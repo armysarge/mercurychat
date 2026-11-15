@@ -10,7 +10,7 @@
 //!   socket loss after a write gives `uncertain`, never failed/delivered.
 
 use rusqlite::{params, Connection, OptionalExtension};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 pub type Result<T> = std::result::Result<T, StorageError>;
 
@@ -20,53 +20,14 @@ pub enum StorageError {
     Sqlite(#[from] rusqlite::Error),
     #[error("database schema version {0} is newer than this build supports")]
     TooNew(i64),
+    #[error("could not back up the database before upgrading it ({}): {reason}; nothing was changed", path.display())]
+    Backup { path: PathBuf, reason: String },
+    #[error("upgrading the database to version {to} failed: {source}; the database was left at version {from}; a copy taken before the upgrade is at {}", backup.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(none: the database was new)".into()))]
+    Migration { from: i64, to: i64, backup: Option<PathBuf>, source: rusqlite::Error },
 }
 
-const SCHEMA_VERSION: i64 = 1;
-
-const MIGRATION_1: &str = r#"
-CREATE TABLE messages (
-  rowid_pk     INTEGER PRIMARY KEY,
-  wire_id      BLOB NOT NULL CHECK (length(wire_id) = 16),
-  peer         TEXT NOT NULL,
-  direction    TEXT NOT NULL CHECK (direction IN ('in','out')),
-  body         TEXT NOT NULL,
-  created_utc  TEXT NOT NULL,
-  received_utc TEXT,
-  state        TEXT NOT NULL,
-  session_gen  INTEGER,
-  attempts     INTEGER NOT NULL DEFAULT 0,
-  UNIQUE (peer, direction, wire_id)
-);
-CREATE TABLE dedup (
-  peer       TEXT NOT NULL,
-  kind       TEXT NOT NULL,
-  wire_id    BLOB NOT NULL,
-  first_utc  TEXT NOT NULL,
-  PRIMARY KEY (peer, kind, wire_id)
-);
-CREATE TABLE transfers (
-  rowid_pk     INTEGER PRIMARY KEY,
-  wire_id      BLOB NOT NULL CHECK (length(wire_id) = 16),
-  peer         TEXT NOT NULL,
-  direction    TEXT NOT NULL CHECK (direction IN ('in','out')),
-  offered_name TEXT NOT NULL,
-  local_path   TEXT,
-  size         INTEGER NOT NULL,
-  sha256       TEXT NOT NULL,
-  received     INTEGER NOT NULL DEFAULT 0,
-  state        TEXT NOT NULL,
-  detail       TEXT,
-  updated_utc  TEXT NOT NULL,
-  UNIQUE (peer, direction, wire_id)
-);
-CREATE TABLE events (
-  id       INTEGER PRIMARY KEY,
-  utc      TEXT NOT NULL,
-  category TEXT NOT NULL,
-  detail   TEXT NOT NULL
-);
-"#;
+mod migrate;
+pub use migrate::{Migration, MIGRATIONS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutState {
@@ -127,31 +88,35 @@ pub struct Store {
 }
 
 impl Store {
+    /// Open (creating if needed) and run pending migrations. The caller holds
+    /// the station's data-root lock (`mc_core::lock`), so no other process
+    /// can use the database while it is upgraded (docs/02 §6).
     pub fn open(path: &Path) -> Result<Self> {
-        let conn = Connection::open(path)?;
-        Self::init(conn)
+        Self::open_with_migrations(path, MIGRATIONS)
+    }
+
+    #[doc(hidden)]
+    pub fn open_with_migrations(path: &Path, migrations: &[Migration]) -> Result<Self> {
+        Self::init(Connection::open(path)?, Some(path), migrations)
     }
 
     pub fn open_in_memory() -> Result<Self> {
-        Self::init(Connection::open_in_memory()?)
+        Self::init(Connection::open_in_memory()?, None, MIGRATIONS)
     }
 
-    fn init(conn: Connection) -> Result<Self> {
+    /// Copy the whole database with SQLite's online backup (never a raw file
+    /// copy of a live WAL database).
+    pub fn backup_to(&self, dest: &Path) -> Result<()> {
+        Ok(self.conn.backup(rusqlite::MAIN_DB, dest, None)?)
+    }
+
+    fn init(mut conn: Connection, path: Option<&Path>, migrations: &[Migration]) -> Result<Self> {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.pragma_update(None, "journal_mode", "WAL")?;
         // Receipt means durable acceptance: FULL at the commit boundary.
         conn.pragma_update(None, "synchronous", "FULL")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
-        let v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0))?;
-        if v > SCHEMA_VERSION {
-            return Err(StorageError::TooNew(v));
-        }
-        if v < 1 {
-            let tx = conn.unchecked_transaction()?;
-            tx.execute_batch(MIGRATION_1)?;
-            tx.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-            tx.commit()?;
-        }
+        migrate::run(&mut conn, path, migrations)?;
         Ok(Store { conn })
     }
 
@@ -358,7 +323,7 @@ mod tests {
             s.store_incoming_chat("LABA", &[9; 16], "persist", 1).unwrap();
         }
         let s = Store::open(&p).unwrap();
-        assert_eq!(s.schema_version().unwrap(), 1);
+        assert_eq!(s.schema_version().unwrap(), MIGRATIONS.last().unwrap().to);
         assert_eq!(s.messages("LABA").unwrap()[0].body, "persist");
     }
 }
