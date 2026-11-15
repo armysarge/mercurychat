@@ -28,6 +28,8 @@ pub struct ModemOptions {
     pub stations_root: Option<PathBuf>,
     /// The shared endpoint lock folder; `None` takes no endpoint lock (tests).
     pub locks_dir: Option<PathBuf>,
+    /// HELLO wait over a real Mercury; `None` is `RADIO_HELLO_TIMEOUT`.
+    pub radio_hello_timeout: Option<Duration>,
 }
 
 /// What the actor asks of the modem.
@@ -180,7 +182,9 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
             };
             r.state(ModemState::Attaching, None).await;
             let endpoint = Endpoint { host: host.clone(), control_port, data_port };
-            let mut station = match open_station(StationConfig::defaults(call, endpoint, &station_dir)).await {
+            let mut cfg = StationConfig::defaults(call, endpoint, &station_dir);
+            cfg.hello_timeout = opts.radio_hello_timeout.unwrap_or(crate::station::RADIO_HELLO_TIMEOUT);
+            let mut station = match open_station(cfg).await {
                 Ok(s) => s,
                 Err(e) => return r.fault(format!("station data: {e}")).await,
             };

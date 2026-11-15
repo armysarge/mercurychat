@@ -41,6 +41,11 @@ pub enum StationError {
     Lock(#[from] crate::lock::LockError),
 }
 
+/// How long a session over a real Mercury waits for the peer's HELLO. M0
+/// measured the exchange at 23 s on BW2300 and 48.7 s on BW500 over virtual
+/// audio; a real channel adds retries. The simulator keeps the 5 s default.
+pub const RADIO_HELLO_TIMEOUT: Duration = Duration::from_secs(120);
+
 #[derive(Clone, Debug)]
 pub struct StationConfig {
     pub callsign: Callsign,

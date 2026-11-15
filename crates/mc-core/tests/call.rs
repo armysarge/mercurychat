@@ -77,7 +77,15 @@ async fn states_until(rx: &mut Receiver<EventEnvelope>, last: ModemState, secs: 
 
 /// Start an app on `profile` and wait until its modem is Ready.
 async fn ready(root: &Path, profile: StationProfile) -> (AppHandle, Receiver<EventEnvelope>, String) {
-    let h = spawn_app(Store::open_in_memory().unwrap(), opts(root));
+    ready_with(root, profile, None).await
+}
+
+async fn ready_with(
+    root: &Path,
+    profile: StationProfile,
+    radio_hello_timeout: Option<Duration>,
+) -> (AppHandle, Receiver<EventEnvelope>, String) {
+    let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions { radio_hello_timeout, ..opts(root) });
     let id = match h.call(AppCommand::SaveProfile { profile }).await.unwrap() {
         CommandOk::Profile(p) => p.id,
         other => panic!("{other:?}"),
@@ -247,6 +255,34 @@ async fn control_loss_recovers_unarmed() {
     peer_task.abort();
 }
 
+/// Over a real modem HELLO takes tens of seconds (M0: 23 s at BW2300, 48.7 s
+/// at BW500), so a real Mercury's session must not give up after a few.
+#[tokio::test(flavor = "multi_thread")]
+async fn existing_modem_waits_for_a_slow_hello() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let mut peer = peer_station(&net, &dir.path().join("peer")).await;
+    peer.set_listen(true).await.unwrap();
+    let peer_task = tokio::spawn(async move {
+        let info = peer.wait_incoming(Duration::from_secs(30)).await.unwrap();
+        tokio::time::sleep(Duration::from_secs(8)).await; // a slow link: HELLO comes late
+        let (_cmd_tx, mut cmd_rx) = mpsc::channel(8);
+        let (_req_tx, mut req_rx) = mpsc::channel(1);
+        let (ev_tx, _ev_rx) = mpsc::unbounded_channel();
+        peer.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await
+    });
+    let (h, mut rx, _) = ready(dir.path(), existing(net.a_base)).await;
+    call(&h, "SIM1").await.unwrap();
+    loop {
+        match next(&mut rx, 20).await {
+            AppEvent::ModemState { state: ModemState::Connected, .. } => break,
+            AppEvent::CallFailed { reason, .. } => panic!("gave up on a slow HELLO: {reason}"),
+            _ => {}
+        }
+    }
+    peer_task.abort();
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn invalid_peer_is_validation() {
     let dir = tempfile::tempdir().unwrap();
@@ -271,7 +307,7 @@ async fn non_mercurychat_peer_is_explained() {
         let _info = peer.wait_incoming(Duration::from_secs(30)).await;
         tokio::time::sleep(Duration::from_secs(60)).await;
     });
-    let (h, mut rx, id) = ready(dir.path(), existing(net.a_base)).await;
+    let (h, mut rx, id) = ready_with(dir.path(), existing(net.a_base), Some(Duration::from_secs(5))).await;
     call(&h, "SIM1").await.unwrap();
     let (peer, reason) = loop {
         match next(&mut rx, 20).await {

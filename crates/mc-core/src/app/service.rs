@@ -26,11 +26,20 @@ pub struct AppOptions {
     pub stations_root: Option<PathBuf>,
     /// The shared endpoint lock folder (MOD-02); `None` takes no endpoint locks.
     pub locks_dir: Option<PathBuf>,
+    /// HELLO wait over a real Mercury; `None` is `station::RADIO_HELLO_TIMEOUT`.
+    pub radio_hello_timeout: Option<std::time::Duration>,
 }
 
 impl Default for AppOptions {
     fn default() -> Self {
-        AppOptions { command_queue: 64, event_ring: 1024, sim_root: None, stations_root: None, locks_dir: None }
+        AppOptions {
+            command_queue: 64,
+            event_ring: 1024,
+            sim_root: None,
+            stations_root: None,
+            locks_dir: None,
+            radio_hello_timeout: None,
+        }
     }
 }
 
@@ -92,7 +101,11 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         session: None,
         chat: None,
         sim_root: opts.sim_root,
-        modem_opts: ModemOptions { stations_root, locks_dir: opts.locks_dir },
+        modem_opts: ModemOptions {
+            stations_root,
+            locks_dir: opts.locks_dir,
+            radio_hello_timeout: opts.radio_hello_timeout,
+        },
         reports,
         task: None,
         pending: None,
