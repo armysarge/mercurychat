@@ -8,11 +8,13 @@
 //! its endpoint lock (MOD-02). An occupied endpoint is reported once, with the
 //! lock's own text, and the task ends: no takeover loop.
 
-use super::events::ModemState;
+use super::events::{ModemState, SessionDirection, SessionInfo};
 use crate::profile::{ModemTarget, StationProfile};
-use crate::station::{Station, StationConfig, StationError};
+use crate::session::{SessionEnd, SessionEvent};
+use crate::station::{ConnectInfo, Station, StationConfig, StationError, StationRequest};
+use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
-use mercury_adapter::{Callsign, Endpoint};
+use mercury_adapter::{Callsign, Command, Endpoint};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -47,7 +49,16 @@ pub struct ModemReport {
 
 #[derive(Debug)]
 pub enum ReportKind {
-    State { state: ModemState, detail: Option<String> },
+    State {
+        state: ModemState,
+        detail: Option<String>,
+    },
+    /// A session was negotiated (Some) or has ended (None).
+    Session(Option<SessionInfo>),
+    CallFailed {
+        peer: String,
+        reason: String,
+    },
 }
 
 /// The actor's end of one modem task. Dropping it stops the task.
@@ -93,6 +104,18 @@ impl Reporter {
 
     async fn fault(&self, detail: String) {
         self.state(ModemState::Faulted, Some(detail)).await;
+    }
+
+    async fn send(&self, kind: ReportKind) {
+        let _ = self.tx.send(ModemReport { generation: self.generation, kind }).await;
+    }
+
+    async fn session(&self, s: Option<SessionInfo>) {
+        self.send(ReportKind::Session(s)).await;
+    }
+
+    async fn call_failed(&self, peer: &str, reason: String) {
+        self.send(ReportKind::CallFailed { peer: peer.to_string(), reason }).await;
     }
 }
 
@@ -157,7 +180,7 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 _ = stopped(&mut cmds) => return,
             }
             let mut station = station;
-            serve(&mut station, cmds, &r).await;
+            serve(&mut station, cmds, &r, profile.listen_preferred).await;
         }
         ModemTarget::Simulator => simulator(&station_dir, call, unarmed, cmds, r).await,
     }
@@ -193,13 +216,14 @@ async fn simulator(
         },
         _ = stopped(&mut cmds) => return,
     };
+    let listen_preferred = unarmed.is_some();
     let detail = match unarmed {
         Some(u) => format!("simulator; {u}"),
         None => "simulator".into(),
     };
     r.state(ModemState::Ready, Some(detail)).await;
     let mut sim = sim;
-    serve(&mut sim.station, cmds, &r).await;
+    serve(&mut sim.station, cmds, &r, listen_preferred).await;
 }
 
 #[cfg(not(feature = "sim"))]
@@ -216,17 +240,286 @@ async fn simulator(
 /// Shown on Ready when the profile prefers listening but it is not armed.
 const UNARMED: &str = "listening is off until you turn it on";
 
+/// How long a call may ring before it is given up (docs/04 section 3).
+const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// What the operator is told when the peer never sends HELLO (docs/04 section 3).
+const NO_HELLO: &str = "the station answered but is not running MercuryChat (no HELLO)";
+
+/// What an idle modem saw first.
+enum Idle {
+    Cmd(Option<ModemCmd>),
+    Incoming(Result<ConnectInfo, StationError>),
+}
+
+/// What became of a call being placed.
+enum Calling {
+    Answered(Result<ConnectInfo, StationError>),
+    Cancelled,
+    Stopped,
+}
+
+/// Where the task goes after a link ends.
+enum After {
+    Idle(Option<String>),
+    Recover,
+    Stop,
+}
+
+/// Resolves when a call being placed should stop: CancelCall or Abort
+/// (Cancelled), or Shutdown and a dropped handle (Stopped).
+async fn call_interrupted(cmds: &mut mpsc::Receiver<ModemCmd>) -> Calling {
+    loop {
+        match cmds.recv().await {
+            Some(ModemCmd::CancelCall | ModemCmd::Abort) => return Calling::Cancelled,
+            Some(ModemCmd::Shutdown) | None => return Calling::Stopped,
+            Some(other) => tracing::debug!(?other, "ignored while calling"),
+        }
+    }
+}
+
 /// The attached modem: holds the station (and so its locks) and carries out
-/// the actor's commands until stopped. Calls and sessions come in Task 5.
-async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporter) {
-    while let Some(cmd) = cmds.recv().await {
-        match cmd {
-            ModemCmd::Shutdown => return,
-            ModemCmd::SetListen(on) => match st.set_listen(on).await {
-                Ok(()) => r.state(if on { ModemState::Listening } else { ModemState::Ready }, None).await,
-                Err(e) => r.fault(format!("LISTEN {}: {e}", if on { "ON" } else { "OFF" })).await,
-            },
-            other => tracing::debug!(?other, "modem command not handled yet"),
+/// the actor's commands until stopped. Idle, it also watches for incoming
+/// links and for the loss of the control connection.
+async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporter, listen_preferred: bool) {
+    let mut listening = false;
+    let mut preferred = listen_preferred;
+    let idle = |listening: bool| if listening { ModemState::Listening } else { ModemState::Ready };
+    loop {
+        let step = tokio::select! {
+            c = cmds.recv() => Idle::Cmd(c),
+            res = st.wait_incoming(Duration::from_secs(3600)) => Idle::Incoming(res),
+        };
+        let after = match step {
+            Idle::Cmd(None | Some(ModemCmd::Shutdown)) => return,
+            Idle::Cmd(Some(ModemCmd::SetListen(on))) => {
+                preferred = on;
+                match st.set_listen(on).await {
+                    Ok(()) => {
+                        listening = on;
+                        r.state(idle(on), None).await;
+                    }
+                    Err(e) => r.fault(format!("LISTEN {}: {e}", if on { "ON" } else { "OFF" })).await,
+                }
+                continue;
+            }
+            Idle::Cmd(Some(ModemCmd::Call(peer))) => {
+                // The actor has already reported Calling.
+                let res = tokio::select! {
+                    res = st.call(&peer, CALL_TIMEOUT) => Calling::Answered(res),
+                    c = call_interrupted(&mut cmds) => c,
+                };
+                match res {
+                    Calling::Stopped => {
+                        let _ = st.cancel_call().await;
+                        return;
+                    }
+                    Calling::Cancelled => match st.cancel_call().await {
+                        Ok(()) => After::Idle(None),
+                        Err(_) => After::Recover,
+                    },
+                    Calling::Answered(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Outgoing).await,
+                    Calling::Answered(Err(StationError::ControlLost | StationError::Detached)) => After::Recover,
+                    Calling::Answered(Err(e)) => {
+                        let reason = match e {
+                            StationError::CallFailed => format!("{} did not answer", peer.as_str()),
+                            StationError::Timeout(_) => {
+                                format!("{} did not answer within {} s", peer.as_str(), CALL_TIMEOUT.as_secs())
+                            }
+                            other => other.to_string(),
+                        };
+                        r.call_failed(peer.as_str(), reason).await;
+                        After::Idle(None)
+                    }
+                }
+            }
+            Idle::Cmd(Some(other)) => {
+                tracing::debug!(?other, "no call or session for this command");
+                continue;
+            }
+            Idle::Incoming(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Incoming).await,
+            Idle::Incoming(Err(StationError::Timeout(_))) => continue,
+            Idle::Incoming(Err(StationError::NotOurSession { src, dest, .. })) => {
+                tracing::warn!(%src, %dest, "ignoring a link that is not ours");
+                continue;
+            }
+            Idle::Incoming(Err(e)) => {
+                tracing::warn!("modem control lost while idle: {e}");
+                After::Recover
+            }
+        };
+        match after {
+            After::Stop => return,
+            After::Idle(detail) => r.state(idle(listening), detail).await,
+            After::Recover => {
+                // Recovery leaves the modem not listening (RF-02).
+                listening = false;
+                r.session(None).await;
+                r.state(ModemState::Recovering, None).await;
+                match st.recover(5).await {
+                    Ok(()) => r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await,
+                    Err(e) => return r.fault(format!("could not recover the modem: {e}")).await,
+                }
+            }
+        }
+    }
+}
+
+fn outcome(end: &SessionEnd, aborted: bool) -> String {
+    match end {
+        SessionEnd::Disconnected if aborted => "aborted".into(),
+        SessionEnd::Disconnected => "disconnected".into(),
+        SessionEnd::ControlLost => "control_lost".into(),
+        SessionEnd::DataLost => "data_lost".into(),
+        SessionEnd::Protocol(m) => format!("protocol: {m}"),
+        SessionEnd::HelloTimeout => "hello_timeout".into(),
+        SessionEnd::CommandsClosed => "commands_closed".into(),
+        SessionEnd::LocalDrop => "local_drop".into(),
+    }
+}
+
+/// One established link: run the MCH/1 session on it while taking the
+/// actor's Disconnect and Abort, record it, and say where to go next.
+async fn link(
+    st: &mut Station,
+    cmds: &mut mpsc::Receiver<ModemCmd>,
+    r: &Reporter,
+    info: ConnectInfo,
+    direction: SessionDirection,
+) -> After {
+    r.state(ModemState::Negotiating, Some(info.peer.clone())).await;
+    // A second connection for session records: the session itself holds the
+    // station's store while it runs.
+    let mut records = match Store::open(&st.cfg.data_dir.join("station.db")) {
+        Ok(s) => Some(s),
+        Err(e) => {
+            tracing::warn!("session records unavailable: {e}");
+            None
+        }
+    };
+    let generation = st.generation();
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let mut negotiated = false;
+    let mut aborted = false;
+    let mut stop = false;
+    let (_chat_tx, mut chat_rx) = mpsc::channel(64);
+    let (req_tx, mut req_rx) = mpsc::channel(4);
+    let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
+
+    let mut on_event = |ev: SessionEvent, negotiated: &mut bool| -> Option<SessionInfo> {
+        let SessionEvent::Negotiated { peer_app, .. } = ev else {
+            tracing::debug!(?ev, "session event");
+            return None;
+        };
+        if *negotiated {
+            return None;
+        }
+        *negotiated = true;
+        let since = mc_storage::now_utc();
+        if let Some(rec) = records.as_mut() {
+            let row = SessionRow {
+                id: session_id.clone(),
+                peer: info.peer.clone(),
+                generation: generation as i64,
+                direction: match direction {
+                    SessionDirection::Outgoing => "out".into(),
+                    SessionDirection::Incoming => "in".into(),
+                },
+                started_utc: since.clone(),
+                ended_utc: None,
+                peer_app: Some(peer_app.clone()),
+                outcome: None,
+            };
+            if let Err(e) = rec.begin_session(&row) {
+                tracing::warn!("could not record the session: {e}");
+            }
+        }
+        Some(SessionInfo { peer: info.peer.clone(), direction, since_utc: since, peer_app: Some(peer_app) })
+    };
+
+    let end = {
+        let run = st.run_session(&info, &mut chat_rx, &mut req_rx, ev_tx);
+        tokio::pin!(run);
+        loop {
+            tokio::select! {
+                end = &mut run => break end,
+                Some(ev) = ev_rx.recv() => {
+                    if let Some(s) = on_event(ev, &mut negotiated) {
+                        r.state(ModemState::Connected, Some(s.peer.clone())).await;
+                        r.session(Some(s)).await;
+                    }
+                }
+                c = cmds.recv() => {
+                    let wire = match c {
+                        Some(ModemCmd::Disconnect) => Command::Disconnect,
+                        Some(ModemCmd::Abort) => {
+                            aborted = true;
+                            Command::Abort
+                        }
+                        Some(ModemCmd::Shutdown) | None => {
+                            // Leaving: the modem ends the link when our sockets close.
+                            stop = true;
+                            break SessionEnd::CommandsClosed;
+                        }
+                        Some(other) => {
+                            tracing::debug!(?other, "ignored during a session");
+                            continue;
+                        }
+                    };
+                    // The session's control pump sends it; its reply is not awaited
+                    // here, because the pump only runs while the session is polled.
+                    let (reply, _) = tokio::sync::oneshot::channel();
+                    let _ = req_tx.try_send(StationRequest::Command(wire, reply));
+                    let detail = if aborted { "aborting" } else { "sending what the modem holds, then disconnecting" };
+                    r.state(ModemState::Draining, Some(detail.into())).await;
+                }
+            }
+        }
+    };
+    while let Ok(ev) = ev_rx.try_recv() {
+        if let Some(s) = on_event(ev, &mut negotiated) {
+            r.state(ModemState::Connected, Some(s.peer.clone())).await;
+            r.session(Some(s)).await;
+        }
+    }
+    if stop {
+        return After::Stop;
+    }
+    if aborted {
+        // ABORT's single DISCONNECT frame keys after DISCONNECTED; let it out.
+        st.wait_teardown_keyed(Duration::from_secs(20)).await;
+    }
+    if negotiated {
+        if let Some(rec) = records.as_mut() {
+            if let Err(e) = rec.end_session(&session_id, &outcome(&end, aborted)) {
+                tracing::warn!("could not record the session end: {e}");
+            }
+        }
+        r.session(None).await;
+    } else if direction == SessionDirection::Outgoing && !aborted {
+        let reason = match &end {
+            SessionEnd::HelloTimeout => NO_HELLO.to_string(),
+            SessionEnd::Protocol(m) => format!("the session could not start: {m}"),
+            _ => "the link ended before the session started".to_string(),
+        };
+        r.call_failed(&info.peer, reason).await;
+    }
+    match end {
+        SessionEnd::ControlLost | SessionEnd::DataLost | SessionEnd::LocalDrop => After::Recover,
+        SessionEnd::Disconnected if aborted => {
+            After::Idle(Some("aborted: delivery of anything not yet confirmed is uncertain".into()))
+        }
+        SessionEnd::Disconnected => After::Idle(None),
+        // The application session ended but the link may still be up.
+        SessionEnd::HelloTimeout | SessionEnd::Protocol(_) | SessionEnd::CommandsClosed => {
+            match st.disconnect(Duration::from_secs(60)).await {
+                Ok(()) => After::Idle(None),
+                Err(StationError::Timeout(_)) => match st.abort().await {
+                    Ok(()) => After::Idle(None),
+                    Err(_) => After::Recover,
+                },
+                Err(_) => After::Recover,
+            }
         }
     }
 }

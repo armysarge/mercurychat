@@ -26,6 +26,8 @@ struct Shared {
     st: [Station; 2],
     session: Option<(String, String)>,
     hold: bool,
+    /// A CONNECT nobody answers stays pending (Mercury keeps retrying).
+    unanswered_calls: bool,
     held: Vec<(usize, Vec<u8>)>,
     /// Bytes delivered to the far data socket, per direction (0: A->B, 1: B->A).
     delivered: [u64; 2],
@@ -75,6 +77,11 @@ impl FakeNet {
     /// Stop forwarding data; bytes accumulate as "in flight".
     pub fn set_hold(&self, hold: bool) {
         self.shared.lock().unwrap().hold = hold;
+    }
+
+    /// Calls to an unreachable station stay pending instead of failing.
+    pub fn set_unanswered_calls(&self, on: bool) {
+        self.shared.lock().unwrap().unanswered_calls = on;
     }
 
     /// Deliver held bytes (to whichever far data socket is attached now).
@@ -222,7 +229,7 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
                     for k in 0..2 {
                         send_line(&s, k, &format!("CONNECTED {a} {b} 2300"));
                     }
-                } else {
+                } else if !s.unanswered_calls {
                     send_line(&s, i, "DISCONNECTED");
                 }
             });

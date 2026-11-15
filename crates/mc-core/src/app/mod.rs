@@ -7,7 +7,7 @@ mod modem;
 mod service;
 
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
-pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, Since};
+pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind};
 pub use service::{spawn_app, AppHandle, AppOptions};
 

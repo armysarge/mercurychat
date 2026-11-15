@@ -2,7 +2,7 @@
 //! and gets `CommandOk` or `AppError`; it never touches sockets, files or the
 //! database directly (docs/02 §2, §7).
 
-use super::events::ModemState;
+use super::events::{ModemState, SessionInfo};
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -23,6 +23,8 @@ pub struct AppSnapshot {
     /// The active profile's stored listen preference (RF-02): shown, never
     /// applied by itself on start-up or recovery.
     pub listen_preferred: bool,
+    /// The MCH/1 session in progress, once negotiated.
+    pub session: Option<SessionInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -47,6 +49,16 @@ pub enum AppCommand {
     SetListen {
         on: bool,
     },
+    /// Call a station; the session starts once it answers with MCH/1.
+    Call {
+        peer: String,
+    },
+    /// Stop a call that has not been answered yet.
+    CancelCall,
+    /// End the session gracefully: the modem sends what it holds first.
+    Disconnect,
+    /// End at once; anything not yet confirmed becomes uncertain.
+    Abort,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

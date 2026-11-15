@@ -348,6 +348,15 @@ impl Station {
         self.connect_info(ev)
     }
 
+    /// Stop a call that has not been answered: ABORT, then DISCONNECTED. If
+    /// the link came up meanwhile, give its teardown frame a moment to key.
+    pub async fn cancel_call(&mut self) -> Result<(), StationError> {
+        self.cmd(Command::Abort).await?;
+        let _ = self.wait_for("DISCONNECTED", Duration::from_secs(5), |e| *e == ControlEvent::Disconnected).await;
+        self.wait_teardown_keyed(Duration::from_secs(2)).await;
+        Ok(())
+    }
+
     pub async fn wait_incoming(&mut self, timeout: Duration) -> Result<ConnectInfo, StationError> {
         let ev = self.wait_for("incoming CONNECTED", timeout, |e| matches!(e, ControlEvent::Connected { .. })).await?;
         self.connect_info(ev)

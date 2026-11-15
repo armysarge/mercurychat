@@ -24,14 +24,50 @@ pub enum ModemState {
     Faulted,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum SessionDirection {
+    Outgoing,
+    Incoming,
+}
+
+/// The negotiated MCH/1 session in progress.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct SessionInfo {
+    pub peer: String,
+    pub direction: SessionDirection,
+    pub since_utc: String,
+    pub peer_app: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export)]
 pub enum AppEvent {
-    ModemState { state: ModemState, detail: Option<String> },
+    ModemState {
+        state: ModemState,
+        detail: Option<String>,
+    },
+    /// A session began (Some) or ended (None).
+    Session {
+        session: Option<SessionInfo>,
+    },
+    /// A call did not lead to a session; `reason` says why, in plain words.
+    CallFailed {
+        peer: String,
+        reason: String,
+    },
     ProfilesChanged,
-    ActiveProfileChanged { id: Option<String> },
-    Fault { code: String, message: String },
+    ActiveProfileChanged {
+        id: Option<String>,
+    },
+    Fault {
+        code: String,
+        message: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

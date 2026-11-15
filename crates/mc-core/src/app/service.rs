@@ -4,10 +4,11 @@
 //! persisted first, then published as an event.
 
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
-use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, Since};
+use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
-use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
+use crate::profile::{from_row, to_row, FieldError, ModemTarget, StationProfile};
 use mc_storage::{StorageError, Store};
+use mercury_adapter::Callsign;
 use std::path::PathBuf;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
@@ -86,6 +87,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         events: events.clone(),
         modem: ModemState::Unavailable,
         modem_detail: None,
+        session: None,
         sim_root: opts.sim_root,
         modem_opts: ModemOptions { stations_root, locks_dir: opts.locks_dir },
         reports,
@@ -128,6 +130,8 @@ struct App {
     events: broadcast::Sender<EventEnvelope>,
     modem: ModemState,
     modem_detail: Option<String>,
+    /// The negotiated session, as the modem task last reported it.
+    session: Option<SessionInfo>,
     sim_root: Option<PathBuf>,
     modem_opts: ModemOptions,
     /// Where modem tasks report; the actor keeps one sender so it never closes.
@@ -200,6 +204,42 @@ impl App {
                 }
                 Ok(CommandOk::Done)
             }
+            AppCommand::Call { peer } => {
+                let peer = Callsign::parse(&peer).map_err(|e| AppError::Validation {
+                    errors: vec![FieldError { field: "peer".into(), message: e.to_string() }],
+                })?;
+                if self.session.is_some() || self.in_call() {
+                    return Err(conflict("a call or session is already in progress".into()));
+                }
+                if !matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+                    return Err(conflict(format!(
+                        "the modem is {}: calls can be made once it is ready",
+                        self.state_word()
+                    )));
+                }
+                self.command_modem(ModemCmd::Call(peer.clone()))?;
+                // Answered at once: a second call is refused from here on.
+                self.set_modem(ModemState::Calling, Some(peer.as_str().to_string()));
+                Ok(CommandOk::Done)
+            }
+            AppCommand::CancelCall => {
+                if self.modem != ModemState::Calling {
+                    return Err(conflict("no call is being placed".into()));
+                }
+                self.command_modem(ModemCmd::CancelCall).map(|_| CommandOk::Done)
+            }
+            AppCommand::Disconnect => {
+                if !matches!(self.modem, ModemState::Negotiating | ModemState::Connected) {
+                    return Err(conflict("there is no session to disconnect".into()));
+                }
+                self.command_modem(ModemCmd::Disconnect).map(|_| CommandOk::Done)
+            }
+            AppCommand::Abort => {
+                if !self.in_call() {
+                    return Err(conflict("there is no call or session to abort".into()));
+                }
+                self.command_modem(ModemCmd::Abort).map(|_| CommandOk::Done)
+            }
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -224,6 +264,33 @@ impl App {
         }
     }
 
+    /// A call is being placed, or a session is up or ending.
+    fn in_call(&self) -> bool {
+        matches!(
+            self.modem,
+            ModemState::Calling | ModemState::Negotiating | ModemState::Connected | ModemState::Draining
+        )
+    }
+
+    fn state_word(&self) -> String {
+        format!("{:?}", self.modem).to_lowercase()
+    }
+
+    fn command_modem(&self, cmd: ModemCmd) -> Result<(), AppError> {
+        if self.task.as_ref().is_some_and(|t| t.send(cmd)) {
+            Ok(())
+        } else {
+            Err(conflict("the modem is not accepting commands".into()))
+        }
+    }
+
+    fn set_session(&mut self, session: Option<SessionInfo>) {
+        if self.session != session {
+            self.session = session.clone();
+            self.emit(AppEvent::Session { session });
+        }
+    }
+
     /// The stored active profile, if it still exists and reads cleanly.
     fn active_profile(&self) -> Option<StationProfile> {
         let id = self.store.setting(ACTIVE_PROFILE).ok()??;
@@ -241,6 +308,7 @@ impl App {
     /// waits for the modem: it reports back through `on_report`.
     fn switch_modem(&mut self, target: Option<StationProfile>) {
         self.task = None; // its Drop tells the old task to stop
+        self.set_session(None);
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         if p.modem == ModemTarget::Simulator {
             if !cfg!(feature = "sim") {
@@ -263,6 +331,8 @@ impl App {
         }
         match report.kind {
             ReportKind::State { state, detail } => self.set_modem(state, detail),
+            ReportKind::Session(session) => self.set_session(session),
+            ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
         }
     }
 
@@ -286,6 +356,7 @@ impl App {
             modem_detail: self.modem_detail.clone(),
             profiles,
             listen_preferred,
+            session: self.session.clone(),
             active_profile_id: active,
         })
     }
