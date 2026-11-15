@@ -34,6 +34,8 @@ pub enum StationError {
     CallFailed,
     #[error("storage: {0}")]
     Storage(#[from] mc_storage::StorageError),
+    #[error("{0}")]
+    Lock(#[from] crate::lock::LockError),
 }
 
 #[derive(Clone, Debug)]
@@ -85,11 +87,14 @@ pub struct Station {
     pub ptt_events: u64,
     pub stale_bytes_discarded: u64,
     pub stale_tx_purged: u64,
+    _lock: crate::lock::LockFile,
 }
 
 impl Station {
     pub fn open(cfg: StationConfig) -> Result<Self, StationError> {
         std::fs::create_dir_all(cfg.data_dir.join("files")).ok();
+        // MOD-02: the data root is ours alone before the store is opened.
+        let lock = crate::lock::lock_data_root(&cfg.data_dir)?;
         let store = Store::open(&cfg.data_dir.join("station.db"))?;
         Ok(Station {
             cfg,
@@ -100,6 +105,7 @@ impl Station {
             ptt_events: 0,
             stale_bytes_discarded: 0,
             stale_tx_purged: 0,
+            _lock: lock,
         })
     }
 

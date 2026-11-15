@@ -3,6 +3,7 @@
 //! No UI dependency; the Tauri shell and the M0 test client both use it.
 
 pub mod files;
+pub mod lock;
 pub mod session;
 pub mod station;
 
