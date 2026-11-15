@@ -1,5 +1,3 @@
-radio_io: reopen a network rig's Hamlib session after its server restarts
-
 ## Summary
 
 When Mercury keys through rigctld (`-R 2`, NET rigctl) and rigctld restarts, Mercury now reopens its Hamlib session at the next PTT change and keys as before. Until now every later PTT call failed until Mercury itself was restarted, while the TNC kept telling the host `PTT ON` / `PTT OFF`. A PTT OFF lost that way leaves a real rig keyed.
