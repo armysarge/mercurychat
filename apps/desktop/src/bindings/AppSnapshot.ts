@@ -2,4 +2,8 @@
 import type { ModemState } from "./ModemState";
 import type { StationProfile } from "./StationProfile";
 
-export type AppSnapshot = { seq: number, generation: number, modem: ModemState, profiles: Array<StationProfile>, activeProfileId: string | null, };
+export type AppSnapshot = { seq: number, generation: number, modem: ModemState, 
+/**
+ * Why the modem is in its state (a fault's reason), as last reported.
+ */
+modemDetail: string | null, profiles: Array<StationProfile>, activeProfileId: string | null, };

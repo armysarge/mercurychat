@@ -16,6 +16,8 @@ pub struct AppSnapshot {
     #[ts(type = "number")]
     pub generation: u64,
     pub modem: ModemState,
+    /// Why the modem is in its state (a fault's reason), as last reported.
+    pub modem_detail: Option<String>,
     pub profiles: Vec<StationProfile>,
     pub active_profile_id: Option<String>,
 }

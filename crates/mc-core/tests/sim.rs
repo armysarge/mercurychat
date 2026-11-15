@@ -121,3 +121,67 @@ async fn restart_reattaches_the_selected_simulator() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
 }
+
+async fn snap(h: &AppHandle) -> mc_core::app::AppSnapshot {
+    match h.call(AppCommand::Snapshot).await.unwrap() {
+        CommandOk::Snapshot(s) => s,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn the_snapshot_carries_the_modem_detail() {
+    // A UI that resyncs after the attach has finished still learns why the
+    // modem is in its state (a fault's reason, "simulator").
+    let dir = tempfile::tempdir().unwrap();
+    let (h, id) = sim_app(dir.path()).await;
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    while !matches!(next(&mut rx).await.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {}
+    let s = snap(&h).await;
+    assert_eq!((s.modem, s.modem_detail.as_deref()), (ModemState::Ready, Some("simulator")));
+
+    let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions::default());
+    let id = match h.call(AppCommand::SaveProfile { profile: StationProfile::new_simulator("ZS6ABC") }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    let s = snap(&h).await;
+    assert_eq!(s.modem, ModemState::Faulted);
+    assert!(s.modem_detail.as_deref().is_some_and(|d| d.contains("simulator")), "{:?}", s.modem_detail);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn editing_the_active_profile_reattaches_its_modem() {
+    // A corrected callsign must reach the modem, not wait for a re-selection.
+    let dir = tempfile::tempdir().unwrap();
+    let (h, id) = sim_app(dir.path()).await;
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
+    let ready = loop {
+        let e = next(&mut rx).await;
+        if matches!(e.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {
+            break e;
+        }
+    };
+    let mut p = snap(&h).await.profiles.into_iter().find(|p| p.id == id).unwrap();
+    p.callsign = "ZS6ABD".into();
+    h.call(AppCommand::SaveProfile { profile: p.clone() }).await.unwrap();
+    let mut seen = Vec::new();
+    loop {
+        let e = next(&mut rx).await;
+        seen.push(e.event.clone());
+        if matches!(e.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {
+            assert!(e.generation > ready.generation, "a re-attach starts a new generation");
+            break;
+        }
+    }
+    assert!(seen.contains(&AppEvent::ModemState { state: ModemState::Attaching, detail: None }), "{seen:?}");
+
+    // Saving it again unchanged (a name edit, say) does not re-attach.
+    p.name = Some("Home".into());
+    h.call(AppCommand::SaveProfile { profile: p }).await.unwrap();
+    assert_eq!(next(&mut rx).await.event, AppEvent::ProfilesChanged);
+    assert!(tokio::time::timeout(Duration::from_millis(300), rx.recv()).await.is_err(), "no re-attach for a name edit");
+}

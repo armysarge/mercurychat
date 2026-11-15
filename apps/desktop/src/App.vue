@@ -177,7 +177,7 @@ const utc = () => now.value.toISOString().slice(11, 19) + "Z";
         <h2 id="h-modemstate">Modem</h2>
         <p class="state" role="status" aria-live="polite">
           <span :class="['mono', 'pill', modemState]">{{ modemState }}</span>
-          <span v-if="view?.modemDetail" class="muted detail">{{ view.modemDetail }}</span>
+          <span v-if="view?.snapshot.modemDetail" class="muted detail">{{ view.snapshot.modemDetail }}</span>
         </p>
         <p v-if="view?.lastFault" class="err">{{ view.lastFault }}</p>
       </section>

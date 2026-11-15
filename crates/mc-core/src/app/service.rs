@@ -78,6 +78,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         log: EventLog::new(opts.event_ring),
         events: events.clone(),
         modem: ModemState::Unavailable,
+        modem_detail: None,
         sim_root: opts.sim_root,
         pending: None,
         #[cfg(feature = "sim")]
@@ -113,6 +114,7 @@ struct App {
     log: EventLog,
     events: broadcast::Sender<EventEnvelope>,
     modem: ModemState,
+    modem_detail: Option<String>,
     sim_root: Option<PathBuf>,
     /// The modem the last selection asked for, attached after replying.
     pending: Option<Option<StationProfile>>,
@@ -138,8 +140,17 @@ impl App {
             }
             AppCommand::SaveProfile { profile } => {
                 let p = profile.validate().map_err(|errors| AppError::Validation { errors })?;
+                // Editing the profile in use: a new callsign or modem must reach
+                // the modem now, not at the next selection.
+                let reattach = self
+                    .active_profile()
+                    .is_some_and(|old| old.id == p.id && (old.callsign != p.callsign || old.modem != p.modem));
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
+                if reattach {
+                    self.log.bump_generation();
+                    self.pending = Some(Some(p.clone()));
+                }
                 Ok(CommandOk::Profile(p))
             }
             AppCommand::DeleteProfile { id } => {
@@ -188,6 +199,7 @@ impl App {
 
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {
         self.modem = state;
+        self.modem_detail = detail.clone();
         self.emit(AppEvent::ModemState { state, detail });
     }
 
@@ -243,6 +255,7 @@ impl App {
             seq: self.log.last_seq(),
             generation: self.log.generation(),
             modem: self.modem,
+            modem_detail: self.modem_detail.clone(),
             profiles,
             active_profile_id: active,
         })

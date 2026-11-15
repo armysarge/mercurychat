@@ -101,6 +101,7 @@ async function until(s, expr, what, ms = 10000) {
 }
 
 const pill = "document.querySelector('.pill')?.textContent.trim()";
+const detail = "document.querySelector('.state .detail')?.textContent.trim()";
 const results = [];
 let first, second, third;
 try {
@@ -112,8 +113,8 @@ try {
     i.dispatchEvent(new Event('input'));
     [...document.querySelectorAll('button')].find(b => b.textContent.trim() === 'Use simulator').click();
   })()`);
-  await until(s, `${pill} === 'ready' && document.body.innerText.includes('simulator') && document.body.innerText.includes(${JSON.stringify(CALL)})`, "ready");
-  results.push(`PASS select: ${CALL} simulator profile saved and selected, modem state "ready"`);
+  await until(s, `${pill} === 'ready' && ${detail} === 'simulator' && document.body.innerText.includes(${JSON.stringify(CALL)})`, "ready");
+  results.push(`PASS select: ${CALL} simulator profile saved and selected, modem state "ready", detail "simulator"`);
   s.close();
 
   second = launch();
@@ -128,8 +129,8 @@ try {
 
   third = launch();
   s = await page((t) => t.includes("Use simulator") && t.includes(CALL), "the restarted window");
-  await until(s, `${pill} === 'ready' && document.querySelector('.profiles li.active')?.innerText.includes(${JSON.stringify(CALL)})`, "ready after restart");
-  results.push(`PASS restart: ${CALL} still listed and in use, simulator re-attached, modem state "ready"`);
+  await until(s, `${pill} === 'ready' && ${detail} === 'simulator' && document.querySelector('.profiles li.active')?.innerText.includes(${JSON.stringify(CALL)})`, "ready after restart");
+  results.push(`PASS restart: ${CALL} still listed and in use, simulator re-attached, modem state "ready", detail "simulator"`);
   s.close();
 } catch (e) {
   results.push(`FAIL ${e.message}`);

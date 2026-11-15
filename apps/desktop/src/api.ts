@@ -49,7 +49,6 @@ export function describeError(e: unknown): string {
 
 export interface View {
   snapshot: AppSnapshot;
-  modemDetail: string | null;
   lastFault: string | null;
 }
 
@@ -79,7 +78,7 @@ export class Mirror {
   /** Replace the local copy with a fresh snapshot. */
   resync(): Promise<void> {
     return snapshot().then((s) => {
-      this.view = { snapshot: s, modemDetail: null, lastFault: this.view?.lastFault ?? null };
+      this.view = { snapshot: s, lastFault: this.view?.lastFault ?? null };
       this.publish();
     });
   }
@@ -117,7 +116,7 @@ export class Mirror {
     switch (ev.type) {
       case "modemState":
         v.snapshot.modem = ev.state;
-        v.modemDetail = ev.detail;
+        v.snapshot.modemDetail = ev.detail;
         break;
       case "activeProfileChanged":
         v.snapshot.activeProfileId = ev.id;
