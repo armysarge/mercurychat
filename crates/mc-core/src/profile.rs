@@ -1,0 +1,190 @@
+//! Station profiles (SET-01, SET-03): who the station is and which modem it
+//! uses. `validate` returns the normalised profile or every field error at
+//! once, worded for the operator. A stored listen preference never arms
+//! transmission by itself (RF-02): the app asks before `LISTEN ON`.
+
+use mc_storage::ProfileRow;
+use mch_protocol::beacon::{normalise_grid, valid_grid};
+use mercury_adapter::Callsign;
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StationProfile {
+    pub id: String,
+    pub callsign: String,
+    pub name: Option<String>,
+    pub grid: Option<String>,
+    pub modem: ModemTarget,
+    pub lab: bool,
+    pub listen_preferred: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+pub enum ModemTarget {
+    /// A Mercury the operator runs (SET-03).
+    Existing {
+        host: String,
+        control_port: u16,
+        data_port: u16,
+        broadcast_port: Option<u16>,
+        telemetry_url: Option<String>,
+    },
+    /// The in-process simulator: no audio, no RF (M1).
+    Simulator,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FieldError {
+    pub field: String,
+    pub message: String,
+}
+
+fn err(field: &str, message: &str) -> FieldError {
+    FieldError { field: field.into(), message: message.into() }
+}
+
+const NAME_MAX: usize = 64;
+const HOST_MAX: usize = 253;
+
+impl StationProfile {
+    /// An existing Mercury on this PC with Mercury's default ports.
+    pub fn new_existing(callsign: &str) -> StationProfile {
+        StationProfile::new(
+            callsign,
+            ModemTarget::Existing {
+                host: "127.0.0.1".into(),
+                control_port: 8300,
+                data_port: 8301,
+                broadcast_port: Some(8100),
+                telemetry_url: None,
+            },
+        )
+    }
+
+    pub fn new_simulator(callsign: &str) -> StationProfile {
+        StationProfile::new(callsign, ModemTarget::Simulator)
+    }
+
+    fn new(callsign: &str, modem: ModemTarget) -> StationProfile {
+        StationProfile {
+            id: uuid::Uuid::new_v4().to_string(),
+            callsign: callsign.into(),
+            name: None,
+            grid: None,
+            modem,
+            lab: false,
+            listen_preferred: false,
+        }
+    }
+
+    pub fn validate(&self) -> Result<StationProfile, Vec<FieldError>> {
+        let mut errors = Vec::new();
+        let mut p = self.clone();
+
+        // Edges are trimmed (pasted input); anything inside must be a callsign.
+        match Callsign::parse(self.callsign.trim()) {
+            Ok(c) => p.callsign = c.as_str().to_string(),
+            Err(_) => errors.push(err("callsign", "Use 1–15 letters, digits, / or -")),
+        }
+
+        p.name = self.name.as_deref().map(str::trim).filter(|n| !n.is_empty()).map(String::from);
+        if p.name.as_ref().is_some_and(|n| n.chars().count() > NAME_MAX) {
+            errors.push(err("name", "At most 64 characters"));
+        }
+
+        p.grid = match self.grid.as_deref().map(str::trim).filter(|g| !g.is_empty()) {
+            Some(g) if valid_grid(g) => Some(normalise_grid(g)),
+            Some(_) => {
+                errors.push(err("grid", "Use a 4, 6 or 8 character Maidenhead locator"));
+                None
+            }
+            None => None,
+        };
+
+        if let ModemTarget::Existing { host, control_port, data_port, broadcast_port, telemetry_url } = &mut p.modem {
+            *host = host.trim().to_string();
+            if host.is_empty() || host.len() > HOST_MAX || host.contains(char::is_whitespace) {
+                errors.push(err("host", "Enter a host name or address"));
+            }
+            for (field, port) in [("controlPort", Some(*control_port)), ("dataPort", Some(*data_port))]
+                .into_iter()
+                .chain([("broadcastPort", *broadcast_port)])
+            {
+                if port == Some(0) {
+                    errors.push(err(field, "Port must be 1–65535"));
+                }
+            }
+            if *data_port != 0 && data_port == control_port {
+                errors.push(err("dataPort", "Must differ from the control port"));
+            }
+            if let Some(b) = *broadcast_port {
+                if b != 0 && (b == *control_port || b == *data_port) {
+                    errors.push(err("broadcastPort", "Must differ from the control and data ports"));
+                }
+            }
+            *telemetry_url = telemetry_url.as_deref().map(str::trim).filter(|u| !u.is_empty()).map(String::from);
+            if telemetry_url.as_ref().is_some_and(|u| !(u.starts_with("ws://") || u.starts_with("wss://"))) {
+                errors.push(err("telemetryUrl", "Use a ws:// or wss:// address"));
+            }
+        }
+
+        if errors.is_empty() {
+            Ok(p)
+        } else {
+            Err(errors)
+        }
+    }
+}
+
+pub fn to_row(p: &StationProfile) -> ProfileRow {
+    let (kind, host, control_port, data_port, broadcast_port, telemetry_url) = match &p.modem {
+        ModemTarget::Existing { host, control_port, data_port, broadcast_port, telemetry_url } => (
+            "existing",
+            Some(host.clone()),
+            Some(*control_port),
+            Some(*data_port),
+            *broadcast_port,
+            telemetry_url.clone(),
+        ),
+        ModemTarget::Simulator => ("simulator", None, None, None, None, None),
+    };
+    ProfileRow {
+        id: p.id.clone(),
+        callsign: p.callsign.clone(),
+        name: p.name.clone(),
+        grid: p.grid.clone(),
+        modem_kind: kind.into(),
+        host,
+        control_port,
+        data_port,
+        broadcast_port,
+        telemetry_url,
+        lab: p.lab,
+        listen_preferred: p.listen_preferred,
+    }
+}
+
+pub fn from_row(r: &ProfileRow) -> Result<StationProfile, FieldError> {
+    let modem = match r.modem_kind.as_str() {
+        "existing" => ModemTarget::Existing {
+            host: r.host.clone().unwrap_or_default(),
+            control_port: r.control_port.unwrap_or(0),
+            data_port: r.data_port.unwrap_or(0),
+            broadcast_port: r.broadcast_port,
+            telemetry_url: r.telemetry_url.clone(),
+        },
+        "simulator" => ModemTarget::Simulator,
+        other => return Err(err("modemKind", &format!("Unknown modem kind {other:?}"))),
+    };
+    Ok(StationProfile {
+        id: r.id.clone(),
+        callsign: r.callsign.clone(),
+        name: r.name.clone(),
+        grid: r.grid.clone(),
+        modem,
+        lab: r.lab,
+        listen_preferred: r.listen_preferred,
+    })
+}

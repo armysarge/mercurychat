@@ -98,7 +98,8 @@ pub fn valid_grid(g: &str) -> bool {
     }
 }
 
-fn normalise_grid(g: &str) -> String {
+/// Field upper case, subsquare lower case: `kg33xi` → `KG33xi`.
+pub fn normalise_grid(g: &str) -> String {
     g.char_indices().map(|(i, c)| if i < 2 { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() }).collect()
 }
 

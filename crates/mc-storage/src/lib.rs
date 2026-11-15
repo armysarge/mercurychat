@@ -282,6 +282,106 @@ impl Store {
     }
 }
 
+/// One `station_profiles` row (MIGRATION_2), flat; `mc_core::profile` maps it
+/// to and from the validated model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProfileRow {
+    pub id: String,
+    pub callsign: String,
+    pub name: Option<String>,
+    pub grid: Option<String>,
+    pub modem_kind: String,
+    pub host: Option<String>,
+    pub control_port: Option<u16>,
+    pub data_port: Option<u16>,
+    pub broadcast_port: Option<u16>,
+    pub telemetry_url: Option<String>,
+    pub lab: bool,
+    pub listen_preferred: bool,
+}
+
+impl Store {
+    /// Insert or update a profile; `created_utc` is kept on update.
+    pub fn save_profile(&mut self, r: &ProfileRow) -> Result<()> {
+        let now = now_utc();
+        self.conn.execute(
+            "INSERT INTO station_profiles (id, callsign, name, grid, modem_kind, host, control_port, data_port,
+               broadcast_port, telemetry_url, lab, listen_preferred, created_utc, updated_utc)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+             ON CONFLICT (id) DO UPDATE SET callsign = excluded.callsign, name = excluded.name,
+               grid = excluded.grid, modem_kind = excluded.modem_kind, host = excluded.host,
+               control_port = excluded.control_port, data_port = excluded.data_port,
+               broadcast_port = excluded.broadcast_port, telemetry_url = excluded.telemetry_url,
+               lab = excluded.lab, listen_preferred = excluded.listen_preferred, updated_utc = excluded.updated_utc",
+            params![
+                r.id,
+                r.callsign,
+                r.name,
+                r.grid,
+                r.modem_kind,
+                r.host,
+                r.control_port,
+                r.data_port,
+                r.broadcast_port,
+                r.telemetry_url,
+                r.lab,
+                r.listen_preferred,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// All profiles, oldest first.
+    pub fn profiles(&self) -> Result<Vec<ProfileRow>> {
+        let mut st = self.conn.prepare(
+            "SELECT id, callsign, name, grid, modem_kind, host, control_port, data_port, broadcast_port,
+                    telemetry_url, lab, listen_preferred
+             FROM station_profiles ORDER BY created_utc, rowid",
+        )?;
+        let rows = st.query_map([], |r| {
+            Ok(ProfileRow {
+                id: r.get(0)?,
+                callsign: r.get(1)?,
+                name: r.get(2)?,
+                grid: r.get(3)?,
+                modem_kind: r.get(4)?,
+                host: r.get(5)?,
+                control_port: r.get(6)?,
+                data_port: r.get(7)?,
+                broadcast_port: r.get(8)?,
+                telemetry_url: r.get(9)?,
+                lab: r.get(10)?,
+                listen_preferred: r.get(11)?,
+            })
+        })?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
+    /// True if a profile was removed.
+    pub fn delete_profile(&mut self, id: &str) -> Result<bool> {
+        Ok(self.conn.execute("DELETE FROM station_profiles WHERE id = ?1", [id])? > 0)
+    }
+
+    pub fn set_setting(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO settings (key, value, updated_utc) VALUES (?1, ?2, ?3)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_utc = excluded.updated_utc",
+            params![key, value, now_utc()],
+        )?;
+        Ok(())
+    }
+
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
+    }
+
+    pub fn delete_setting(&mut self, key: &str) -> Result<()> {
+        self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

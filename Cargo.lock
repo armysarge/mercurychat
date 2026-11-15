@@ -1962,10 +1962,12 @@ dependencies = [
  "mch-protocol",
  "mercury-adapter",
  "rand",
+ "serde",
  "sha2",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
+ "uuid",
 ]
 
 [[package]]
