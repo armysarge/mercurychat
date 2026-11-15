@@ -19,7 +19,7 @@ use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 /// Where a modem task keeps its data and takes its locks.
 #[derive(Debug, Clone, Default)]
@@ -75,12 +75,20 @@ pub enum ReportKind {
 pub struct ModemHandle {
     pub generation: u64,
     cmds: mpsc::Sender<ModemCmd>,
+    /// Closes when the task has ended and let go of its sockets and locks.
+    done: Option<oneshot::Receiver<()>>,
 }
 
 impl ModemHandle {
     /// Queue a command; false if the task has ended or is backed up.
     pub fn send(&self, cmd: ModemCmd) -> bool {
         self.cmds.try_send(cmd).is_ok()
+    }
+
+    /// Stop the task; the receiver closes once it has let go of the modem,
+    /// so a successor can wait for it (`spawn`'s `after`).
+    pub fn stop(mut self) -> Option<oneshot::Receiver<()>> {
+        self.done.take() // dropping self sends Shutdown
     }
 }
 
@@ -90,15 +98,45 @@ impl Drop for ModemHandle {
     }
 }
 
+/// Start a modem task. `after` is the stopped predecessor's `stop()`: the new
+/// task waits for it (bounded by HANDOVER) before it takes the modem's locks.
 pub fn spawn(
     profile: StationProfile,
     generation: u64,
     opts: ModemOptions,
     reports: mpsc::Sender<ModemReport>,
+    after: Option<oneshot::Receiver<()>>,
 ) -> ModemHandle {
     let (tx, rx) = mpsc::channel(64);
-    tokio::spawn(run(profile, opts, rx, Reporter { generation, tx: reports }));
-    ModemHandle { generation, cmds: tx }
+    let (done_tx, done_rx) = oneshot::channel::<()>();
+    tokio::spawn(async move {
+        run(profile, opts, rx, Reporter { generation, tx: reports }, after).await;
+        drop(done_tx);
+    });
+    ModemHandle { generation, cmds: tx, done: Some(done_rx) }
+}
+
+/// How long a new task waits for its stopped predecessor to let go of the
+/// modem. A stopping task ends a call it was placing first (about 7 s).
+const HANDOVER: Duration = Duration::from_secs(30);
+
+/// What cut a long modem wait short.
+enum Cut {
+    Stop,
+    Abort,
+}
+
+/// Resolves when a long wait (recovery, ending a link) must give way: on
+/// Shutdown or a dropped handle, and on Abort when `abortable`. Anything else
+/// is ignored: the actor only allows it once the modem is idle again.
+async fn cut_short(cmds: &mut mpsc::Receiver<ModemCmd>, abortable: bool) -> Cut {
+    loop {
+        match cmds.recv().await {
+            Some(ModemCmd::Shutdown) | None => return Cut::Stop,
+            Some(ModemCmd::Abort) if abortable => return Cut::Abort,
+            Some(other) => tracing::debug!(?other, "ignored while the modem is busy"),
+        }
+    }
 }
 
 struct Reporter {
@@ -160,7 +198,24 @@ async fn open_station(cfg: StationConfig) -> Result<Station, StationError> {
     }
 }
 
-async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiver<ModemCmd>, r: Reporter) {
+async fn run(
+    profile: StationProfile,
+    opts: ModemOptions,
+    mut cmds: mpsc::Receiver<ModemCmd>,
+    r: Reporter,
+    after: Option<oneshot::Receiver<()>>,
+) {
+    // The task this one replaces may still hold the modem (recovering, ending
+    // a link): let it finish first, or its locks look like another instance.
+    if let Some(mut prev) = after {
+        if matches!(prev.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
+            r.state(ModemState::Attaching, Some("closing the previous connection".into())).await;
+            tokio::select! {
+                _ = tokio::time::timeout(HANDOVER, prev) => {}
+                _ = stopped(&mut cmds) => return,
+            }
+        }
+    }
     let Some(stations) = opts.stations_root.clone() else {
         return r.fault("no data folder for the station".into()).await;
     };
@@ -345,13 +400,25 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
                         let _ = st.cancel_call().await;
                         return;
                     }
-                    Calling::Cancelled => match st.cancel_call().await {
-                        Ok(()) => After::Idle(None),
-                        Err(_) => After::Recover,
-                    },
+                    Calling::Cancelled => {
+                        let res = tokio::select! {
+                            res = st.cancel_call() => Some(res),
+                            _ = cut_short(&mut cmds, false) => None,
+                        };
+                        match res {
+                            Some(Ok(())) => After::Idle(None),
+                            Some(Err(_)) => After::Recover,
+                            None => After::Stop,
+                        }
+                    }
                     Calling::Answered(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Outgoing).await,
                     Calling::Answered(Err(StationError::ControlLost | StationError::Detached)) => After::Recover,
-                    Calling::Answered(Err(StationError::BadPeer(p))) => refuse_link(st, r, &p).await,
+                    Calling::Answered(Err(StationError::BadPeer(p))) => {
+                        tokio::select! {
+                            a = refuse_link(st, r, &p) => a,
+                            _ = cut_short(&mut cmds, false) => After::Stop,
+                        }
+                    }
                     Calling::Answered(Err(e)) => {
                         let reason = match e {
                             StationError::CallFailed => format!("{} did not answer", peer.as_str()),
@@ -371,7 +438,12 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
             }
             Idle::Incoming(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Incoming).await,
             Idle::Incoming(Err(StationError::Timeout(_))) => continue,
-            Idle::Incoming(Err(StationError::BadPeer(p))) => refuse_link(st, r, &p).await,
+            Idle::Incoming(Err(StationError::BadPeer(p))) => {
+                tokio::select! {
+                    a = refuse_link(st, r, &p) => a,
+                    _ = cut_short(&mut cmds, false) => After::Stop,
+                }
+            }
             Idle::Incoming(Err(StationError::NotOurSession { src, dest, .. })) => {
                 tracing::warn!(%src, %dest, "ignoring a link that is not ours");
                 continue;
@@ -389,7 +461,12 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
                 listening = false;
                 r.session(None).await;
                 r.state(ModemState::Recovering, None).await;
-                match st.recover(5).await {
+                // Recovery can take a minute; a stop must not wait for it.
+                let res = tokio::select! {
+                    res = st.recover(5) => res,
+                    _ = cut_short(&mut cmds, false) => return,
+                };
+                match res {
                     Ok(()) => r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await,
                     Err(e) => return r.fault(format!("could not recover the modem: {e}")).await,
                 }
@@ -620,14 +697,23 @@ async fn link(
         }
         SessionEnd::Disconnected => After::Idle(None),
         // The application session ended but the link may still be up.
+        // Ending it can take a minute; Shutdown and Abort still apply meanwhile.
         SessionEnd::HelloTimeout | SessionEnd::Protocol(_) | SessionEnd::CommandsClosed => {
-            match st.disconnect(Duration::from_secs(60)).await {
-                Ok(()) => After::Idle(None),
-                Err(StationError::Timeout(_)) => match st.abort().await {
-                    Ok(()) => After::Idle(None),
+            let cut = {
+                let ended = st.end_link_after(&end, Duration::from_secs(60));
+                tokio::select! {
+                    res = ended => Ok(res),
+                    c = cut_short(cmds, true) => Err(c),
+                }
+            };
+            match cut {
+                Ok(Ok(())) => After::Idle(None),
+                Ok(Err(_)) => After::Recover,
+                Err(Cut::Stop) => After::Stop,
+                Err(Cut::Abort) => match st.abort().await {
+                    Ok(()) => After::Idle(Some("aborted: delivery of anything not yet confirmed is uncertain".into())),
                     Err(_) => After::Recover,
                 },
-                Err(_) => After::Recover,
             }
         }
     }

@@ -469,7 +469,8 @@ impl App {
     /// Stop whatever modem task runs, then start the selected one. Never
     /// waits for the modem: it reports back through `on_report`.
     fn switch_modem(&mut self, target: Option<StationProfile>) {
-        self.task = None; // its Drop tells the old task to stop
+        // The old task is told to stop; the new one waits for it to let go.
+        let prev = self.task.take().and_then(modem::ModemHandle::stop);
         self.set_session(None);
         self.chat = None;
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
@@ -483,7 +484,7 @@ impl App {
             }
         }
         let generation = self.log.generation();
-        self.task = Some(modem::spawn(p, generation, self.modem_opts.clone(), self.reports.clone()));
+        self.task = Some(modem::spawn(p, generation, self.modem_opts.clone(), self.reports.clone(), prev));
     }
 
     /// A report from a modem task. One from a task the actor has replaced
