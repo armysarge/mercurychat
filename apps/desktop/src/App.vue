@@ -154,8 +154,9 @@ function send() {
   if (!text.trim() || textBytes.value > MAX_BYTES) return;
   const to = openPeer.value;
   return chat(async () => {
-    const r = await call({ type: "sendChat", peer: to, text });
-    if (r.type === "message") onMessage(r);
+    // The message itself arrives as MessageChanged events, which may overtake
+    // this reply: applying the reply's "queued" here could undo a newer state.
+    await call({ type: "sendChat", peer: to, text });
     if (composer.value === text) composer.value = "";
   });
 }
