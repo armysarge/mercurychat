@@ -34,6 +34,9 @@ async function call(s, peer, ms) {
   const end = Date.now() + ms;
   while (Date.now() < end) {
     await s.eval(click("Call"));
+    // The click returns before the state leaves ready (and Call becomes
+    // Cancel), so wait for the call to start before reading its outcome.
+    await until(s, `${pill} !== 'ready' || document.body.innerText.includes('Call failed')`, "the call to start", 10000);
     const r = await until(s, `(${pill} === 'connected' && 'up') || (document.body.innerText.includes('Call failed') && 'failed') || (${pill} === 'ready' && 'ready')`, "a call outcome", 150000).catch(() => "timeout");
     if (r === "up") return;
     await sleep(5000);
@@ -45,10 +48,10 @@ async function call(s, peer, ms) {
 // not outside input, so they run through a shell on purpose.
 export async function existingRun({ exe, dataDir, port, host, controlPort, peer, peerLog, stopA, startA }) {
   const results = [];
-  let app;
+  let app, s;
   try {
     app = launch(exe, dataDir, port);
-    let s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
+    s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
     // The first-use form for an existing Mercury (the same form is in Settings).
     await s.eval(setInput('form.existing input[name="callsign"]', "ZS6WIN"));
     await s.eval(setInput('form.existing input[name="host"]', host));
@@ -66,6 +69,7 @@ export async function existingRun({ exe, dataDir, port, host, controlPort, peer,
     const watch = setInterval(() => s.eval(mode).then((m) => m && seen.add(m)).catch(() => {}), 200);
     await call(s, peer, 300000);
     clearInterval(watch);
+    seen.add(await until(s, `${mode} === ${JSON.stringify(`Connected to ${peer}`)} && ${mode}`, "the connected header", 5000).catch(() => s.eval(mode)));
     for (const want of [`Calling ${peer}`, `Negotiating with ${peer}`, `Connected to ${peer}`]) {
       if (![...seen].includes(want)) throw new Error(`header never said "${want}": ${[...seen].join(" / ")}`);
     }
@@ -117,6 +121,9 @@ export async function existingRun({ exe, dataDir, port, host, controlPort, peer,
     s.close();
   } catch (e) {
     results.push(`FAIL ${e.message}`);
+    // What the window showed when it failed, for the run's record.
+    const shown = await s?.eval("JSON.stringify({ view: document.querySelector('main.view')?.firstElementChild?.className, composer: !!document.querySelector('textarea.composer'), text: document.body.innerText.slice(0, 1500) })").catch(() => null);
+    if (shown) results.push(`WINDOW ${shown}`);
   } finally {
     if (app) kill(app);
   }
