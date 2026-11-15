@@ -7,8 +7,10 @@ use mc_storage::ProfileRow;
 use mch_protocol::beacon::{normalise_grid, valid_grid};
 use mercury_adapter::Callsign;
 use serde::{Deserialize, Serialize};
+use ts_rs::TS;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(rename_all = "camelCase")]
 pub struct StationProfile {
     pub id: String,
@@ -20,7 +22,8 @@ pub struct StationProfile {
     pub listen_preferred: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 #[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ModemTarget {
     /// A Mercury the operator runs (SET-03).
@@ -35,7 +38,8 @@ pub enum ModemTarget {
     Simulator,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
 pub struct FieldError {
     pub field: String,
     pub message: String,

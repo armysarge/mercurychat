@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
+ts-rs = "12"
+serde_json = "1"
 mch-protocol = { path = "../mch-protocol" }
 mercury-adapter = { path = "../mercury-adapter", default-features = false }
 mc-storage = { path = "../mc-storage" }

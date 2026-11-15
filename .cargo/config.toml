@@ -1,0 +1,3 @@
+[env]
+# ts-rs writes the UI contract types here (docs/M1-plan.md Task 5).
+TS_RS_EXPORT_DIR = { value = "apps/desktop/src/bindings", relative = true }
