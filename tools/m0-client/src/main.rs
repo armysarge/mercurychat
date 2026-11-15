@@ -4,6 +4,7 @@
 //!   m0-client lab --a HOST:PORT --b HOST:PORT ... L1: two real Mercury instances
 //!   m0-client probe --endpoint HOST:PORT          attach and print control lines
 //!   m0-client broadcast --a .. --b ..             CQ / MCB1 beacon / BUSY / MONITOR proof
+//!   m0-client peer --host H --port P --call SIM2  headless MercuryChat peer (M2 labs)
 //!
 //! Every run writes report.json, report.md and control transcripts to --work.
 
@@ -30,6 +31,24 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Cmd {
+    /// A headless MercuryChat station on one Mercury: LISTEN ON, answer every
+    /// call, run the session, and print one JSON line per stored message
+    /// ({"event":"received", peer, id, bytes, sha256}). With --echo, reply
+    /// "echo: <text>" to each.
+    Peer {
+        #[arg(long, default_value = "127.0.0.1")]
+        host: String,
+        /// Control port (data = port + 1).
+        #[arg(long, default_value_t = 8300)]
+        port: u16,
+        #[arg(long, default_value = "SIM2")]
+        call: String,
+        #[arg(long)]
+        echo: bool,
+        /// The peer's own station data (store, files).
+        #[arg(long, default_value = "m2-peer")]
+        work: PathBuf,
+    },
     /// Run the M0 scenario against an in-process fake Mercury pair (no audio).
     Selftest {
         #[arg(long, default_value = "m0-selftest")]
@@ -161,6 +180,33 @@ fn write_outputs(work: &Path, report: &Report, a: &lab::Snapshot, b: &lab::Snaps
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     match cli.cmd {
+        Cmd::Peer { host, port, call, echo, work } => {
+            use sha2::{Digest, Sha256};
+            std::fs::create_dir_all(&work)?;
+            let c = Callsign::parse(&call)?;
+            let mut st = Station::open(StationConfig::defaults(c.clone(), Endpoint::base(&host, port), &work))?;
+            st.attach().await?;
+            st.set_listen(true).await?;
+            println!(
+                "{}",
+                serde_json::json!({ "event": "listening", "call": c.as_str(), "host": host, "port": port, "echo": echo })
+            );
+            let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+            tokio::spawn(mc_core::sim::serve_peer(st, echo, Some(tx)));
+            while let Some((from, id, text)) = rx.recv().await {
+                println!(
+                    "{}",
+                    serde_json::json!({
+                        "event": "received",
+                        "peer": from,
+                        "id": id.to_hex(),
+                        "bytes": text.len(),
+                        "sha256": hex::encode(Sha256::digest(text.as_bytes())),
+                    })
+                );
+            }
+            anyhow::bail!("the peer station stopped: its Mercury control connection is gone");
+        }
         Cmd::Selftest { work } => {
             std::fs::create_dir_all(&work)?;
             let net = mercury_adapter::fake::FakeNet::start().await;

@@ -95,6 +95,21 @@ for port in 8300 8301 8400 8401; do
   # idle data port and transmits them at the start of the next session.
   for i in $(seq 1 100); do timeout 1 bash -c "exec 3<>/dev/tcp/127.0.0.1/$port" 2>/dev/null && break; sleep 0.1; done
 done
+# --- optional headless MercuryChat peer on Mercury B (M2) ---------------------
+# PEER=1 runs `m0-client peer --echo` on station B, so a MercuryChat on A can
+# call it. One JSON line per stored message goes to $OUT/peer/peer.jsonl.
+if [ "${PEER:-0}" = 1 ]; then
+  PEER_BIN=${PEER_BIN:-/mercury/linux-amd64/m0-client}
+  [ -x "$PEER_BIN" ] || { echo "PEER=1 but no m0-client at $PEER_BIN" >&2; exit 1; }
+  mkdir -p "$OUT/peer"
+  "$PEER_BIN" peer --host 127.0.0.1 --port 8400 --call "${PEER_CALL:-SIM2}" --echo --work "$OUT/peer/station" \
+    > "$OUT/peer/peer.jsonl" 2> "$OUT/peer/peer.log" &
+  echo $! > "$OUT/peer/pid"
+  for i in $(seq 1 100); do grep -q '"listening"' "$OUT/peer/peer.jsonl" 2>/dev/null && break; sleep 0.1; done
+  grep -q '"listening"' "$OUT/peer/peer.jsonl" || { echo "the peer did not start; see $OUT/peer/peer.log" >&2; exit 1; }
+  echo "peer=${PEER_CALL:-SIM2} on B (echo), sha256=$(sha256sum "$PEER_BIN" | cut -d' ' -f1)" >> "$OUT/lab-manifest.txt"
+fi
+
 echo "LAB READY: A=8300/8301 B=8400/8401 (PTT none, crossed null-sink routes)"
 echo "lab_ready_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT/lab-manifest.txt"
 
