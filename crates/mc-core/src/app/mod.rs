@@ -3,9 +3,11 @@
 
 mod contract;
 mod events;
+mod service;
 
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, Since};
+pub use service::{spawn_app, AppHandle, AppOptions};
 
 use ts_rs::TS;
 

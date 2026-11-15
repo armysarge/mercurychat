@@ -24,6 +24,7 @@ hex = "0.4"
 rand = "0.9"
 
 [dev-dependencies]
+futures = "0.3"
 filetime = "0.2"
 mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }
 tokio = { version = "1", features = ["full"] }
