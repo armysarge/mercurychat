@@ -47,7 +47,7 @@ fn fresh_database_is_at_latest() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("station.db");
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 2);
+    assert_eq!(s.schema_version().unwrap(), MIGRATIONS.last().unwrap().to);
     drop(s);
     assert!(has_table(&path, "station_profiles"));
     assert!(has_table(&path, "settings"));
@@ -59,7 +59,7 @@ fn v1_database_upgrades_with_backup() {
     let dir = tempfile::tempdir().unwrap();
     let path = v1_db(dir.path());
     let s = Store::open(&path).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 2);
+    assert_eq!(s.schema_version().unwrap(), MIGRATIONS.last().unwrap().to);
     chat_survives(&s);
     drop(s);
 

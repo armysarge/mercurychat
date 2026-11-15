@@ -16,7 +16,11 @@ pub struct Migration {
     pub sql: &'static str,
 }
 
-pub const MIGRATIONS: &[Migration] = &[Migration { to: 1, sql: MIGRATION_1 }, Migration { to: 2, sql: MIGRATION_2 }];
+pub const MIGRATIONS: &[Migration] = &[
+    Migration { to: 1, sql: MIGRATION_1 },
+    Migration { to: 2, sql: MIGRATION_2 },
+    Migration { to: 3, sql: MIGRATION_3 },
+];
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE messages (
@@ -85,6 +89,21 @@ CREATE TABLE settings (
   key         TEXT PRIMARY KEY,
   value       TEXT NOT NULL,
   updated_utc TEXT NOT NULL
+);
+"#;
+
+/// Chat history paging and session records (M2).
+const MIGRATION_3: &str = r#"
+CREATE INDEX messages_peer_order ON messages (peer, rowid_pk);
+CREATE TABLE sessions (
+  id          TEXT PRIMARY KEY,
+  peer        TEXT NOT NULL,
+  generation  INTEGER NOT NULL,
+  direction   TEXT NOT NULL CHECK (direction IN ('in','out')),
+  started_utc TEXT NOT NULL,
+  ended_utc   TEXT,
+  peer_app    TEXT,
+  outcome     TEXT
 );
 "#;
 

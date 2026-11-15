@@ -71,12 +71,58 @@ pub enum Stored {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageRow {
+    /// Local order (the row id): pages and the UI sort by it.
+    pub seq: i64,
     pub wire_id: [u8; 16],
     pub peer: String,
     pub direction: String,
     pub body: String,
     pub state: String,
     pub attempts: i64,
+    pub created_utc: String,
+    pub received_utc: Option<String>,
+    pub session_gen: Option<i64>,
+}
+
+/// One peer's conversation summary (M2).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConversationRow {
+    pub peer: String,
+    pub last_utc: String,
+    pub messages: i64,
+    pub uncertain: i64,
+}
+
+/// One MCH/1 session as recorded on the station (docs/02 section 6, sessions).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SessionRow {
+    pub id: String,
+    pub peer: String,
+    pub generation: i64,
+    pub direction: String,
+    pub started_utc: String,
+    pub ended_utc: Option<String>,
+    pub peer_app: Option<String>,
+    pub outcome: Option<String>,
+}
+
+const MESSAGE_COLUMNS: &str =
+    "rowid_pk, wire_id, peer, direction, body, state, attempts, created_utc, received_utc, session_gen";
+
+fn message_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MessageRow> {
+    let id: Vec<u8> = r.get(1)?;
+    Ok(MessageRow {
+        seq: r.get(0)?,
+        wire_id: id.try_into().unwrap_or([0; 16]),
+        peer: r.get(2)?,
+        direction: r.get(3)?,
+        body: r.get(4)?,
+        state: r.get(5)?,
+        attempts: r.get(6)?,
+        created_utc: r.get(7)?,
+        received_utc: r.get(8)?,
+        session_gen: r.get(9)?,
+    })
 }
 
 pub fn now_utc() -> String {
@@ -189,21 +235,115 @@ impl Store {
     }
 
     pub fn messages(&self, peer: &str) -> Result<Vec<MessageRow>> {
+        let mut st =
+            self.conn.prepare(&format!("SELECT {MESSAGE_COLUMNS} FROM messages WHERE peer = ?1 ORDER BY rowid_pk"))?;
+        let rows = st.query_map(params![peer], message_row)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// One message, either direction (outgoing first if both share an id).
+    pub fn message(&self, peer: &str, id: &[u8; 16]) -> Result<Option<MessageRow>> {
+        Ok(self
+            .conn
+            .query_row(
+                &format!(
+                    "SELECT {MESSAGE_COLUMNS} FROM messages WHERE peer = ?1 AND wire_id = ?2
+                     ORDER BY direction DESC LIMIT 1"
+                ),
+                params![peer, &id[..]],
+                message_row,
+            )
+            .optional()?)
+    }
+
+    /// Up to `limit` messages before `before_seq` (or the latest), oldest first.
+    pub fn history(&self, peer: &str, before_seq: Option<i64>, limit: u32) -> Result<Vec<MessageRow>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages WHERE peer = ?1 AND rowid_pk < ?2
+             ORDER BY rowid_pk DESC LIMIT ?3"
+        ))?;
+        let rows = st.query_map(params![peer, before_seq.unwrap_or(i64::MAX), limit], message_row)?;
+        let mut v: Vec<MessageRow> = rows.collect::<std::result::Result<_, _>>()?;
+        v.reverse();
+        Ok(v)
+    }
+
+    /// Outgoing messages never handed to a session, in the order written.
+    pub fn queued_for(&self, peer: &str) -> Result<Vec<MessageRow>> {
+        let mut st = self.conn.prepare(&format!(
+            "SELECT {MESSAGE_COLUMNS} FROM messages WHERE peer = ?1 AND direction = 'out' AND state = 'queued'
+             ORDER BY rowid_pk"
+        ))?;
+        let rows = st.query_map(params![peer], message_row)?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    /// Count and body bytes of a peer's unsettled outgoing messages (CHT-03 quota).
+    pub fn peer_queue_usage(&self, peer: &str) -> Result<(u32, u64)> {
+        Ok(self.conn.query_row(
+            "SELECT count(*), coalesce(sum(length(CAST(body AS BLOB))), 0) FROM messages
+             WHERE peer = ?1 AND direction = 'out' AND state IN ('queued','submitting','awaiting_receipt')",
+            params![peer],
+            |r| Ok((r.get::<_, i64>(0)? as u32, r.get::<_, i64>(1)? as u64)),
+        )?)
+    }
+
+    /// Every peer with history, the most recent conversation first.
+    pub fn conversations(&self) -> Result<Vec<ConversationRow>> {
         let mut st = self.conn.prepare(
-            "SELECT wire_id, peer, direction, body, state, attempts FROM messages WHERE peer = ?1 ORDER BY rowid_pk",
+            "SELECT peer, max(coalesce(received_utc, created_utc)), count(*),
+                    sum(CASE WHEN state = 'uncertain' THEN 1 ELSE 0 END), max(rowid_pk) AS last
+             FROM messages GROUP BY peer ORDER BY last DESC",
         )?;
-        let rows = st.query_map(params![peer], |r| {
-            let id: Vec<u8> = r.get(0)?;
-            Ok(MessageRow {
-                wire_id: id.try_into().unwrap_or([0; 16]),
-                peer: r.get(1)?,
-                direction: r.get(2)?,
-                body: r.get(3)?,
-                state: r.get(4)?,
-                attempts: r.get(5)?,
-            })
+        let rows = st.query_map([], |r| {
+            Ok(ConversationRow { peer: r.get(0)?, last_utc: r.get(1)?, messages: r.get(2)?, uncertain: r.get(3)? })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
+    pub fn begin_session(&mut self, s: &SessionRow) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO sessions (id, peer, generation, direction, started_utc, ended_utc, peer_app, outcome)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![s.id, s.peer, s.generation, s.direction, s.started_utc, s.ended_utc, s.peer_app, s.outcome],
+        )?;
+        Ok(())
+    }
+
+    pub fn set_session_peer_app(&mut self, id: &str, peer_app: &str) -> Result<()> {
+        self.conn.execute("UPDATE sessions SET peer_app = ?1 WHERE id = ?2", params![peer_app, id])?;
+        Ok(())
+    }
+
+    pub fn end_session(&mut self, id: &str, outcome: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE sessions SET ended_utc = ?1, outcome = ?2 WHERE id = ?3",
+            params![now_utc(), outcome, id],
+        )?;
+        Ok(())
+    }
+
+    pub fn session(&self, id: &str) -> Result<Option<SessionRow>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT id, peer, generation, direction, started_utc, ended_utc, peer_app, outcome
+                 FROM sessions WHERE id = ?1",
+                params![id],
+                |r| {
+                    Ok(SessionRow {
+                        id: r.get(0)?,
+                        peer: r.get(1)?,
+                        generation: r.get(2)?,
+                        direction: r.get(3)?,
+                        started_utc: r.get(4)?,
+                        ended_utc: r.get(5)?,
+                        peer_app: r.get(6)?,
+                        outcome: r.get(7)?,
+                    })
+                },
+            )
+            .optional()?)
     }
 
     /// Delete message history for a peer (dedup keys are retained).
