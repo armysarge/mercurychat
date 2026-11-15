@@ -515,9 +515,9 @@ impl Link {
 
     /// Whether a message handed to this session has no receipt yet.
     fn unconfirmed(&self) -> bool {
-        self.submitted
-            .iter()
-            .any(|id| self.row(id).is_some_and(|m| matches!(m.state.as_str(), "queued" | "submitting" | "awaiting_receipt")))
+        self.submitted.iter().any(|id| {
+            self.row(id).is_some_and(|m| matches!(m.state.as_str(), "queued" | "submitting" | "awaiting_receipt"))
+        })
     }
 
     async fn report(&mut self, r: &Reporter, id: &[u8; 16]) {

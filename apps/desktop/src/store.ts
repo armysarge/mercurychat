@@ -115,8 +115,12 @@ export async function loadConversations() {
 /** Open `peer`'s conversation: the latest page of history and its draft. */
 export async function openPeer(peer: string) {
   const p = peer.trim().toUpperCase();
+  // The draft typed for the conversation being left is saved now, and the new
+  // one is shown at once: no window where one peer's text sits under another.
+  if (chat.open && chat.open !== p) flushDraft(chat.open);
   chat.error = "";
   chat.open = p;
+  chat.draft = draftFor(p);
   chat.messages = [];
   chat.hasOlder = false;
   delete chat.unread[p];
@@ -127,7 +131,6 @@ export async function openPeer(peer: string) {
       chat.messages = h.messages;
       chat.hasOlder = h.messages.length === PAGE;
     }
-    chat.draft = chat.conversations.find((c) => c.peer === p)?.draft ?? "";
   } catch (e) {
     chat.error = describeError(e);
   }
@@ -186,15 +189,51 @@ export function send(text: string) {
   return act(() => call({ type: "sendChat", peer: to, text }));
 }
 
-let draftTimer: ReturnType<typeof setTimeout> | undefined;
+/** Drafts this window has typed, by station and peer: newer than the list. */
+const drafts = new Map<string, string>();
+/** Draft saves waiting out the typing delay, by station and peer. */
+const draftTimers = new Map<string, { timer: ReturnType<typeof setTimeout>; profile: string; peer: string; text: string }>();
+const draftKey = (peer: string) => `${activeProfile.value?.id ?? ""}/${peer}`;
 
-/** Keep the draft for the peer it was typed for (debounced); never sent. */
+/** The draft to show for `peer`: what was typed here, else what the store holds. */
+function draftFor(peer: string): string {
+  return drafts.get(draftKey(peer)) ?? chat.conversations.find((c) => c.peer === peer)?.draft ?? "";
+}
+
+/** Save a pending draft for `peer` now instead of after the typing delay. */
+function flushDraft(peer: string) {
+  const key = draftKey(peer);
+  const pending = draftTimers.get(key);
+  if (!pending) return;
+  clearTimeout(pending.timer);
+  draftTimers.delete(key);
+  storeDraft(pending);
+}
+
+/** SaveDraft goes to the active station: never send one typed for another. */
+function storeDraft(d: { profile: string; peer: string; text: string }) {
+  if (activeProfile.value?.id === d.profile) call({ type: "saveDraft", peer: d.peer, text: d.text }).catch(() => {});
+}
+
+/** Keep the draft for the peer it was typed for (debounced per peer); never
+ *  sent. Showing a peer's own draft again saves nothing. */
 export function saveDraft(text: string) {
   const forPeer = chat.open;
-  clearTimeout(draftTimer);
-  draftTimer = setTimeout(() => {
-    if (activeProfile.value && forPeer) call({ type: "saveDraft", peer: forPeer, text }).catch(() => {});
-  }, 500);
+  if (!activeProfile.value || !forPeer) return;
+  const key = draftKey(forPeer);
+  if (draftFor(forPeer) === text && !draftTimers.has(key)) return;
+  drafts.set(key, text);
+  const conv = chat.conversations.find((c) => c.peer === forPeer);
+  if (conv) conv.draft = text || null;
+  clearTimeout(draftTimers.get(key)?.timer);
+  const pending = { profile: activeProfile.value.id, peer: forPeer, text };
+  draftTimers.set(key, {
+    ...pending,
+    timer: setTimeout(() => {
+      draftTimers.delete(key);
+      storeDraft(pending);
+    }, 500),
+  });
 }
 
 export const retry = (m: ChatMessage) => act(() => call({ type: "retryChat", peer: m.peer, id: m.id }));
@@ -213,5 +252,5 @@ export const queuedBytes = computed(() =>
 
 export function stopTimers() {
   clearTimeout(convTimer);
-  clearTimeout(draftTimer);
+  for (const peer of [...draftTimers.values()].map((d) => d.peer)) flushDraft(peer);
 }
