@@ -3,6 +3,7 @@
 //! through `app_call` to the core's service actor; its events arrive on
 //! `mc://event`.
 
+mod probe;
 mod startup;
 
 use mc_core::app::{spawn_app, AppCommand, AppError, AppHandle as Core, AppOptions, CommandOk, EventEnvelope, Since};
@@ -156,17 +157,29 @@ struct ProbeResult {
 
 /// Read-only modem probe: attach the control/data pair, ask VERSION and
 /// BUFFER, record 3 s of status lines, detach. Sends no MYCALL/LISTEN, so it
-/// does not change the modem's configuration.
+/// does not change the modem's configuration. Only this computer or an
+/// endpoint a profile names, under that endpoint's lock (probe.rs).
 #[tauri::command]
-async fn modem_probe(host: String, port: u16) -> ProbeResult {
+async fn modem_probe(shell: tauri::State<'_, Shell>, host: String, port: u16) -> Result<ProbeResult, AppError> {
     use mercury_adapter::{AdapterEvent, Endpoint, MercuryClient, Timeouts};
+    let refuse = |summary: String| Ok(ProbeResult { ok: false, summary, lines: vec![] });
     if port == 0 || port == u16::MAX || host.trim().is_empty() || host.len() > 253 {
-        return ProbeResult { ok: false, summary: "invalid host or port".into(), lines: vec![] };
+        return refuse("invalid host or port".into());
     }
-    let ep = Endpoint::base(host.trim(), port);
+    let host = host.trim();
+    let Shell::Running(running) = shell.inner() else { return Err(shell.core().err().unwrap_or(stopped_err())) };
+    let profiles = match running.core.call(AppCommand::Snapshot).await? {
+        CommandOk::Snapshot(s) => s.profiles,
+        _ => Vec::new(),
+    };
+    let _guard = match probe::probe_guard(&running.locks_dir, host, port, &profiles) {
+        Ok(g) => g,
+        Err(e) => return refuse(e),
+    };
+    let ep = Endpoint::base(host, port);
     let mut att = match MercuryClient::attach(&ep, Timeouts::default()).await {
         Ok(a) => a,
-        Err(e) => return ProbeResult { ok: false, summary: e.to_string(), lines: vec![] },
+        Err(e) => return refuse(e.to_string()),
     };
     let _ = att.client.query("VERSION").await;
     let _ = att.client.query("BUFFER").await;
@@ -183,7 +196,7 @@ async fn modem_probe(host: String, port: u16) -> ProbeResult {
         }
     }
     let vara = lines.iter().any(|l| l.starts_with("VARA"));
-    ProbeResult {
+    Ok(ProbeResult {
         ok: true,
         summary: format!(
             "Attached control {} + data {}. {}",
@@ -196,7 +209,11 @@ async fn modem_probe(host: String, port: u16) -> ProbeResult {
             }
         ),
         lines,
-    }
+    })
+}
+
+fn stopped_err() -> AppError {
+    AppError::Internal { message: "the application service is not running".into() }
 }
 
 /// Start-up order (docs/02 §6): data-root lock, logging, log pruning, crash
@@ -218,7 +235,12 @@ fn start(app: &tauri::App) -> Result<Shell, Box<dyn std::error::Error>> {
     let locks_dir = app.path().app_local_data_dir()?.join("locks");
     std::fs::create_dir_all(&locks_dir)?;
     let startup::Prepared { root, db_path, schema, store, log, lock } = p;
-    let opts = AppOptions { sim_root: Some(root.clone()), ..AppOptions::default() };
+    let opts = AppOptions {
+        sim_root: Some(root.clone()),
+        stations_root: Some(root.join("stations")),
+        locks_dir: Some(locks_dir.clone()),
+        ..AppOptions::default()
+    };
     // spawn_app needs a runtime context; Tauri's runtime keeps the actor alive.
     let core = tauri::async_runtime::block_on(async move { spawn_app(store, opts) });
     forward_events(app.handle().clone(), core.subscribe());

@@ -5,6 +5,7 @@
 
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, Since};
+use super::modem::{self, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use mc_storage::{StorageError, Store};
 use std::path::PathBuf;
@@ -16,13 +17,17 @@ const ACTIVE_PROFILE: &str = "activeProfileId";
 pub struct AppOptions {
     pub command_queue: usize,
     pub event_ring: usize,
-    /// Where the simulator keeps its two stations' data; `None` disables it.
+    /// The data root, which also enables the simulator; `None` disables it.
     pub sim_root: Option<PathBuf>,
+    /// `{data root}/stations`; defaults to `{sim_root}/stations`.
+    pub stations_root: Option<PathBuf>,
+    /// The shared endpoint lock folder (MOD-02); `None` takes no endpoint locks.
+    pub locks_dir: Option<PathBuf>,
 }
 
 impl Default for AppOptions {
     fn default() -> Self {
-        AppOptions { command_queue: 64, event_ring: 1024, sim_root: None }
+        AppOptions { command_queue: 64, event_ring: 1024, sim_root: None, stations_root: None, locks_dir: None }
     }
 }
 
@@ -73,6 +78,8 @@ impl AppHandle {
 pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
     let (tx, mut rx) = mpsc::channel(opts.command_queue.max(1));
     let (events, _) = broadcast::channel(opts.event_ring.max(1));
+    let (reports, mut report_rx) = mpsc::channel(256);
+    let stations_root = opts.stations_root.clone().or_else(|| opts.sim_root.as_ref().map(|r| r.join("stations")));
     let mut app = App {
         store,
         log: EventLog::new(opts.event_ring),
@@ -80,29 +87,35 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         modem: ModemState::Unavailable,
         modem_detail: None,
         sim_root: opts.sim_root,
+        modem_opts: ModemOptions { stations_root, locks_dir: opts.locks_dir },
+        reports,
+        task: None,
         pending: None,
-        #[cfg(feature = "sim")]
-        sim: None,
     };
-    // The selection survives a restart, so its modem is attached again (attach
-    // only: a stored listen preference never arms transmission, RF-02).
-    let resumed = app.active_profile();
     tokio::spawn(async move {
-        if let Some(p) = resumed {
-            app.switch_modem(Some(p)).await;
+        // The selection survives a restart, so its modem is attached again (attach
+        // only: a stored listen preference never arms transmission, RF-02).
+        if let Some(p) = app.active_profile() {
+            app.switch_modem(Some(p));
         }
-        while let Some(req) = rx.recv().await {
-            match req {
-                Request::Command(cmd, reply) => {
-                    let _ = reply.send(app.handle(cmd));
-                    // A modem change is answered at once, then carried out.
-                    if let Some(target) = app.pending.take() {
-                        app.switch_modem(target).await;
+        loop {
+            tokio::select! {
+                req = rx.recv() => {
+                    let Some(req) = req else { break };
+                    match req {
+                        Request::Command(cmd, reply) => {
+                            let _ = reply.send(app.handle(cmd));
+                            // A modem change is answered at once, then started.
+                            if let Some(target) = app.pending.take() {
+                                app.switch_modem(target);
+                            }
+                        }
+                        Request::Since(seq, reply) => {
+                            let _ = reply.send(Ok(app.log.since(seq)));
+                        }
                     }
                 }
-                Request::Since(seq, reply) => {
-                    let _ = reply.send(Ok(app.log.since(seq)));
-                }
+                Some(report) = report_rx.recv() => app.on_report(report),
             }
         }
     });
@@ -116,10 +129,13 @@ struct App {
     modem: ModemState,
     modem_detail: Option<String>,
     sim_root: Option<PathBuf>,
-    /// The modem the last selection asked for, attached after replying.
+    modem_opts: ModemOptions,
+    /// Where modem tasks report; the actor keeps one sender so it never closes.
+    reports: mpsc::Sender<ModemReport>,
+    /// The running modem task, if any. Dropping it stops the task.
+    task: Option<ModemHandle>,
+    /// The modem the last selection asked for, started after replying.
     pending: Option<Option<StationProfile>>,
-    #[cfg(feature = "sim")]
-    sim: Option<crate::sim::SimModem>,
 }
 
 fn storage(e: StorageError) -> AppError {
@@ -203,41 +219,33 @@ impl App {
         self.emit(AppEvent::ModemState { state, detail });
     }
 
-    /// Detach whatever modem is attached, then attach the selected one.
-    async fn switch_modem(&mut self, target: Option<StationProfile>) {
-        #[cfg(feature = "sim")]
-        {
-            self.sim = None; // drops both stations, closing their sockets and locks
-        }
-        match target.map(|p| (p.modem.clone(), p)) {
-            None => self.set_modem(ModemState::Unavailable, None),
-            Some((ModemTarget::Existing { .. }, _)) => {
-                // Attaching a real Mercury is M2 work; M1 only stores the endpoints.
-                self.set_modem(ModemState::Unavailable, Some("existing modems are attached from M2 on".into()))
+    /// Stop whatever modem task runs, then start the selected one. Never
+    /// waits for the modem: it reports back through `on_report`.
+    fn switch_modem(&mut self, target: Option<StationProfile>) {
+        self.task = None; // its Drop tells the old task to stop
+        let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
+        if p.modem == ModemTarget::Simulator {
+            if !cfg!(feature = "sim") {
+                return self.set_modem(ModemState::Faulted, Some("the simulator is not part of this build".into()));
             }
-            Some((ModemTarget::Simulator, p)) => self.start_sim(&p).await,
+            if self.sim_root.is_none() {
+                return self.set_modem(ModemState::Faulted, Some("simulator unavailable: no data directory".into()));
+            }
         }
+        let generation = self.log.generation();
+        self.task = Some(modem::spawn(p, generation, self.modem_opts.clone(), self.reports.clone()));
     }
 
-    #[cfg(feature = "sim")]
-    async fn start_sim(&mut self, p: &StationProfile) {
-        let Some(root) = self.sim_root.clone() else {
-            return self.set_modem(ModemState::Faulted, Some("simulator unavailable: no data directory".into()));
-        };
-        self.set_modem(ModemState::Attaching, None);
-        match crate::sim::SimModem::start(&root, &p.callsign).await {
-            Ok(sim) => {
-                self.sim = Some(sim);
-                self.set_modem(ModemState::Ready, Some("simulator".into()));
-            }
-            Err(e) => self.set_modem(ModemState::Faulted, Some(format!("simulator: {e}"))),
+    /// A report from a modem task. One from a task the actor has replaced
+    /// (another generation) is stale and dropped (docs/02 section 3).
+    fn on_report(&mut self, report: ModemReport) {
+        if self.task.as_ref().map(|t| t.generation) != Some(report.generation) {
+            tracing::debug!(generation = report.generation, "dropping a stale modem report");
+            return;
         }
-    }
-
-    #[cfg(not(feature = "sim"))]
-    async fn start_sim(&mut self, _p: &StationProfile) {
-        let _ = &self.sim_root;
-        self.set_modem(ModemState::Faulted, Some("the simulator is not part of this build".into()));
+        match report.kind {
+            ReportKind::State { state, detail } => self.set_modem(state, detail),
+        }
     }
 
     fn snapshot(&self) -> Result<AppSnapshot, AppError> {

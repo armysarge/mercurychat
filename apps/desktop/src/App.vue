@@ -112,7 +112,7 @@ async function runProbe() {
   try {
     probe.value = await invoke<ProbeResult>("modem_probe", { host: host.value, port: Number(port.value) });
   } catch (e) {
-    probe.value = { ok: false, summary: String(e), lines: [] };
+    probe.value = { ok: false, summary: describeError(e), lines: [] };
   } finally {
     probing.value = false;
   }

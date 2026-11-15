@@ -94,7 +94,7 @@ async fn simulator_without_a_data_root_faults() {
 #[tokio::test(flavor = "multi_thread")]
 async fn no_real_endpoint_is_touched() {
     let dir = tempfile::tempdir().unwrap();
-    let sim = SimModem::start(dir.path(), "ZS6ABC").await.unwrap();
+    let sim = SimModem::start(&dir.path().join("station"), &dir.path().join("peer"), "ZS6ABC").await.unwrap();
     for base in [sim.net.a_base, sim.net.b_base] {
         assert!(![8100, 8300, 8301, 8400, 8401].contains(&base), "simulator used a real Mercury port {base}");
     }

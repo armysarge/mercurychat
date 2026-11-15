@@ -52,6 +52,25 @@ pub struct StationConfig {
     pub timeouts: Timeouts,
 }
 
+impl StationConfig {
+    /// The app's station defaults (M2): BW2300, files up to 256 KiB in 1 KiB
+    /// chunks, never auto-accepted, a 5 s HELLO wait.
+    pub fn defaults(callsign: Callsign, endpoint: Endpoint, data_dir: &std::path::Path) -> Self {
+        StationConfig {
+            callsign,
+            endpoint,
+            data_dir: data_dir.to_path_buf(),
+            bandwidth: Bandwidth::Bw2300,
+            max_file: 256 * 1024,
+            chunk: 1024,
+            auto_accept_files: false,
+            hello_timeout: Duration::from_secs(5),
+            modem_window: 2 * 1024 + 256,
+            timeouts: Timeouts::default(),
+        }
+    }
+}
+
 /// Control-plane requests accepted while a session is running.
 #[derive(Debug)]
 pub enum StationRequest {
