@@ -255,6 +255,21 @@ const UNARMED: &str = "listening is off until you turn it on";
 /// How long a call may ring before it is given up (docs/04 section 3).
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 
+/// What the operator is told when Mercury reports an invalid peer callsign.
+const BAD_PEER: &str = "peer callsign rejected";
+
+/// Take down a link we refuse, and say so; a failed ABORT means the modem
+/// itself is in doubt.
+async fn refuse_link(st: &mut Station, r: &Reporter, peer: &str) -> After {
+    let shown: String = peer.chars().take(32).collect();
+    let after = match st.abort().await {
+        Ok(()) => After::Idle(None),
+        Err(_) => After::Recover,
+    };
+    r.call_failed(&shown, BAD_PEER.into()).await;
+    after
+}
+
 /// What the operator is told when the peer never sends HELLO (docs/04 section 3).
 const NO_HELLO: &str = "the station answered but is not running MercuryChat (no HELLO)";
 
@@ -332,6 +347,7 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
                     },
                     Calling::Answered(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Outgoing).await,
                     Calling::Answered(Err(StationError::ControlLost | StationError::Detached)) => After::Recover,
+                    Calling::Answered(Err(StationError::BadPeer(p))) => refuse_link(st, r, &p).await,
                     Calling::Answered(Err(e)) => {
                         let reason = match e {
                             StationError::CallFailed => format!("{} did not answer", peer.as_str()),
@@ -351,6 +367,7 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
             }
             Idle::Incoming(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Incoming).await,
             Idle::Incoming(Err(StationError::Timeout(_))) => continue,
+            Idle::Incoming(Err(StationError::BadPeer(p))) => refuse_link(st, r, &p).await,
             Idle::Incoming(Err(StationError::NotOurSession { src, dest, .. })) => {
                 tracing::warn!(%src, %dest, "ignoring a link that is not ours");
                 continue;

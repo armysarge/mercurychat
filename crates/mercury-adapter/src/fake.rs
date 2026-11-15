@@ -101,6 +101,19 @@ impl FakeNet {
         deliver(&mut self.shared.lock().unwrap(), from, bytes);
     }
 
+    /// Send a raw control line to station `to` (fault injection).
+    pub fn send_control(&self, to: usize, line: &str) {
+        send_line(&self.shared.lock().unwrap(), to, line);
+    }
+
+    /// Bring a link up as Mercury would, but with a CONNECTED line of the
+    /// test's choosing, sent to station `to` only.
+    pub fn raw_connected(&self, to: usize, line: &str) {
+        let mut s = self.shared.lock().unwrap();
+        s.session = Some(("?".into(), "?".into()));
+        send_line(&s, to, line);
+    }
+
     /// Calls to an unreachable station stay pending instead of failing.
     pub fn set_unanswered_calls(&self, on: bool) {
         self.shared.lock().unwrap().unanswered_calls = on;

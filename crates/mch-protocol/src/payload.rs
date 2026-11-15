@@ -251,6 +251,22 @@ mod tests {
         assert!(FileAccept::from_frame(&f).is_err());
     }
 
+    /// Over-long HELLO fields from a peer are refused on receipt.
+    #[test]
+    fn over_long_hello_fields_rejected() {
+        let mut long_app = hello();
+        long_app.app = "M".repeat(65);
+        let mut long_call = hello();
+        long_call.callsign = "A".repeat(16);
+        for h in [long_app, long_call] {
+            let f = Frame::new(FrameType::Hello, ObjectId::ZERO, serde_json::to_vec(&h).unwrap());
+            assert!(Hello::from_frame(&f).is_err(), "{h:?}");
+        }
+        let mut ok = hello();
+        ok.app = "M".repeat(64);
+        assert!(Hello::from_frame(&ok.to_frame().unwrap()).is_ok());
+    }
+
     #[test]
     fn small_peer_frame_rejected() {
         let mut h = hello();

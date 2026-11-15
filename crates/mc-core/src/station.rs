@@ -32,6 +32,9 @@ pub enum StationError {
     NotOurSession { src: String, dest: String, local: String },
     #[error("call ended without connecting")]
     CallFailed,
+    /// Mercury reported a peer that is not a valid callsign (untrusted input).
+    #[error("peer callsign rejected: {0:?}")]
+    BadPeer(String),
     #[error("storage: {0}")]
     Storage(#[from] mc_storage::StorageError),
     #[error("{0}")]
@@ -322,7 +325,14 @@ impl Station {
         } else {
             return Err(StationError::NotOurSession { src: source, dest, local: local.into() });
         };
-        Ok(ConnectInfo { source, dest, bandwidth, peer: peer.to_ascii_uppercase(), initiator })
+        // The normalised callsign is the peer's identity: upper case, any
+        // suffix (/P, -1) kept. Anything else is refused before a session,
+        // message or dedup key can exist.
+        let peer = match Callsign::parse(&peer) {
+            Ok(c) => c.as_str().to_string(),
+            Err(_) => return Err(StationError::BadPeer(peer.chars().take(64).collect())),
+        };
+        Ok(ConnectInfo { source, dest, bandwidth, peer, initiator })
     }
 
     /// Place a call and wait for CONNECTED (or DISCONNECTED = failed).

@@ -152,4 +152,31 @@ mod tests {
         assert!(matches!(parse_event("VARA version 4.9.0 registered"), ControlEvent::Version(_)));
         assert_eq!(parse_event("SOMETHING NEW"), ControlEvent::Unknown("SOMETHING NEW".into()));
     }
+
+    /// A peer name with spaces, or a missing one, is never a CONNECTED event:
+    /// only three single-token fields are.
+    #[test]
+    fn connected_needs_exactly_three_tokens() {
+        for line in ["CONNECTED ZS6ABC LISTEN ON ZS6ABC 2300", "CONNECTED  ZS6ABC 2300", "CONNECTED ZS6"] {
+            assert_eq!(parse_event(line), ControlEvent::Unknown(line.into()), "{line:?}");
+        }
+    }
+
+    /// A CR or LF inside a reported callsign ends the line there.
+    #[test]
+    fn line_breaks_split_a_reported_callsign() {
+        let mut p = LineParser::new();
+        let lines = p.push(b"CONNECTED ZS6\r\nABC ZS6ABC 2300\r").unwrap();
+        assert_eq!(lines, ["CONNECTED ZS6", "ABC ZS6ABC 2300"]);
+        assert!(lines.iter().all(|l| !matches!(parse_event(l), ControlEvent::Connected { .. })));
+    }
+
+    /// The buffer never grows past MAX_LINE, and the parser keeps working after.
+    #[test]
+    fn too_long_line_then_recovers() {
+        let mut p = LineParser::new();
+        assert_eq!(p.push(&vec![b'A'; 10 * MAX_LINE]), Err(LineTooLong));
+        assert!(p.buf.len() <= MAX_LINE);
+        assert_eq!(p.push(b"\rOK\r").unwrap(), ["OK"]);
+    }
 }
