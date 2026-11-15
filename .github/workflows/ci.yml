@@ -15,9 +15,8 @@ jobs:
       - name: Linux WebKitGTK deps
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev libxdo-dev
-      - name: Build UI
-        run: npm --prefix apps/desktop ci && npm --prefix apps/desktop run build
-      - name: Rust tests (protocol vectors, adapter, storage, core, L0 scenario)
-        run: cargo test --workspace
-      - name: Clippy
-        run: cargo clippy --workspace -- -D warnings
+      - name: Install UI dependencies
+        run: npm --prefix apps/desktop ci
+      - name: Check gate (fmt, clippy, tests, UI build)
+        shell: bash
+        run: bash scripts/check.sh
