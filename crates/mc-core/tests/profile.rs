@@ -194,3 +194,13 @@ fn settings_round_trip() {
     let s = Store::open(&path).unwrap();
     assert_eq!(s.setting("activeProfileId").unwrap().as_deref(), Some("def"));
 }
+
+#[test]
+fn a_new_profile_from_the_ui_gets_an_id() {
+    // The UI drafts a profile with no id; saving must not store it under "".
+    let mut draft = StationProfile::new_simulator("ZS6ABC");
+    draft.id = " ".into();
+    let p = draft.validate().unwrap();
+    assert!(!p.id.trim().is_empty());
+    assert_ne!(p.id, StationProfile::new_simulator("ZS6ABC").validate().unwrap().id);
+}

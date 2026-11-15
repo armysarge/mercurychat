@@ -17,5 +17,11 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["time", "sync"] }
 mc-storage = { path = "../crates/mc-storage" }
+mc-core = { path = "../crates/mc-core", features = ["sim"] }
+tracing = "0.1"
+thiserror = "2"
 mch-protocol = { path = "../crates/mch-protocol" }
 mercury-adapter = { path = "../crates/mercury-adapter", default-features = false }
+
+[dev-dependencies]
+tempfile = "3"

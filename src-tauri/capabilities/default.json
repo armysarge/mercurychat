@@ -3,5 +3,14 @@
   "identifier": "default",
   "description": "Main window: only MercuryChat's own commands; no shell, fs or http plugins.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    "allow-app-info",
+    "allow-app-call",
+    "allow-events-since",
+    "allow-ui-ready",
+    "allow-report-ipc",
+    "allow-ping",
+    "allow-modem-probe"
+  ]
 }

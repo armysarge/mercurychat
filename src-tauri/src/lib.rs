@@ -1,11 +1,20 @@
-//! MercuryChat desktop shell (M0): typed commands only; the UI has no raw
-//! sockets, shell or filesystem access (docs/02 §2, §7).
+//! MercuryChat desktop shell: typed commands only; the UI has no raw
+//! sockets, shell or filesystem access (docs/02 §2, §7). Every UI action goes
+//! through `app_call` to the core's service actor; its events arrive on
+//! `mc://event`.
 
+mod startup;
+
+use mc_core::app::{spawn_app, AppCommand, AppError, AppHandle as Core, AppOptions, CommandOk, EventEnvelope, Since};
 use serde::Serialize;
 use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
-use tauri::Manager;
+use tauri::{Emitter, Manager};
+use tokio::sync::broadcast;
+
+/// The one event channel the UI listens on.
+pub const EVENT_CHANNEL: &str = "mc://event";
 
 static STARTED: OnceLock<Instant> = OnceLock::new();
 
@@ -13,9 +22,31 @@ fn since_start_ms() -> u128 {
     STARTED.get().map(|t| t.elapsed().as_millis()).unwrap_or(0)
 }
 
-struct AppState {
+/// What start-up produced: a running core, or the reason it could not start
+/// (shown in the window; the app exits when the operator closes it).
+enum Shell {
+    Running(Box<Running>),
+    Failed(String),
+}
+
+struct Running {
+    core: Core,
+    data_root: PathBuf,
     db_path: PathBuf,
-    store: Mutex<mc_storage::Store>,
+    /// Endpoint locks (MOD-02), shared by every instance on this machine.
+    locks_dir: PathBuf,
+    schema: i64,
+    _log: Option<mc_core::logs::LogGuard>,
+    _lock: mc_core::lock::LockFile,
+}
+
+impl Shell {
+    fn core(&self) -> Result<Core, AppError> {
+        match self {
+            Shell::Running(r) => Ok(r.core.clone()),
+            Shell::Failed(message) => Err(AppError::Internal { message: message.clone() }),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -24,23 +55,69 @@ struct AppInfo {
     protocol: String,
     os: String,
     arch: String,
+    data_root: String,
     db_path: String,
     db_schema: i64,
+    locks_dir: String,
     startup_ms: u128,
+    /// Set when start-up failed; the UI then shows only this.
+    startup_error: Option<String>,
 }
 
 #[tauri::command]
-fn app_info(state: tauri::State<'_, AppState>) -> Result<AppInfo, String> {
-    let schema = state.store.lock().unwrap().schema_version().map_err(|e| e.to_string())?;
-    Ok(AppInfo {
+fn app_info(shell: tauri::State<'_, Shell>) -> AppInfo {
+    let (data_root, db_path, db_schema, locks_dir, startup_error) = match shell.inner() {
+        Shell::Running(r) => (
+            r.data_root.display().to_string(),
+            r.db_path.display().to_string(),
+            r.schema,
+            r.locks_dir.display().to_string(),
+            None,
+        ),
+        Shell::Failed(m) => (String::new(), String::new(), 0, String::new(), Some(m.clone())),
+    };
+    AppInfo {
         app_version: env!("CARGO_PKG_VERSION").into(),
         protocol: format!("MCH/{}.{} draft", mch_protocol::MAJOR, mch_protocol::MINOR),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
-        db_path: state.db_path.display().to_string(),
-        db_schema: schema,
+        data_root,
+        db_path,
+        db_schema,
+        locks_dir,
         startup_ms: since_start_ms(),
-    })
+        startup_error,
+    }
+}
+
+/// Every UI action (docs/02 §2): one typed command, one typed reply.
+#[tauri::command]
+async fn app_call(shell: tauri::State<'_, Shell>, cmd: AppCommand) -> Result<CommandOk, AppError> {
+    let core = shell.core()?;
+    core.call(cmd).await
+}
+
+/// Events after `seq`, or `snapshotNeeded` when the ring no longer holds them.
+#[tauri::command]
+async fn events_since(shell: tauri::State<'_, Shell>, seq: u64) -> Result<Since, AppError> {
+    let core = shell.core()?;
+    core.events_since(seq).await
+}
+
+/// Relay core events to the window. A lagging relay drops events; the UI
+/// sees the gap in `seq` and asks `events_since`.
+fn forward_events(app: tauri::AppHandle, mut rx: broadcast::Receiver<EventEnvelope>) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            match rx.recv().await {
+                Ok(env) => {
+                    let _ = app.emit(EVENT_CHANNEL, &env);
+                }
+                Err(broadcast::error::RecvError::Lagged(n)) => tracing::warn!(missed = n, "UI event relay lagged"),
+                Err(broadcast::error::RecvError::Closed) => break,
+            }
+        }
+    });
 }
 
 /// Called by the UI after its first data render. Prints a parseable line for
@@ -122,22 +199,49 @@ async fn modem_probe(host: String, port: u16) -> ProbeResult {
     }
 }
 
+/// Start-up order (docs/02 §6): data-root lock, logging, log pruning, crash
+/// report, store (all in `startup::prepare`), then the service actor.
+fn start(app: &tauri::App) -> Result<Shell, Box<dyn std::error::Error>> {
+    // Lab mode (MOD-02): MC_DATA_DIR gives each instance its own data root.
+    let root = match std::env::var_os("MC_DATA_DIR") {
+        Some(d) => PathBuf::from(d),
+        None => app.path().app_data_dir()?,
+    };
+    let p = match startup::prepare(&root) {
+        Ok(p) => p,
+        Err(e) => {
+            eprintln!("MercuryChat cannot start: {e}");
+            return Ok(Shell::Failed(e.to_string()));
+        }
+    };
+    // Endpoint locks ignore MC_DATA_DIR so lab instances on one machine share them.
+    let locks_dir = app.path().app_local_data_dir()?.join("locks");
+    std::fs::create_dir_all(&locks_dir)?;
+    let startup::Prepared { root, db_path, schema, store, log, lock } = p;
+    let opts = AppOptions { sim_root: Some(root.clone()), ..AppOptions::default() };
+    // spawn_app needs a runtime context; Tauri's runtime keeps the actor alive.
+    let core = tauri::async_runtime::block_on(async move { spawn_app(store, opts) });
+    forward_events(app.handle().clone(), core.subscribe());
+    Ok(Shell::Running(Box::new(Running { core, data_root: root, db_path, locks_dir, schema, _log: log, _lock: lock })))
+}
+
 pub fn run() {
     STARTED.get_or_init(Instant::now);
     tauri::Builder::default()
         .setup(|app| {
-            // Lab mode (MOD-02): MC_DATA_DIR gives each instance its own data root.
-            let dir = match std::env::var_os("MC_DATA_DIR") {
-                Some(d) => PathBuf::from(d),
-                None => app.path().app_data_dir()?,
-            };
-            std::fs::create_dir_all(&dir)?;
-            let db_path = dir.join("mercurychat.db");
-            let store = mc_storage::Store::open(&db_path)?;
-            app.manage(AppState { db_path, store: Mutex::new(store) });
+            let shell = start(app)?;
+            app.manage(shell);
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![app_info, ui_ready, report_ipc, ping, modem_probe])
+        .invoke_handler(tauri::generate_handler![
+            app_info,
+            app_call,
+            events_since,
+            ui_ready,
+            report_ipc,
+            ping,
+            modem_probe
+        ])
         .run(tauri::generate_context!())
         .expect("error while running MercuryChat");
 }

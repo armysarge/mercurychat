@@ -2069,13 +2069,17 @@ dependencies = [
 name = "mercurychat"
 version = "0.0.1"
 dependencies = [
+ "mc-core",
  "mc-storage",
  "mch-protocol",
  "mercury-adapter",
  "serde",
  "tauri",
  "tauri-build",
+ "tempfile",
+ "thiserror 2.0.21",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

@@ -83,7 +83,13 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         #[cfg(feature = "sim")]
         sim: None,
     };
+    // The selection survives a restart, so its modem is attached again (attach
+    // only: a stored listen preference never arms transmission, RF-02).
+    let resumed = app.active_profile();
     tokio::spawn(async move {
+        if let Some(p) = resumed {
+            app.switch_modem(Some(p)).await;
+        }
         while let Some(req) = rx.recv().await {
             match req {
                 Request::Command(cmd, reply) => {
@@ -171,6 +177,13 @@ impl App {
                 Ok(CommandOk::Done)
             }
         }
+    }
+
+    /// The stored active profile, if it still exists and reads cleanly.
+    fn active_profile(&self) -> Option<StationProfile> {
+        let id = self.store.setting(ACTIVE_PROFILE).ok()??;
+        let row = self.store.profiles().ok()?.into_iter().find(|r| r.id == id)?;
+        from_row(&row).ok()
     }
 
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {

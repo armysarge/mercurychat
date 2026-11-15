@@ -100,3 +100,24 @@ async fn no_real_endpoint_is_touched() {
     }
     assert_eq!(sim.peer_callsign, "SIM1");
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restart_reattaches_the_selected_simulator() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("mercurychat.db");
+    {
+        let mut store = Store::open(&db).unwrap();
+        let p = StationProfile::new_simulator("ZS6ABC").validate().unwrap();
+        store.save_profile(&mc_core::profile::to_row(&p)).unwrap();
+        store.set_setting("activeProfileId", &p.id).unwrap();
+    }
+    let h = spawn_app(
+        Store::open(&db).unwrap(),
+        AppOptions { sim_root: Some(dir.path().to_path_buf()), ..AppOptions::default() },
+    );
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while modem(&h).await != ModemState::Ready {
+        assert!(tokio::time::Instant::now() < deadline, "the selected simulator was not re-attached on start");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+}

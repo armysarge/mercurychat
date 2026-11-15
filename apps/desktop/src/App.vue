@@ -1,17 +1,22 @@
 <script setup lang="ts">
-// M0 shell: proves the Vue <-> Tauri <-> Rust core <-> SQLite path and a
-// read-only modem probe. It is not the operator interface (that is M1+).
+// M1 foundation: station profiles, the simulator modem and its state, all
+// through typed commands (api.ts). Not yet the operator interface (M2+).
 import { invoke } from "@tauri-apps/api/core";
-import { onMounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
+import { call, describeError, Mirror, type View } from "./api";
+import type { StationProfile } from "./bindings/StationProfile";
 
 interface AppInfo {
   app_version: string;
   protocol: string;
   os: string;
   arch: string;
+  data_root: string;
   db_path: string;
   db_schema: number;
+  locks_dir: string;
   startup_ms: number;
+  startup_error: string | null;
 }
 interface ProbeResult {
   ok: boolean;
@@ -20,24 +25,86 @@ interface ProbeResult {
 }
 
 const info = ref<AppInfo | null>(null);
-const infoError = ref("");
+const startupError = ref("");
+const view = ref<View | null>(null);
+const actionError = ref("");
+const working = ref(false);
+const callsign = ref("");
 const host = ref("127.0.0.1");
 const port = ref(8300);
 const probing = ref(false);
 const probe = ref<ProbeResult | null>(null);
 const pingMs = ref<number[]>([]);
 const now = ref(new Date());
+const mirror = new Mirror((v) => (view.value = v));
+let clock: ReturnType<typeof setInterval> | undefined;
+
+const profiles = computed(() => view.value?.snapshot.profiles ?? []);
+const activeId = computed(() => view.value?.snapshot.activeProfileId ?? null);
+const modemState = computed(() => view.value?.snapshot.modem.type ?? "unavailable");
 
 onMounted(async () => {
-  setInterval(() => (now.value = new Date()), 1000);
+  clock = setInterval(() => (now.value = new Date()), 1000);
   try {
     info.value = await invoke<AppInfo>("app_info");
+    if (info.value.startup_error) {
+      // No retry loop: the operator reads this and closes the window.
+      startupError.value = info.value.startup_error;
+      return;
+    }
+    await mirror.start();
     const selfMeasure = await invoke<boolean>("ui_ready");
     if (selfMeasure) await measureIpc(200);
   } catch (e) {
-    infoError.value = String(e);
+    startupError.value = describeError(e);
   }
 });
+onUnmounted(() => {
+  mirror.stop();
+  clearInterval(clock);
+});
+
+async function act(step: () => Promise<unknown>) {
+  working.value = true;
+  actionError.value = "";
+  try {
+    await step();
+  } catch (e) {
+    actionError.value = describeError(e);
+  } finally {
+    working.value = false;
+  }
+}
+
+/** Save a simulator profile for the callsign (or reuse one), then select it. */
+function useSimulator() {
+  return act(async () => {
+    const wanted = callsign.value.trim().toUpperCase();
+    let p = profiles.value.find((x) => x.modem.kind === "simulator" && x.callsign === wanted);
+    if (!p) {
+      const draft: StationProfile = {
+        id: "",
+        callsign: callsign.value,
+        name: null,
+        grid: null,
+        modem: { kind: "simulator" },
+        lab: true,
+        listenPreferred: false,
+      };
+      const saved = await call({ type: "saveProfile", profile: draft });
+      if (saved.type !== "profile") throw new Error(`unexpected reply ${saved.type}`);
+      p = saved;
+    }
+    await call({ type: "selectProfile", id: p.id });
+  });
+}
+
+const select = (id: string | null) => act(() => call({ type: "selectProfile", id }));
+const remove = (id: string) => act(() => call({ type: "deleteProfile", id }));
+
+function where(p: StationProfile): string {
+  return p.modem.kind === "simulator" ? "simulator" : `${p.modem.host}:${p.modem.controlPort}`;
+}
 
 async function runProbe() {
   probing.value = true;
@@ -72,20 +139,58 @@ const utc = () => now.value.toISOString().slice(11, 19) + "Z";
   <div class="shell">
     <header class="top">
       <div class="brand"><span class="mark" aria-hidden="true">M</span> MercuryChat</div>
-      <div class="badge warn" role="status">M0 integration shell — no RF, PTT not controlled</div>
+      <div class="badge warn" role="status">M1 foundation — simulator only, no RF, PTT not controlled</div>
       <div class="utc mono" aria-label="UTC time">{{ utc() }}</div>
     </header>
 
-    <main class="grid">
+    <main v-if="startupError" class="grid">
+      <section class="card" role="alert" aria-labelledby="h-fail">
+        <h2 id="h-fail">MercuryChat cannot start</h2>
+        <p class="err">{{ startupError }}</p>
+        <p class="muted">Close this window to exit.</p>
+      </section>
+    </main>
+
+    <main v-else class="grid">
+      <section class="card" aria-labelledby="h-station">
+        <h2 id="h-station">Station</h2>
+        <ul v-if="profiles.length" class="profiles">
+          <li v-for="p in profiles" :key="p.id" :class="{ active: p.id === activeId }">
+            <span class="mono call">{{ p.callsign }}</span>
+            <span class="muted kind">{{ where(p) }}</span>
+            <span v-if="p.id === activeId" class="tag ok">in use</span>
+            <button v-if="p.id === activeId" :disabled="working" @click="select(null)">Stop using</button>
+            <button v-else :disabled="working" @click="select(p.id)">Use</button>
+            <button class="quiet" :disabled="working" :aria-label="'Delete ' + p.callsign" @click="remove(p.id)">Delete</button>
+          </li>
+        </ul>
+        <p v-else-if="view" class="muted">No station profile yet.</p>
+        <p v-else class="muted">Loading…</p>
+        <form class="row" @submit.prevent="useSimulator">
+          <label>Callsign <input v-model="callsign" class="mono" maxlength="15" autocomplete="off" /></label>
+          <button type="submit" :disabled="working">Use simulator</button>
+        </form>
+        <p v-if="actionError" class="err" role="alert">{{ actionError }}</p>
+      </section>
+
+      <section class="card" aria-labelledby="h-modemstate">
+        <h2 id="h-modemstate">Modem</h2>
+        <p class="state" role="status" aria-live="polite">
+          <span :class="['mono', 'pill', modemState]">{{ modemState }}</span>
+          <span v-if="view?.modemDetail" class="muted detail">{{ view.modemDetail }}</span>
+        </p>
+        <p v-if="view?.lastFault" class="err">{{ view.lastFault }}</p>
+      </section>
+
       <section class="card" aria-labelledby="h-build">
         <h2 id="h-build">Build and storage</h2>
-        <p v-if="infoError" class="err">{{ infoError }}</p>
-        <dl v-else-if="info">
+        <dl v-if="info">
           <dt>App</dt><dd class="mono">{{ info.app_version }}</dd>
           <dt>Protocol</dt><dd class="mono">{{ info.protocol }}</dd>
           <dt>Platform</dt><dd class="mono">{{ info.os }} / {{ info.arch }}</dd>
           <dt>SQLite</dt><dd class="mono">schema v{{ info.db_schema }}</dd>
-          <dt>Database</dt><dd class="mono path">{{ info.db_path }}</dd>
+          <dt>Data</dt><dd class="mono path">{{ info.data_root }}</dd>
+          <dt>Locks</dt><dd class="mono path">{{ info.locks_dir }}</dd>
           <dt>Core ready</dt><dd class="mono">{{ info.startup_ms }} ms after launch</dd>
         </dl>
         <p v-else class="muted">Loading…</p>
@@ -152,6 +257,7 @@ button {
   padding: 7px 14px; font-weight: 600; cursor: pointer;
 }
 button:disabled { opacity: 0.6; cursor: default; }
+button.quiet { background: transparent; color: var(--text-2); border: 1px solid var(--border); }
 .result { margin-top: var(--space); font-weight: 600; }
 .ok { color: var(--success); }
 .err { color: var(--danger); }
@@ -159,6 +265,20 @@ button:disabled { opacity: 0.6; cursor: default; }
   background: var(--raised); border-radius: 8px; padding: var(--space);
   max-height: 220px; overflow: auto; font-size: 12px; margin: var(--space) 0 0;
 }
+.profiles { list-style: none; margin: 0 0 var(--space); padding: 0; display: grid; gap: 6px; }
+.profiles li {
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space);
+  padding: 6px 8px; border-radius: 8px; background: var(--raised);
+}
+.profiles li.active { outline: 1px solid var(--success); }
+.call { font-weight: 650; }
+.kind, .detail { margin: 0; font-size: 12px; }
+.tag { font-size: 12px; }
+.state { display: flex; align-items: center; gap: var(--space); margin: 0; }
+.pill { padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; color: var(--text-2); }
+.pill.ready, .pill.listening, .pill.connected { color: var(--success); }
+.pill.attaching, .pill.calling, .pill.negotiating, .pill.draining, .pill.recovering { color: var(--warning); }
+.pill.faulted { color: var(--danger); }
 @media (max-width: 820px) {
   .badge { display: none; }
 }

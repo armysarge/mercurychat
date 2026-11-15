@@ -86,6 +86,10 @@ impl StationProfile {
     pub fn validate(&self) -> Result<StationProfile, Vec<FieldError>> {
         let mut errors = Vec::new();
         let mut p = self.clone();
+        // A draft from the UI has no id yet: give it one, never store "".
+        if p.id.trim().is_empty() {
+            p.id = uuid::Uuid::new_v4().to_string();
+        }
 
         // Edges are trimmed (pasted input); anything inside must be a callsign.
         match Callsign::parse(self.callsign.trim()) {
