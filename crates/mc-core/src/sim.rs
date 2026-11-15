@@ -90,9 +90,13 @@ pub async fn serve_peer(mut peer: Station, echo: bool, received: Option<mpsc::Un
             }
             std::future::pending::<()>().await
         };
-        tokio::select! {
-            _ = peer.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx) => {}
-            _ = watch => {}
+        let end = tokio::select! {
+            end = peer.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx) => end,
+            _ = watch => continue,
+        };
+        if let Err(e) = peer.end_link_after(&end, Duration::from_secs(60)).await {
+            tracing::warn!("could not end the link after {end:?}: {e}");
+            return;
         }
     }
 }

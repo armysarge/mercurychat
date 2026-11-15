@@ -384,6 +384,23 @@ impl Station {
         Ok(())
     }
 
+    /// After `run_session` returns: when the application session ended but the
+    /// link may still be up (no HELLO, a protocol or storage error, commands
+    /// closed), end the link too: a graceful DISCONNECT, then ABORT if it does
+    /// not finish within `timeout`. Otherwise the peer would sit on a live link
+    /// that no session serves. Any other end means the link is already gone.
+    pub async fn end_link_after(&mut self, end: &SessionEnd, timeout: Duration) -> Result<(), StationError> {
+        match end {
+            SessionEnd::HelloTimeout | SessionEnd::Protocol(_) | SessionEnd::CommandsClosed => {
+                match self.disconnect(timeout).await {
+                    Err(StationError::Timeout(_)) => self.abort().await,
+                    other => other,
+                }
+            }
+            _ => Ok(()),
+        }
+    }
+
     /// Abort discards queued modem data; RF may continue briefly.
     pub async fn abort(&mut self) -> Result<(), StationError> {
         self.cmd(Command::Abort).await?;
