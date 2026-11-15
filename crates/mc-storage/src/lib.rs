@@ -516,6 +516,17 @@ impl Store {
         Ok(self.conn.query_row("SELECT value FROM settings WHERE key = ?1", [key], |r| r.get(0)).optional()?)
     }
 
+    /// Every setting whose key starts with `prefix`: (key without the prefix,
+    /// value, updated_utc), in key order.
+    pub fn settings_with_prefix(&self, prefix: &str) -> Result<Vec<(String, String, String)>> {
+        let mut st = self.conn.prepare(
+            "SELECT substr(key, length(?1) + 1), value, updated_utc FROM settings
+             WHERE substr(key, 1, length(?1)) = ?1 ORDER BY key",
+        )?;
+        let rows = st.query_map([prefix], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+        Ok(rows.collect::<std::result::Result<_, _>>()?)
+    }
+
     pub fn delete_setting(&mut self, key: &str) -> Result<()> {
         self.conn.execute("DELETE FROM settings WHERE key = ?1", [key])?;
         Ok(())

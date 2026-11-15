@@ -8,13 +8,15 @@
 //! its endpoint lock (MOD-02). An occupied endpoint is reported once, with the
 //! lock's own text, and the task ends: no takeover loop.
 
+use super::chat::ChatMessage;
 use super::events::{ModemState, SessionDirection, SessionInfo};
 use crate::profile::{ModemTarget, StationProfile};
-use crate::session::{SessionEnd, SessionEvent};
+use crate::session::{SessionCommand, SessionEnd, SessionEvent};
 use crate::station::{ConnectInfo, Station, StationConfig, StationError, StationRequest};
 use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
 use mercury_adapter::{Callsign, Command, Endpoint};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -36,7 +38,11 @@ pub enum ModemCmd {
     CancelCall,
     Disconnect,
     Abort,
-    Submit { id: ObjectId },
+    /// A queued message for `peer`, to go out if the session is with them.
+    Submit {
+        peer: String,
+        id: ObjectId,
+    },
     Shutdown,
 }
 
@@ -59,6 +65,8 @@ pub enum ReportKind {
         peer: String,
         reason: String,
     },
+    /// A message changed state or arrived.
+    Message(ChatMessage),
 }
 
 /// The actor's end of one modem task. Dropping it stops the task.
@@ -112,6 +120,10 @@ impl Reporter {
 
     async fn session(&self, s: Option<SessionInfo>) {
         self.send(ReportKind::Session(s)).await;
+    }
+
+    async fn message(&self, m: ChatMessage) {
+        self.send(ReportKind::Message(m)).await;
     }
 
     async fn call_failed(&self, peer: &str, reason: String) {
@@ -378,8 +390,108 @@ fn outcome(end: &SessionEnd, aborted: bool) -> String {
     }
 }
 
+/// The application side of one link: its session record, the messages it
+/// has handed to the session, and the reports about them.
+struct Link {
+    info: ConnectInfo,
+    direction: SessionDirection,
+    generation: u64,
+    session_id: String,
+    /// A second connection to station.db: the session holds the station's own.
+    records: Option<Store>,
+    chats: mpsc::Sender<SessionCommand>,
+    submitted: HashSet<[u8; 16]>,
+    negotiated: bool,
+}
+
+impl Link {
+    fn row(&self, id: &[u8; 16]) -> Option<ChatMessage> {
+        let row = self.records.as_ref()?.message(&self.info.peer, id).ok()??;
+        Some(ChatMessage::from(&row))
+    }
+
+    async fn report(&mut self, r: &Reporter, id: &[u8; 16]) {
+        if let Some(m) = self.row(id) {
+            r.message(m).await;
+        }
+    }
+
+    /// Hand one queued message to the session, once per session. Only after
+    /// negotiation: before it, the queue is read when HELLO completes.
+    async fn submit(&mut self, r: &Reporter, id: [u8; 16]) {
+        if !self.negotiated || self.submitted.contains(&id) {
+            return;
+        }
+        let Some(mut m) = self.row(&id) else { return };
+        if m.direction != "out" || m.state != "queued" {
+            return; // never an automatic resend of anything else (CHT-03)
+        }
+        let cmd = SessionCommand::SendChat { id: ObjectId(id), text: m.body.clone() };
+        if self.chats.try_send(cmd).is_err() {
+            tracing::warn!("the session is not taking messages; {} stays queued", hex::encode(id));
+            return;
+        }
+        self.submitted.insert(id);
+        m.state = "submitting".into();
+        r.message(m).await;
+    }
+
+    async fn on_event(&mut self, r: &Reporter, ev: SessionEvent) {
+        match ev {
+            SessionEvent::Negotiated { peer_app, .. } if !self.negotiated => {
+                self.negotiated = true;
+                let since = mc_storage::now_utc();
+                if let Some(rec) = self.records.as_mut() {
+                    let row = SessionRow {
+                        id: self.session_id.clone(),
+                        peer: self.info.peer.clone(),
+                        generation: self.generation as i64,
+                        direction: match self.direction {
+                            SessionDirection::Outgoing => "out".into(),
+                            SessionDirection::Incoming => "in".into(),
+                        },
+                        started_utc: since.clone(),
+                        ended_utc: None,
+                        peer_app: Some(peer_app.clone()),
+                        outcome: None,
+                    };
+                    if let Err(e) = rec.begin_session(&row) {
+                        tracing::warn!("could not record the session: {e}");
+                    }
+                }
+                let peer = self.info.peer.clone();
+                r.state(ModemState::Connected, Some(peer.clone())).await;
+                r.session(Some(SessionInfo {
+                    peer: peer.clone(),
+                    direction: self.direction,
+                    since_utc: since,
+                    peer_app: Some(peer_app),
+                }))
+                .await;
+                // The outbox for this peer goes out in order, after HELLO.
+                let queued = match self.records.as_ref().map(|s| s.queued_for(&peer)) {
+                    Some(Ok(rows)) => rows,
+                    Some(Err(e)) => {
+                        tracing::warn!("could not read the outbox: {e}");
+                        Vec::new()
+                    }
+                    None => Vec::new(),
+                };
+                for row in queued {
+                    self.submit(r, row.wire_id).await;
+                }
+            }
+            SessionEvent::ChatSubmitted { id, .. } | SessionEvent::ChatDelivered { id, .. } => {
+                self.report(r, &id.0).await
+            }
+            SessionEvent::ChatReceived { id, duplicate: false, .. } => self.report(r, &id.0).await,
+            other => tracing::debug!(?other, "session event"),
+        }
+    }
+}
+
 /// One established link: run the MCH/1 session on it while taking the
-/// actor's Disconnect and Abort, record it, and say where to go next.
+/// actor's Disconnect, Abort and Submit, record it, and say where to go next.
 async fn link(
     st: &mut Station,
     cmds: &mut mpsc::Receiver<ModemCmd>,
@@ -388,54 +500,28 @@ async fn link(
     direction: SessionDirection,
 ) -> After {
     r.state(ModemState::Negotiating, Some(info.peer.clone())).await;
-    // A second connection for session records: the session itself holds the
-    // station's store while it runs.
-    let mut records = match Store::open(&st.cfg.data_dir.join("station.db")) {
+    let records = match Store::open(&st.cfg.data_dir.join("station.db")) {
         Ok(s) => Some(s),
         Err(e) => {
             tracing::warn!("session records unavailable: {e}");
             None
         }
     };
-    let generation = st.generation();
-    let session_id = uuid::Uuid::new_v4().to_string();
-    let mut negotiated = false;
-    let mut aborted = false;
-    let mut stop = false;
-    let (_chat_tx, mut chat_rx) = mpsc::channel(64);
+    let (chat_tx, mut chat_rx) = mpsc::channel(256);
     let (req_tx, mut req_rx) = mpsc::channel(4);
     let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
-
-    let mut on_event = |ev: SessionEvent, negotiated: &mut bool| -> Option<SessionInfo> {
-        let SessionEvent::Negotiated { peer_app, .. } = ev else {
-            tracing::debug!(?ev, "session event");
-            return None;
-        };
-        if *negotiated {
-            return None;
-        }
-        *negotiated = true;
-        let since = mc_storage::now_utc();
-        if let Some(rec) = records.as_mut() {
-            let row = SessionRow {
-                id: session_id.clone(),
-                peer: info.peer.clone(),
-                generation: generation as i64,
-                direction: match direction {
-                    SessionDirection::Outgoing => "out".into(),
-                    SessionDirection::Incoming => "in".into(),
-                },
-                started_utc: since.clone(),
-                ended_utc: None,
-                peer_app: Some(peer_app.clone()),
-                outcome: None,
-            };
-            if let Err(e) = rec.begin_session(&row) {
-                tracing::warn!("could not record the session: {e}");
-            }
-        }
-        Some(SessionInfo { peer: info.peer.clone(), direction, since_utc: since, peer_app: Some(peer_app) })
+    let mut link = Link {
+        info: info.clone(),
+        direction,
+        generation: st.generation(),
+        session_id: uuid::Uuid::new_v4().to_string(),
+        records,
+        chats: chat_tx,
+        submitted: HashSet::new(),
+        negotiated: false,
     };
+    let mut aborted = false;
+    let mut stop = false;
 
     let end = {
         let run = st.run_session(&info, &mut chat_rx, &mut req_rx, ev_tx);
@@ -443,18 +529,19 @@ async fn link(
         loop {
             tokio::select! {
                 end = &mut run => break end,
-                Some(ev) = ev_rx.recv() => {
-                    if let Some(s) = on_event(ev, &mut negotiated) {
-                        r.state(ModemState::Connected, Some(s.peer.clone())).await;
-                        r.session(Some(s)).await;
-                    }
-                }
+                Some(ev) = ev_rx.recv() => link.on_event(r, ev).await,
                 c = cmds.recv() => {
                     let wire = match c {
                         Some(ModemCmd::Disconnect) => Command::Disconnect,
                         Some(ModemCmd::Abort) => {
                             aborted = true;
                             Command::Abort
+                        }
+                        Some(ModemCmd::Submit { peer, id }) => {
+                            if peer == link.info.peer {
+                                link.submit(r, id.0).await;
+                            }
+                            continue;
                         }
                         Some(ModemCmd::Shutdown) | None => {
                             // Leaving: the modem ends the link when our sockets close.
@@ -477,21 +564,22 @@ async fn link(
         }
     };
     while let Ok(ev) = ev_rx.try_recv() {
-        if let Some(s) = on_event(ev, &mut negotiated) {
-            r.state(ModemState::Connected, Some(s.peer.clone())).await;
-            r.session(Some(s)).await;
-        }
+        link.on_event(r, ev).await;
     }
     if stop {
         return After::Stop;
+    }
+    // Whatever was in flight is now uncertain (or was confirmed): say which.
+    for id in link.submitted.clone() {
+        link.report(r, &id).await;
     }
     if aborted {
         // ABORT's single DISCONNECT frame keys after DISCONNECTED; let it out.
         st.wait_teardown_keyed(Duration::from_secs(20)).await;
     }
-    if negotiated {
-        if let Some(rec) = records.as_mut() {
-            if let Err(e) = rec.end_session(&session_id, &outcome(&end, aborted)) {
+    if link.negotiated {
+        if let Some(rec) = link.records.as_mut() {
+            if let Err(e) = rec.end_session(&link.session_id, &outcome(&end, aborted)) {
                 tracing::warn!("could not record the session end: {e}");
             }
         }

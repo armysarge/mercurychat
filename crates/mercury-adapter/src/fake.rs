@@ -26,6 +26,8 @@ struct Shared {
     st: [Station; 2],
     session: Option<(String, String)>,
     hold: bool,
+    /// Hold only what station `i` sends.
+    hold_from: [bool; 2],
     /// A CONNECT nobody answers stays pending (Mercury keeps retrying).
     unanswered_calls: bool,
     held: Vec<(usize, Vec<u8>)>,
@@ -77,6 +79,26 @@ impl FakeNet {
     /// Stop forwarding data; bytes accumulate as "in flight".
     pub fn set_hold(&self, hold: bool) {
         self.shared.lock().unwrap().hold = hold;
+    }
+
+    /// Hold only what station `from` sends (its modem keeps it).
+    pub fn set_hold_from(&self, from: usize, hold: bool) {
+        self.shared.lock().unwrap().hold_from[from] = hold;
+    }
+
+    /// How many writes are held.
+    pub fn held_len(&self) -> usize {
+        self.shared.lock().unwrap().held.len()
+    }
+
+    /// Remove and return the held writes, as (sender, bytes).
+    pub fn take_held(&self) -> Vec<(usize, Vec<u8>)> {
+        std::mem::take(&mut self.shared.lock().unwrap().held)
+    }
+
+    /// Deliver `bytes` as if station `from` had just sent them.
+    pub fn inject(&self, from: usize, bytes: Vec<u8>) {
+        deliver(&mut self.shared.lock().unwrap(), from, bytes);
     }
 
     /// Calls to an unreachable station stay pending instead of failing.
@@ -292,7 +314,7 @@ async fn data_conn(net: Arc<FakeNet>, i: usize, sock: TcpStream, mut rx: mpsc::U
         }
         let bytes = buf[..n].to_vec();
         send_line(&s, i, &format!("BUFFER {n}"));
-        if s.hold {
+        if s.hold || s.hold_from[i] {
             s.held.push((i, bytes));
         } else {
             deliver(&mut s, i, bytes);

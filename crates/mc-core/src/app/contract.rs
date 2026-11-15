@@ -2,6 +2,7 @@
 //! and gets `CommandOk` or `AppError`; it never touches sockets, files or the
 //! database directly (docs/02 §2, §7).
 
+use super::chat::{ChatMessage, Conversation};
 use super::events::{ModemState, SessionInfo};
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
@@ -59,6 +60,29 @@ pub enum AppCommand {
     Disconnect,
     /// End at once; anything not yet confirmed becomes uncertain.
     Abort,
+    /// Queue a message; it goes out when a session with `peer` is up.
+    SendChat {
+        peer: String,
+        text: String,
+    },
+    /// Send an uncertain or failed message again, under the same id.
+    RetryChat {
+        peer: String,
+        id: String,
+    },
+    /// Keep (or, with empty text, clear) the unsent draft for a peer.
+    SaveDraft {
+        peer: String,
+        text: String,
+    },
+    Conversations,
+    /// Up to `limit` (at most 200) messages before `before_seq`, oldest first.
+    History {
+        peer: String,
+        #[ts(type = "number | null")]
+        before_seq: Option<i64>,
+        limit: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -67,6 +91,9 @@ pub enum AppCommand {
 pub enum CommandOk {
     Snapshot(AppSnapshot),
     Profile(StationProfile),
+    Message(ChatMessage),
+    Conversations(Vec<Conversation>),
+    History(Vec<ChatMessage>),
     Done,
 }
 

@@ -3,6 +3,7 @@
 //! to. A bounded ring keeps the recent ones; a client asking for events older
 //! than the ring holds is told to take a snapshot, never handed a gap.
 
+use super::chat::ChatMessage;
 use serde::Serialize;
 use std::collections::VecDeque;
 use ts_rs::TS;
@@ -59,6 +60,10 @@ pub enum AppEvent {
     CallFailed {
         peer: String,
         reason: String,
+    },
+    /// A message was queued, changed state, or arrived.
+    MessageChanged {
+        message: ChatMessage,
     },
     ProfilesChanged,
     ActiveProfileChanged {
