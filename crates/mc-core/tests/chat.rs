@@ -196,7 +196,12 @@ async fn send_while_connected_reaches_delivered() {
     assert_eq!(m.id.len(), 32);
     // The queued event is on the stream too, before the modem takes it.
     let seen = states_of(&mut app.rx, &m.id, "delivered", 15).await;
-    assert_eq!(seen, ["queued", "submitting", "awaiting_receipt", "delivered"]);
+    // Each report reads the row as it is now, so under load a state can be
+    // overtaken before it is read: only forward, queued first, delivered last.
+    let order = ["queued", "submitting", "awaiting_receipt", "delivered"];
+    let rank = |s: &String| order.iter().position(|o| o == s).unwrap_or_else(|| panic!("unexpected state {s}"));
+    assert_eq!(seen.first().map(String::as_str), Some("queued"), "{seen:?}");
+    assert!(seen.windows(2).all(|w| rank(&w[0]) < rank(&w[1])), "states went backwards or repeated: {seen:?}");
     let echo = message(&mut app.rx, None, 15).await;
     assert_eq!((echo.body.as_str(), echo.peer.as_str()), ("echo: hi", PEER));
     let h = history(&app.h, PEER).await;

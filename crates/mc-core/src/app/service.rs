@@ -105,6 +105,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             stations_root,
             locks_dir: opts.locks_dir,
             radio_hello_timeout: opts.radio_hello_timeout,
+            slot: Default::default(),
         },
         reports,
         task: None,
@@ -469,8 +470,9 @@ impl App {
     /// Stop whatever modem task runs, then start the selected one. Never
     /// waits for the modem: it reports back through `on_report`.
     fn switch_modem(&mut self, target: Option<StationProfile>) {
-        // The old task is told to stop; the new one waits for it to let go.
-        let prev = self.task.take().and_then(modem::ModemHandle::stop);
+        // The old task is told to stop; the new one waits for it to let go
+        // (ModemOptions::slot).
+        self.task = None;
         self.set_session(None);
         self.chat = None;
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
@@ -484,7 +486,7 @@ impl App {
             }
         }
         let generation = self.log.generation();
-        self.task = Some(modem::spawn(p, generation, self.modem_opts.clone(), self.reports.clone(), prev));
+        self.task = Some(modem::spawn(p, generation, self.modem_opts.clone(), self.reports.clone()));
     }
 
     /// A report from a modem task. One from a task the actor has replaced

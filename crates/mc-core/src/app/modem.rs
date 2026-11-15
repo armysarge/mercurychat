@@ -18,6 +18,7 @@ use mch_protocol::ObjectId;
 use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
 
@@ -30,6 +31,10 @@ pub struct ModemOptions {
     pub locks_dir: Option<PathBuf>,
     /// HELLO wait over a real Mercury; `None` is `RADIO_HELLO_TIMEOUT`.
     pub radio_hello_timeout: Option<Duration>,
+    /// Held by a modem task for its whole life (shared by every task the actor
+    /// starts): a new task waits for every stopped predecessor to let go of
+    /// the modem, its sockets and its locks before it takes them.
+    pub slot: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What the actor asks of the modem.
@@ -75,20 +80,12 @@ pub enum ReportKind {
 pub struct ModemHandle {
     pub generation: u64,
     cmds: mpsc::Sender<ModemCmd>,
-    /// Closes when the task has ended and let go of its sockets and locks.
-    done: Option<oneshot::Receiver<()>>,
 }
 
 impl ModemHandle {
     /// Queue a command; false if the task has ended or is backed up.
     pub fn send(&self, cmd: ModemCmd) -> bool {
         self.cmds.try_send(cmd).is_ok()
-    }
-
-    /// Stop the task; the receiver closes once it has let go of the modem,
-    /// so a successor can wait for it (`spawn`'s `after`).
-    pub fn stop(mut self) -> Option<oneshot::Receiver<()>> {
-        self.done.take() // dropping self sends Shutdown
     }
 }
 
@@ -98,25 +95,18 @@ impl Drop for ModemHandle {
     }
 }
 
-/// Start a modem task. `after` is the stopped predecessor's `stop()`: the new
-/// task waits for it (bounded by HANDOVER) before it takes the modem's locks.
 pub fn spawn(
     profile: StationProfile,
     generation: u64,
     opts: ModemOptions,
     reports: mpsc::Sender<ModemReport>,
-    after: Option<oneshot::Receiver<()>>,
 ) -> ModemHandle {
     let (tx, rx) = mpsc::channel(64);
-    let (done_tx, done_rx) = oneshot::channel::<()>();
-    tokio::spawn(async move {
-        run(profile, opts, rx, Reporter { generation, tx: reports }, after).await;
-        drop(done_tx);
-    });
-    ModemHandle { generation, cmds: tx, done: Some(done_rx) }
+    tokio::spawn(run(profile, opts, rx, Reporter { generation, tx: reports }));
+    ModemHandle { generation, cmds: tx }
 }
 
-/// How long a new task waits for its stopped predecessor to let go of the
+/// How long a new task waits for its stopped predecessors to let go of the
 /// modem. A stopping task ends a call it was placing first (about 7 s).
 const HANDOVER: Duration = Duration::from_secs(30);
 
@@ -124,6 +114,10 @@ const HANDOVER: Duration = Duration::from_secs(30);
 /// session before it ends the link anyway (they then go uncertain). Abort
 /// still ends it at once.
 const RECEIPT_DRAIN: Duration = Duration::from_secs(120);
+
+/// After a hand-over, how long an attach that finds Mercury still occupied
+/// (by the predecessor's just-closed sockets) is retried.
+const HANDOVER_ATTACH: Duration = Duration::from_secs(5);
 
 /// What cut a long modem wait short.
 enum Cut {
@@ -203,24 +197,28 @@ async fn open_station(cfg: StationConfig) -> Result<Station, StationError> {
     }
 }
 
-async fn run(
-    profile: StationProfile,
-    opts: ModemOptions,
-    mut cmds: mpsc::Receiver<ModemCmd>,
-    r: Reporter,
-    after: Option<oneshot::Receiver<()>>,
-) {
-    // The task this one replaces may still hold the modem (recovering, ending
-    // a link): let it finish first, or its locks look like another instance.
-    if let Some(mut prev) = after {
-        if matches!(prev.try_recv(), Err(oneshot::error::TryRecvError::Empty)) {
+async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiver<ModemCmd>, r: Reporter) {
+    // A task this one replaces may still hold the modem (recovering, ending a
+    // link): wait for it first, or its locks look like another instance. The
+    // slot is declared first, so it is released last, after the locks.
+    let mut handed_over = false;
+    let _slot = match opts.slot.clone().try_lock_owned() {
+        Ok(slot) => slot,
+        Err(_) => {
+            handed_over = true;
             r.state(ModemState::Attaching, Some("closing the previous connection".into())).await;
             tokio::select! {
-                _ = tokio::time::timeout(HANDOVER, prev) => {}
+                slot = tokio::time::timeout(HANDOVER, opts.slot.clone().lock_owned()) => match slot {
+                    Ok(slot) => slot,
+                    Err(_) => {
+                        let s = HANDOVER.as_secs();
+                        return r.fault(format!("the previous modem connection did not close within {s} s")).await;
+                    }
+                },
                 _ = stopped(&mut cmds) => return,
             }
         }
-    }
+    };
     let Some(stations) = opts.stations_root.clone() else {
         return r.fault("no data folder for the station".into()).await;
     };
@@ -248,8 +246,24 @@ async fn run(
                 Ok(s) => s,
                 Err(e) => return r.fault(format!("station data: {e}")).await,
             };
+            // Mercury may still see the predecessor's sockets for a moment
+            // after they close: after a hand-over, "occupied" is retried briefly.
+            let patience = if handed_over { HANDOVER_ATTACH } else { Duration::ZERO };
+            let attach = async {
+                let deadline = tokio::time::Instant::now() + patience;
+                loop {
+                    match station.attach().await {
+                        Err(StationError::Attach(mercury_adapter::AttachError::Occupied { .. }))
+                            if tokio::time::Instant::now() < deadline =>
+                        {
+                            tokio::time::sleep(Duration::from_millis(100)).await
+                        }
+                        other => return other,
+                    }
+                }
+            };
             tokio::select! {
-                res = station.attach() => match res {
+                res = attach => match res {
                     Ok(()) => r.state(ModemState::Ready, unarmed).await,
                     Err(e) => return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await,
                 },

@@ -284,6 +284,35 @@ async fn reselect_while_recovering_hands_over() {
     assert_eq!(snapshot(&h).await.modem, ModemState::Ready);
 }
 
+/// Deterministic form of the above: a task stopped while calling ends the call
+/// at the modem first (about 2 s) and holds the endpoint lock meanwhile. "No
+/// station" then the same station again must still wait for it (CI found the
+/// hand-over lost across the "no station" selection).
+#[tokio::test(flavor = "multi_thread")]
+async fn reselect_while_a_call_is_cancelled_hands_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    net.set_unanswered_calls(true); // nobody answers, and Mercury keeps trying
+    let h = spawn_app(
+        Store::open_in_memory().unwrap(),
+        AppOptions { locks_dir: Some(dir.path().join("locks")), ..opts(dir.path()) },
+    );
+    let id = match h.call(AppCommand::SaveProfile { profile: existing(net.a_base) }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
+    until(&mut rx, ModemState::Ready, 15).await;
+    call(&h, "SIM1").await.unwrap();
+    until(&mut rx, ModemState::Calling, 5).await;
+
+    h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    until(&mut rx, ModemState::Ready, 15).await;
+    assert!(net.log().iter().any(|l| l == "A> ABORT"), "the stopped task ended the call at the modem");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn existing_modem_waits_for_a_slow_hello() {
     let dir = tempfile::tempdir().unwrap();
