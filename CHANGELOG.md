@@ -1,5 +1,13 @@
 # Planning changes
 
+## 0.6 — 15 November 2026 (M2 connected messaging)
+
+- Built M2 on branch `m2-chat`: one modem task per station that owns Mercury; explicit listening that is off after every start and recovery (RF-02); calls with cancel, disconnect (drain) and abort; MCH/1 negotiation that names a non-MercuryChat peer instead of failing silently; a durable outbox with per-peer quotas, drafts and paged history; end-to-end receipts only after the receiver has stored the message; duplicates shown once; untrusted peer callsigns and control lines validated and bounded.
+- A dropped link or an abort marks every unconfirmed message "uncertain" with a Retry that reuses the same ID; restart and recovery never resend on their own.
+- The chat workspace replaces the M1 test window: first-use setup, conversation list, transcript with delivery states in words, composer with a byte count, session pane, recovery banners, and drawers down to 800×480. The window draws its own title bar and thin, themed scrollbars.
+- Labs over real Mercury with PTT none: Windows app ↔ Mercury in the Linux container, and Windows ↔ Windows over VB-Audio cables, each passing attach, call, Unicode chat (sha256 equal at the peer), stop mid-message → uncertain, restart with nothing resent, and Retry delivered once. These found two bugs, both fixed with tests: the HELLO wait was too short for a real modem (now 120 s), and a late command reply could overwrite newer message states in the window.
+- CI green on Windows, Ubuntu x64 and Ubuntu arm64; clean Windows, Debian amd64 and Debian arm64 builds. Still open: the Raspberry Pi smoke test, which gates the exit of M1 and M2. Estimates unchanged. Details: docs/M2-progress.md.
+
 ## 0.5 — 15 November 2026 (M1 foundation)
 
 - Built M1's foundation on branch `m1-foundation`: one check gate (`scripts/check.sh`, also CI); data-root and endpoint locks (MOD-02); schema v2 migrations with a backup taken first; station profiles with validation; MOD-01 modem states and a typed command/event contract exported to TypeScript; daily logs kept 7 days or 25 MiB, plus crash reports; the application service actor; and an in-process simulator modem.

@@ -4,7 +4,7 @@ Open-source radio messaging for Windows and Linux, powered by the Mercury HF mod
 
 > **Early alpha: under active development.** MercuryChat is not ready for on-air use. Nothing is released, interfaces and stored data may change without notice, and it has not been tested on air.
 
-**Status:** M0 (modem-integration proof) closed 15 November 2026, with the Raspberry Pi run carried as an exception ([go/no-go note](docs/M0-go-no-go.md)); M1 (desktop foundation): the foundation is built (station profiles, migrations with backups, single-instance data locks, logs and crash reports, the typed command/event contract, and an in-process simulator modem the window runs on). M1 exits after the Raspberry Pi smoke test and the first-run UI ([M1 progress](docs/M1-progress.md)). A headless core and test client pass the M0 scenario against two real Mercury modems over crossed virtual audio; this is not yet a usable operator app. No radio transmissions have been made. Progress, evidence and open items: [docs/M0-progress.md](docs/M0-progress.md); how to reproduce: [lab/README.md](lab/README.md).
+**Status:** M0 (modem-integration proof) closed 15 November 2026, with the Raspberry Pi run carried as an exception ([go/no-go note](docs/M0-go-no-go.md)); M1 (desktop foundation): the foundation is built (station profiles, migrations with backups, single-instance data locks, logs and crash reports, the typed command/event contract, and an in-process simulator modem the window runs on). M1 exits after the Raspberry Pi smoke test ([M1 progress](docs/M1-progress.md)). M2 (connected messaging) is built on branch `m2-chat`: calls and auto-answer over a real Mercury, MCH/1 negotiation, a durable outbox with end-to-end receipts and duplicate suppression, abort and recovery that mark unconfirmed messages uncertain instead of resending them, and the chat workspace (first-use setup, conversations, transcript, composer, session pane). Messages round-trip between the Windows app and Mercury on Linux, and over virtual audio cables on Windows. It is not yet tested on air or on a Raspberry Pi. No radio transmissions have been made. Progress, evidence and open items: [docs/M0-progress.md](docs/M0-progress.md); how to reproduce: [lab/README.md](lab/README.md).
 
 ## Decisions confirmed with the owner
 
@@ -37,4 +37,4 @@ MercuryChat-to-MercuryChat interoperability is the initial target. A VARA-like h
 
 ## Immediate next milestone
 
-M1, the desktop foundation ([plan](docs/M1-plan.md)). It starts with the parts that do not depend on the UI stack. The Raspberry Pi smoke test carried from M0 must pass before M1's UI-heavy work and before M1 exits ([go/no-go note](docs/M0-go-no-go.md)).
+The Raspberry Pi smoke test carried from M0 ([go/no-go note](docs/M0-go-no-go.md)). M1 and M2 exit when it passes, and the chat workspace's layout is held until then. After that, M3: discovery and operator tools.
