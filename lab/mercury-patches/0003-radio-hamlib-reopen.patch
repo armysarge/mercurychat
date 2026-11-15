@@ -1,5 +1,5 @@
 diff --git a/.github/workflows/integration.yml b/.github/workflows/integration.yml
-index 635579e..159a2ef 100644
+index 635579e4..159a2efe 100644
 --- a/.github/workflows/integration.yml
 +++ b/.github/workflows/integration.yml
 @@ -41,6 +41,7 @@ jobs:
@@ -10,8 +10,37 @@ index 635579e..159a2ef 100644
              libssl-dev \
              openssl \
              pkg-config \
+diff --git a/host/radio_host.c b/host/radio_host.c
+index 6b6fc5a8..66b83322 100644
+--- a/host/radio_host.c
++++ b/host/radio_host.c
+@@ -77,6 +77,9 @@ void radio_io_shutdown(void)
+         radio_host_key(false);
+ }
+ 
++/* Keying is the host app's; nothing is left to retry here. */
++void radio_io_service(void) { }
++
+ bool radio_io_get_frequency(bool allow_poll, uint64_t *frequency_hz, uint64_t *age_ms)
+ {
+     (void) allow_poll;
+diff --git a/main.c b/main.c
+index 17a6ac69..7645b8c8 100644
+--- a/main.c
++++ b/main.c
+@@ -328,7 +328,10 @@ int main(int argc, char *argv[])
+     }
+ 
+     while (!mercury_stop)
++    {
++        radio_io_service();         /* e.g. a PTT OFF lost while rigctld was down */
+         msleep(500);
++    }
+ 
+     /* Diagnosis build only: the answerer never disconnects, so its trace would
+      * otherwise be lost.  No-op unless ARQ_TRACE_ENABLED. */
 diff --git a/radio_io/radio_io.c b/radio_io/radio_io.c
-index 9aa4815..d3b4a07 100644
+index 9aa4815a..8d184515 100644
 --- a/radio_io/radio_io.c
 +++ b/radio_io/radio_io.c
 @@ -297,7 +297,7 @@ static int hamlib_open(const ptt_config_t *config)
@@ -23,13 +52,19 @@ index 9aa4815..d3b4a07 100644
      int ret = rig_open(g_radio);
      /* A port without modem-control lines -- a pty from socat or ser2net, a
       * com0com pair, some Bluetooth serial links -- refuses the ioctl, and
-@@ -356,13 +356,65 @@ static int hamlib_open(const ptt_config_t *config)
+@@ -356,31 +356,132 @@ static int hamlib_open(const ptt_config_t *config)
   * byte -- ~60 ms more key-up for an Icom CI-V echo + ack (seen as 23 -> 134
   * ms get_level in hermes-radio-daemon).  So errno is cleared before every
   * Hamlib call that talks to the radio: open, keying, frequency poll, close. */
+-static int hamlib_set(bool on)
 +static int hamlib_ptt(bool on)
-+{
-+    errno = 0;
+ {
+-    if (!g_radio)
+-        return -1;
+     errno = 0;
+-    int ret = rig_set_ptt(g_radio, RIG_VFO_CURR,
+-                          on ? RIG_PTT_ON : RIG_PTT_OFF);
+-    if (ret != RIG_OK)
 +    return rig_set_ptt(g_radio, RIG_VFO_CURR, on ? RIG_PTT_ON : RIG_PTT_OFF);
 +}
 +
@@ -39,64 +74,125 @@ index 9aa4815..d3b4a07 100644
 + * and a PTT OFF that fails leaves a rig keyed that Mercury can no longer
 + * release.  Reopen the session from the same config and retry the one call.
 + * Serial rigs are left alone: their open can take seconds and a USB fd handed
-+ * over by the UI cannot be opened twice.  At most one attempt every
-+ * HAMLIB_REOPEN_INTERVAL_MS, since an unreachable server costs a connect
-+ * timeout on the keying path.  Caller holds g_radio_mutex. */
++ * over by the UI cannot be opened twice.  Key-ups (and the idle retry below)
++ * make at most one attempt every HAMLIB_REOPEN_INTERVAL_MS, since an
++ * unreachable server costs a connect timeout on the keying path.  An unkey is
++ * not paced: a late unkey costs a carrier left on air, and a refused connect
++ * to a local server is immediate.  Caller holds g_radio_mutex. */
 +#define HAMLIB_REOPEN_INTERVAL_MS 3000U
 +static uint64_t g_hamlib_reopen_ms = 0;
 +
-+static bool hamlib_reopen(void)
++/* Set when a PTT OFF could not be delivered, cleared when any PTT change
++ * reaches the rig.  While it is set, radio_io_service() (main loop) and the
++ * UI's frequency poll retry the OFF every FREQUENCY_POLL_INTERVAL_MS, so a rig
++ * keyed when its server went away is released once the server is back, not
++ * at the next transmission. */
++static bool g_hamlib_off_pending = false;
++static uint64_t g_hamlib_off_retry_ms = 0;  /* last failed OFF or retry */
++
++static bool hamlib_reopen(bool paced)
 +{
 +    if (radio_io_port_kind(g_config.hamlib_model) != RADIO_PORT_KIND_NETWORK)
 +        return false;
 +    uint64_t now = hermes_uptime_ms();
-+    if (g_hamlib_reopen_ms != 0 && now - g_hamlib_reopen_ms < HAMLIB_REOPEN_INTERVAL_MS)
++    if (paced && g_hamlib_reopen_ms != 0 &&
++        now - g_hamlib_reopen_ms < HAMLIB_REOPEN_INTERVAL_MS)
 +        return false;
 +    g_hamlib_reopen_ms = now;
 +
 +    HLOGW(RADIO_LOG_TAG, "Hamlib session to %s lost; reopening",
 +          g_config.device[0] ? g_config.device : "default");
 +    if (g_radio)
-+    {
+     {
+-        char err[512];
+-        HLOGW(RADIO_LOG_TAG, "PTT %s failed (Hamlib model %d): %s",
+-              on ? "ON" : "OFF", g_config.hamlib_model,
+-              rig_err_text(rigerror(ret), err, sizeof err));
+-        return -1;
 +        errno = 0;                  /* see hamlib_ptt */
 +        rig_close(g_radio);
 +        rig_cleanup(g_radio);
 +        g_radio = NULL;
-+    }
+     }
+-    HLOGD(RADIO_LOG_TAG, "PTT %s via Hamlib (model %d)",
+-          on ? "ON" : "OFF", g_config.hamlib_model);
+-    return 0;
 +    if (hamlib_open(&g_config) != 0)
 +    {
 +        HLOGW(RADIO_LOG_TAG, "Hamlib reopen failed; next attempt at the next "
-+              "PTT change at least %u ms from now", HAMLIB_REOPEN_INTERVAL_MS);
++              "PTT change, or within %u ms while a PTT OFF is pending",
++              FREQUENCY_POLL_INTERVAL_MS);
 +        return false;
 +    }
 +    HLOGI(RADIO_LOG_TAG, "Hamlib session reopened");
 +    return true;
 +}
 +
- static int hamlib_set(bool on)
- {
-+    /* NULL here only after a failed reopen: keep trying, at the same pace. */
-+    bool reopened = !g_radio && hamlib_reopen();
-     if (!g_radio)
++/* Send one PTT change, reopening a dead network session once.  `paced`
++ * holds the reopen to HAMLIB_REOPEN_INTERVAL_MS. */
++static int hamlib_send(bool on, bool paced)
++{
++    /* NULL here only after a failed reopen: keep trying. */
++    bool reopened = !g_radio && hamlib_reopen(paced);
++    int ret = -1;
++    if (!g_radio)
 +    {
 +        HLOGW(RADIO_LOG_TAG, "PTT %s not sent: no Hamlib session (reopen pending)",
 +              on ? "ON" : "OFF");
-         return -1;
--    errno = 0;
--    int ret = rig_set_ptt(g_radio, RIG_VFO_CURR,
--                          on ? RIG_PTT_ON : RIG_PTT_OFF);
 +    }
-+    int ret = hamlib_ptt(on);
-+    if (ret == -RIG_EIO && !reopened && hamlib_reopen())
++    else
++    {
 +        ret = hamlib_ptt(on);
-     if (ret != RIG_OK)
-     {
-         char err[512];
-@@ -378,9 +430,10 @@ static int hamlib_set(bool on)
++        if (ret == -RIG_EIO && !reopened && hamlib_reopen(paced))
++            ret = hamlib_ptt(on);
++        if (ret != RIG_OK)
++        {
++            char err[512];
++            HLOGW(RADIO_LOG_TAG, "PTT %s failed (Hamlib model %d): %s",
++                  on ? "ON" : "OFF", g_config.hamlib_model,
++                  rig_err_text(rigerror(ret), err, sizeof err));
++        }
++    }
++    if (ret == RIG_OK)
++    {
++        g_hamlib_off_pending = false;   /* the rig's PTT is known again */
++        HLOGD(RADIO_LOG_TAG, "PTT %s via Hamlib (model %d)",
++              on ? "ON" : "OFF", g_config.hamlib_model);
++        return 0;
++    }
++    if (!on)
++    {
++        g_hamlib_off_pending = true;
++        g_hamlib_off_retry_ms = hermes_uptime_ms();
++    }
++    return -1;
++}
++
++static int hamlib_set(bool on)
++{
++    return hamlib_send(on, on);         /* only key-ups are paced */
++}
++
++/* Retry an undelivered PTT OFF, paced like a key-up.  Never while keyed: a
++ * transmission's own OFF supersedes it.  Only hamlib_send sets the flag and
++ * hamlib_close clears it, so it is never set under another backend.  Caller
++ * holds g_radio_mutex. */
++static void hamlib_retry_pending_off(uint64_t now)
++{
++    if (!g_hamlib_off_pending || g_ptt_active)
++        return;
++    if (now - g_hamlib_off_retry_ms < FREQUENCY_POLL_INTERVAL_MS)
++        return;
++    g_hamlib_off_retry_ms = now;
++    if (hamlib_send(false, true) == 0)
++        HLOGI(RADIO_LOG_TAG, "Pending PTT OFF delivered: the rig is released");
+ }
  
  static void hamlib_close(void)
  {
 +    g_hamlib_reopen_ms = 0;         /* a new backend starts with no history */
++    g_hamlib_off_pending = false;
++    g_hamlib_off_retry_ms = 0;
      if (!g_radio)
          return;
 -    errno = 0;                      /* see hamlib_set */
@@ -104,7 +200,36 @@ index 9aa4815..d3b4a07 100644
      (void)rig_set_ptt(g_radio, RIG_VFO_CURR, RIG_PTT_OFF);
      errno = 0;                      /* ...which Hamlib's own reads may set */
      rig_close(g_radio);
-@@ -801,7 +854,7 @@ bool radio_io_get_frequency(bool allow_poll, uint64_t *frequency_hz,
+@@ -772,6 +873,19 @@ void radio_io_report_frequency(uint64_t frequency_hz)
+     atomic_store_explicit(&g_frequency_valid, frequency_hz != 0, memory_order_release);
+ }
+ 
++/* Idle housekeeping, called every few hundred ms by the main loop: retries a
++ * PTT OFF that could not be delivered (hamlib_retry_pending_off).  trylock, so
++ * it never waits behind keying. */
++void radio_io_service(void)
++{
++#ifdef HAVE_HAMLIB
++    if (pthread_mutex_trylock(&g_radio_mutex) != 0)
++        return;
++    hamlib_retry_pending_off(hermes_uptime_ms());
++    pthread_mutex_unlock(&g_radio_mutex);
++#endif
++}
++
+ bool radio_io_get_frequency(bool allow_poll, uint64_t *frequency_hz,
+                             uint64_t *age_ms)
+ {
+@@ -795,13 +909,16 @@ bool radio_io_get_frequency(bool allow_poll, uint64_t *frequency_hz,
+                     now - g_frequency_attempt_ms >= FREQUENCY_POLL_INTERVAL_MS;
+     bool post_ptt_quiet =
+         now - g_last_ptt_off_ms < FREQUENCY_POST_PTT_QUIET_MS;
++    /* A lost PTT OFF comes first: it releases the rig, and its reopen is
++     * also what brings back the session the read below needs. */
++    hamlib_retry_pending_off(now);
+     if (allow_poll && poll_due && !g_ptt_active && !post_ptt_quiet &&
+         g_backend == &HAMLIB_BACKEND && g_radio)
+     {
          freq_t freq = 0;
          uint64_t started_ms = now;
          g_frequency_attempt_ms = now;
@@ -113,12 +238,27 @@ index 9aa4815..d3b4a07 100644
          int ret = rig_get_freq(g_radio, RIG_VFO_CURR, &freq);
          if (ret != RIG_OK)
          {
+diff --git a/radio_io/radio_io.h b/radio_io/radio_io.h
+index 648913b8..c28f69d9 100644
+--- a/radio_io/radio_io.h
++++ b/radio_io/radio_io.h
+@@ -90,6 +90,10 @@ int radio_io_key_on(void);
+ /* Key transmitter off (PTT OFF). Returns 0 on success, -1 on failure. */
+ int radio_io_key_off(void);
+ 
++/* Idle housekeeping for the main loop: retries a PTT OFF that could not be
++ * delivered (a network rig whose server was down).  Never blocks. */
++void radio_io_service(void);
++
+ /* List all hamlib-supported radio models and exit. */
+ void radio_io_list_models(void);
+ 
 diff --git a/tests/integration/mercury_rigctld_restart_test.go b/tests/integration/mercury_rigctld_restart_test.go
 new file mode 100644
-index 0000000..4a63576
+index 00000000..e2df63e3
 --- /dev/null
 +++ b/tests/integration/mercury_rigctld_restart_test.go
-@@ -0,0 +1,189 @@
+@@ -0,0 +1,248 @@
 +package integration
 +
 +import (
@@ -143,7 +283,29 @@ index 0000000..4a63576
 +// Needs rigctld (Debian: libhamlib-utils) and a Mercury built with Hamlib;
 +// skipped otherwise.  The rig is Hamlib's dummy (model 1) with PTT, so no
 +// radio is involved; audio is the null backend.
-+func TestHamlibSessionSurvivesRigctldRestart(t *testing.T) {
++
++// rigLab is one Mercury keying a dummy rig through a rigctld that the test
++// can stop and start on the same port, plus the broadcast port to make it
++// transmit.
++type rigLab struct {
++	t        *testing.T
++	ctx      context.Context
++	dir      string
++	rigctld  string
++	rigPort  int
++	logPath  string
++	frameLen int
++	rig      *exec.Cmd
++	proc     *processWait
++	bcast    net.Conn
++	stdout   string
++	stderr   string
++}
++
++// newRigLab starts rigctld and Mercury in modem mode `mode` (-m), whose
++// broadcast frames carry frameLen bytes.
++func newRigLab(t *testing.T, mode, frameLen int) *rigLab {
++	t.Helper()
 +	rigctld, err := exec.LookPath("rigctld")
 +	if err != nil {
 +		t.Skip("rigctld not installed (Debian: libhamlib-utils)")
@@ -155,70 +317,36 @@ index 0000000..4a63576
 +	}
 +
 +	ctx, cancel := context.WithCancel(context.Background())
-+	defer cancel()
++	t.Cleanup(cancel)
 +	dir := t.TempDir()
-+	rigPort := freePort(t)
++	l := &rigLab{t: t, ctx: ctx, dir: dir, rigctld: rigctld, rigPort: freePort(t),
++		logPath: filepath.Join(dir, "mercury.log"), frameLen: frameLen}
++	l.startRig()
++	t.Cleanup(l.stopRig)
++
 +	port := freePortPair(t)
-+	logPath := filepath.Join(dir, "mercury.log")
-+
-+	// rigctld on a fixed port, so a restart is the same server to Mercury.
-+	var rig *exec.Cmd
-+	startRig := func() {
-+		t.Helper()
-+		f, err := os.OpenFile(filepath.Join(dir, "rigctld.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
-+		if err != nil {
-+			t.Fatal(err)
-+		}
-+		defer f.Close()
-+		rig = exec.CommandContext(ctx, rigctld, "-m", "1", "-P", "RIG", "-T", "127.0.0.1", "-t", fmt.Sprint(rigPort))
-+		rig.Stdout, rig.Stderr = f, f
-+		if err := rig.Start(); err != nil {
-+			t.Fatalf("start rigctld: %v", err)
-+		}
-+		for i := 0; i < 50; i++ {
-+			if c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", rigPort), 200*time.Millisecond); err == nil {
-+				c.Close()
-+				return
-+			}
-+			time.Sleep(100 * time.Millisecond)
-+		}
-+		t.Fatal("rigctld did not listen")
-+	}
-+	stopRig := func() {
-+		_ = rig.Process.Kill()
-+		_ = rig.Wait()
-+	}
-+	startRig()
-+	defer stopRig()
-+
 +	stdout, stderr := tempLogFilesNamed(t, "rig")
++	l.stdout, l.stderr = stdout.Name(), stderr.Name()
 +	cmd := exec.CommandContext(ctx, bin,
 +		"-x", "null",
 +		"-p", fmt.Sprint(port), "-b", fmt.Sprint(port+100),
-+		"-m", "1", "-v", // DATAC3
-+		"-R", "2", "-A", fmt.Sprintf("127.0.0.1:%d", rigPort),
-+		"-L", logPath,
++		"-m", fmt.Sprint(mode), "-v",
++		"-R", "2", "-A", fmt.Sprintf("127.0.0.1:%d", l.rigPort),
++		"-L", l.logPath,
 +		"-C", filepath.Join(dir, "missing-mercury.ini"))
 +	cmd.Dir = repoRoot
 +	cmd.Stdout, cmd.Stderr = stdout, stderr
 +	if err := startChild(cmd); err != nil {
 +		t.Fatalf("start mercury: %v", err)
 +	}
-+	proc := waitForProcess(cmd)
-+	defer func() { _ = stopProcess(t, cmd, proc, stdout.Name(), stderr.Name()) }()
++	l.proc = waitForProcess(cmd)
++	t.Cleanup(func() { _ = stopProcess(t, cmd, l.proc, l.stdout, l.stderr) })
 +
-+	fail := func(format string, args ...interface{}) {
-+		t.Helper()
-+		t.Logf("mercury.log:\n%s", readLog(t, logPath))
-+		printLogs(t, stdout.Name(), stderr.Name())
-+		t.Fatalf(format, args...)
-+	}
-+
-+	ctl, err := waitForTCP(ctx, "127.0.0.1", port, controlPortTimeout, proc)
++	ctl, err := waitForTCP(ctx, "127.0.0.1", port, controlPortTimeout, l.proc)
 +	if err != nil {
-+		fail("control port: %v", err)
++		l.fail("control port: %v", err)
 +	}
-+	defer ctl.Close()
++	t.Cleanup(func() { ctl.Close() })
 +	go func() { // the host side: keep the PTT ON/OFF lines flowing
 +		buf := make([]byte, 1024)
 +		for {
@@ -227,84 +355,155 @@ index 0000000..4a63576
 +			}
 +		}
 +	}()
-+	bcast, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port+100), 5*time.Second)
++	l.bcast, err = net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", port+100), 5*time.Second)
 +	if err != nil {
-+		fail("broadcast port: %v", err)
++		l.fail("broadcast port: %v", err)
 +	}
-+	defer bcast.Close()
++	t.Cleanup(func() { l.bcast.Close() })
++	return l
++}
 +
-+	count := func(s string) int { return strings.Count(readLog(t, logPath), s) }
-+	// One broadcast frame keys and unkeys the rig once.
-+	transmit := func(what string, wantOn, wantOff int) {
-+		t.Helper()
-+		f := make([]byte, 126) // DATAC3
-+		f[0] = bcastDataHeader
-+		copy(f[1:], what)
-+		if _, err := bcast.Write(kissEncode(kissCmdModemFrame, f)); err != nil {
-+			fail("%s: write frame: %v", what, err)
-+		}
-+		deadline := time.Now().Add(30 * time.Second)
-+		for time.Now().Before(deadline) {
-+			select {
-+			case <-proc.done:
-+				fail("%s: mercury exited: %v", what, proc.err)
-+			default:
-+			}
-+			if count("PTT ON via Hamlib") >= wantOn && count("PTT OFF via Hamlib") >= wantOff {
-+				return
-+			}
-+			time.Sleep(100 * time.Millisecond)
-+		}
-+		fail("%s: rig keyed %d/%d and released %d/%d times (PTT ON failed %d, PTT OFF failed %d)",
-+			what, count("PTT ON via Hamlib"), wantOn, count("PTT OFF via Hamlib"), wantOff,
-+			count("PTT ON failed"), count("PTT OFF failed"))
++// startRig runs rigctld on a fixed port, so a restart is the same server to Mercury.
++func (l *rigLab) startRig() {
++	l.t.Helper()
++	f, err := os.OpenFile(filepath.Join(l.dir, "rigctld.log"), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
++	if err != nil {
++		l.t.Fatal(err)
 +	}
++	defer f.Close()
++	l.rig = exec.CommandContext(l.ctx, l.rigctld, "-m", "1", "-P", "RIG", "-T", "127.0.0.1", "-t", fmt.Sprint(l.rigPort))
++	l.rig.Stdout, l.rig.Stderr = f, f
++	if err := l.rig.Start(); err != nil {
++		l.t.Fatalf("start rigctld: %v", err)
++	}
++	for i := 0; i < 50; i++ {
++		if c, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", l.rigPort), 200*time.Millisecond); err == nil {
++			c.Close()
++			return
++		}
++		time.Sleep(100 * time.Millisecond)
++	}
++	l.t.Fatal("rigctld did not listen")
++}
 +
-+	transmit("before the restart", 1, 1)
++func (l *rigLab) stopRig() {
++	_ = l.rig.Process.Kill()
++	_ = l.rig.Wait()
++}
++
++func (l *rigLab) fail(format string, args ...interface{}) {
++	l.t.Helper()
++	l.t.Logf("mercury.log:\n%s", readLog(l.t, l.logPath))
++	printLogs(l.t, l.stdout, l.stderr)
++	l.t.Fatalf(format, args...)
++}
++
++func (l *rigLab) count(s string) int { return strings.Count(readLog(l.t, l.logPath), s) }
++
++// send queues one broadcast frame: Mercury keys, modulates and unkeys once.
++func (l *rigLab) send(what string) {
++	l.t.Helper()
++	f := make([]byte, l.frameLen)
++	f[0] = bcastDataHeader
++	copy(f[1:], what)
++	if _, err := l.bcast.Write(kissEncode(kissCmdModemFrame, f)); err != nil {
++		l.fail("%s: write frame: %v", what, err)
++	}
++}
++
++// waitFor polls the log until cond holds or 30 s pass.
++func (l *rigLab) waitFor(what string, cond func() bool) {
++	l.t.Helper()
++	deadline := time.Now().Add(30 * time.Second)
++	for time.Now().Before(deadline) {
++		select {
++		case <-l.proc.done:
++			l.fail("%s: mercury exited: %v", what, l.proc.err)
++		default:
++		}
++		if cond() {
++			return
++		}
++		time.Sleep(100 * time.Millisecond)
++	}
++	l.fail("%s: timed out (rig keyed %d, released %d; PTT ON failed %d, PTT OFF failed %d, not sent %d)",
++		what, l.count("PTT ON via Hamlib"), l.count("PTT OFF via Hamlib"),
++		l.count("PTT ON failed"), l.count("PTT OFF failed"), l.count("not sent"))
++}
++
++// transmit sends one frame and waits until the rig was keyed wantOn and
++// released wantOff times in all.
++func (l *rigLab) transmit(what string, wantOn, wantOff int) {
++	l.t.Helper()
++	l.send(what)
++	l.waitFor(what, func() bool {
++		return l.count("PTT ON via Hamlib") >= wantOn && l.count("PTT OFF via Hamlib") >= wantOff
++	})
++}
++
++func (l *rigLab) logRadioLines() {
++	for _, line := range strings.Split(readLog(l.t, l.logPath), "\n") {
++		if strings.Contains(line, "[radio-io]") &&
++			(strings.Contains(line, "Hamlib session") || strings.Contains(line, "reopen") ||
++				strings.Contains(line, "failed") || strings.Contains(line, "not sent") ||
++				strings.Contains(line, "Pending")) {
++			l.t.Log(strings.TrimSpace(line))
++		}
++	}
++}
++
++func TestHamlibSessionSurvivesRigctldRestart(t *testing.T) {
++	l := newRigLab(t, 1, 126) // DATAC3
++	defer l.logRadioLines()
++
++	l.transmit("before the restart", 1, 1)
 +
 +	// rigctld restarts while Mercury is idle: the next key-up finds the
 +	// session dead, reopens it and keys.
-+	stopRig()
-+	startRig()
-+	transmit("after a rigctld restart", 2, 2)
-+	if count("Hamlib session reopened") < 1 {
-+		fail("no reopen logged")
++	l.stopRig()
++	l.startRig()
++	l.transmit("after a rigctld restart", 2, 2)
++	if l.count("Hamlib session reopened") < 1 {
++		l.fail("no reopen logged")
 +	}
 +
-+	// rigctld is down when Mercury keys: the reopen fails, Mercury stays up,
-+	// and once rigctld is back (past the reopen interval) keying resumes.
-+	stopRig()
-+	f := make([]byte, 126)
-+	f[0] = bcastDataHeader
-+	copy(f[1:], "while rigctld is down")
-+	if _, err := bcast.Write(kissEncode(kissCmdModemFrame, f)); err != nil {
-+		fail("write frame: %v", err)
-+	}
-+	deadline := time.Now().Add(30 * time.Second)
-+	for count("Hamlib reopen failed") < 1 && time.Now().Before(deadline) {
-+		time.Sleep(100 * time.Millisecond)
-+	}
-+	if count("Hamlib reopen failed") < 1 {
-+		fail("keying with rigctld down did not try a reopen")
-+	}
++	// rigctld is down when Mercury keys: the reopen fails and Mercury stays up.
++	l.stopRig()
++	l.send("while rigctld is down")
++	l.waitFor("a reopen with rigctld down", func() bool { return l.count("Hamlib reopen failed") >= 1 })
 +	// The PTT OFF that follows finds no session; that must be said, not lost.
-+	for count("PTT OFF not sent") < 1 && time.Now().Before(deadline) {
-+		time.Sleep(100 * time.Millisecond)
++	l.waitFor("the PTT OFF with no session", func() bool { return l.count("PTT OFF not sent") >= 1 })
++
++	// ...and not forgotten: once rigctld is back, the idle poll reopens the
++	// session and releases the rig, with no new transmission.
++	offs := l.count("PTT OFF via Hamlib")
++	l.startRig()
++	l.waitFor("the pending PTT OFF", func() bool { return l.count("Pending PTT OFF delivered") >= 1 })
++	if l.count("PTT OFF via Hamlib") <= offs {
++		l.fail("the pending PTT OFF was reported delivered but not sent")
 +	}
-+	if count("PTT OFF not sent") < 1 {
-+		fail("a PTT OFF with no Hamlib session was not logged")
++
++	// Keying resumes on the session the poll reopened.
++	l.transmit("after rigctld came back", 3, offs+2)
++	if n := l.count("Hamlib session reopened"); n < 2 {
++		l.fail("reopened %d times, want 2", n)
 +	}
-+	startRig()
-+	time.Sleep(4 * time.Second) // HAMLIB_REOPEN_INTERVAL_MS is 3 s
-+	transmit("after rigctld came back", 3, 3)
-+	if n := count("Hamlib session reopened"); n < 2 {
-+		fail("reopened %d times, want 2", n)
-+	}
-+	for _, l := range strings.Split(readLog(t, logPath), "\n") {
-+		if strings.Contains(l, "[radio-io]") &&
-+			(strings.Contains(l, "Hamlib session") || strings.Contains(l, "reopen") ||
-+				strings.Contains(l, "failed") || strings.Contains(l, "not sent")) {
-+			t.Log(strings.TrimSpace(l))
-+		}
++}
++
++// A key-up that finds rigctld down tries a reopen and fails.  The unkey that
++// follows a short frame comes well inside HAMLIB_REOPEN_INTERVAL_MS; it must
++// make its own attempt rather than be dropped by the pace that limits
++// key-ups, since a late unkey costs a carrier left on air.
++func TestHamlibPttOffIsNotPaced(t *testing.T) {
++	l := newRigLab(t, 2, 14) // DATAC0: ~1.1 s on air, against the 3 s pace
++	defer l.logRadioLines()
++
++	l.transmit("session up", 1, 1)
++	l.stopRig()
++	l.send("while rigctld is down")
++	l.waitFor("the key-up's reopen", func() bool { return l.count("Hamlib reopen failed") >= 1 })
++	l.waitFor("the unkey", func() bool { return l.count("PTT OFF not sent")+l.count("PTT OFF failed") >= 1 })
++	if n := l.count("Hamlib reopen failed"); n < 2 {
++		l.fail("the PTT OFF was dropped by the reopen pace (%d failed reopens, want 2: key-up and unkey)", n)
 +	}
 +}

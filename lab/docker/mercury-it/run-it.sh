@@ -5,7 +5,7 @@
 #
 # Builds two trees: /base (the branch's merge base with upstream mercuryv2,
 # i.e. without the change) and /fix (the working tree as mounted, committed or
-# not). Runs the named unit tests on /fix, then the Go integration test(s) on
+# not; BASE=<commit> picks another "before", e.g. the PR head). Runs the named unit tests on /fix, then the Go integration test(s) on
 # both, so a test that exercises the fault is seen to fail before and pass
 # after. Results go to /out.
 set -uo pipefail
@@ -15,7 +15,7 @@ OUT=${OUT:-/out}
 mkdir -p "$OUT"
 git config --global --add safe.directory '*'
 
-base=$(git -C /src merge-base HEAD "$(git -C /src rev-parse --verify -q upstream/mercuryv2 || echo origin/mercuryv2)")
+base=${BASE:-$(git -C /src merge-base HEAD "$(git -C /src rev-parse --verify -q upstream/mercuryv2 || echo origin/mercuryv2)")}
 echo "base=$base" | tee "$OUT/summary.txt"
 
 git clone -q /src /base && git -C /base checkout -q "$base"
