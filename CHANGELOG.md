@@ -1,5 +1,12 @@
 # Planning changes
 
+## 0.5 — 15 November 2026 (M1 foundation)
+
+- Built M1's foundation on branch `m1-foundation`: one check gate (`scripts/check.sh`, also CI); data-root and endpoint locks (MOD-02); schema v2 migrations with a backup taken first; station profiles with validation; MOD-01 modem states and a typed command/event contract exported to TypeScript; daily logs kept 7 days or 25 MiB, plus crash reports; the application service actor; and an in-process simulator modem.
+- The desktop window now uses only typed commands (`app_call`, `events_since`, the `mc://event` stream) with an explicit command allowlist. A second instance on the same data root shows why it can't start. The selected profile, and its simulator, come back after a restart. All three were checked in the real window by `lab/windows/m1-ui-check.mjs`.
+- The amd64 `.deb` installs and runs on bare Ubuntu 24.04. Windows, Linux amd64 and Linux arm64 packages build from the branch.
+- Still open before M1 exits: the Raspberry Pi smoke test, then the first-run wizard, navigation and themes (Task 11). Estimates unchanged. Details: docs/M1-progress.md.
+
 ## 0.4 — 15 November 2026 (M1 started)
 
 - Closed M0 with the Raspberry Pi run as an exception: go for M1 on Tauri/Vue/Rust, on condition that the Pi smoke test passes before M1's UI work. Re-estimated to 14–21.5 developer-weeks (12–18.5 to go). See docs/M0-go-no-go.md.
