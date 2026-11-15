@@ -95,7 +95,15 @@ impl Station {
         std::fs::create_dir_all(cfg.data_dir.join("files")).ok();
         // MOD-02: the data root is ours alone before the store is opened.
         let lock = crate::lock::lock_data_root(&cfg.data_dir)?;
-        let store = Store::open(&cfg.data_dir.join("station.db"))?;
+        let mut store = Store::open(&cfg.data_dir.join("station.db"))?;
+        // A previous run may have ended mid-session (crash, kill, power):
+        // anything that may have reached the modem is uncertain, never resent
+        // on its own. Messages never handed to a session stay queued.
+        let n = store.mark_in_flight_uncertain()?;
+        if n > 0 {
+            store.log_event("recovery", &format!("start-up: {n} message(s) marked uncertain"))?;
+        }
+        store.mark_transfers_interrupted()?;
         Ok(Station {
             cfg,
             store,
