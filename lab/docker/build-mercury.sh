@@ -16,6 +16,15 @@ for t in "${targets[@]}"; do
   # Clone (not copy): the Windows checkout has CRLF endings that break the build
   # scripts, and a clone pins exactly the recorded commit.
   cd / && rm -rf /build && git clone -q /src /build && git -C /build checkout -q "$commit" && cd /build
+  # Optional MercuryChat patches (mounted at /patches): applied in order to the
+  # pinned commit; each one is recorded in the manifest.
+  applied=""
+  if [ -d /patches ] && ls /patches/*.patch >/dev/null 2>&1; then
+    for p in /patches/*.patch; do
+      git apply --whitespace=nowarn "$p"
+      applied="$applied $(basename "$p")@$(sha256sum "$p" | cut -c1-12)"
+    done
+  fi
   make clean >/dev/null 2>&1 || true
   case "$t" in
     linux-amd64)
@@ -48,6 +57,7 @@ for t in "${targets[@]}"; do
     echo "target=$t"
     echo "mercury_commit=$commit"
     echo "tracked_changes=$dirty"
+    echo "patches=${applied:- none}"
     echo "compiler=$($cc --version | head -1)"
     echo "file=$(file -b "$out_bin")"
     echo "sha256=$(sha256sum "$out_bin" | cut -d' ' -f1)"

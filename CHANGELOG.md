@@ -8,6 +8,7 @@
 - Raspberry Pi kit prepared; Pi gate still open. Details: docs/M0-progress.md.
 - Reviewed owner-supplied VarAC screenshots as a workflow checklist (docs/04 §8); owner decided Core includes rig control through one shared rigctld (D13). Dummy-rig lab 14/14.
 - Windows virtual-cable lab over VB-Audio Cable A/B: M0 scenario 17/17 at BW2300 and BW500; desktop shell alongside both modems with no measurable effect.
+- Closed Mercury's listener exposure with upstream PR #565 (`bind_address`): loopback-only binding proven, LAN refused, scenario 17/17; patch mechanism in `lab/mercury-patches/`.
 - Proved CQ and MCB/1 beacons over Mercury's broadcast plane (11/11): KISS codec, MCB/1 encoder/strict decoder with golden vectors, idle-only and capacity-limited broadcast gate.
 
 ## 0.2 — 14 November 2026

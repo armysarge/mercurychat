@@ -1,0 +1,339 @@
+diff --git a/common/cfg_utils.c b/common/cfg_utils.c
+index ce9aa963..33990c58 100644
+--- a/common/cfg_utils.c
++++ b/common/cfg_utils.c
+@@ -36,6 +36,7 @@ void cfg_set_defaults(mercury_config *cfg)
+ {
+     cfg->ui_enabled         = false;
+     cfg->ui_port            = UI_DEFAULT_PORT;       /* 10000  */
++    cfg->bind_address[0]    = '\0';                  /* all interfaces */
+     cfg->tls_enabled        = false;                 /* ws     */
+     snprintf(cfg->tls_cert, sizeof(cfg->tls_cert), "%s", CFG_SSL_CERT);
+     snprintf(cfg->tls_key,  sizeof(cfg->tls_key),  "%s", CFG_SSL_KEY);
+@@ -248,6 +249,10 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
+     i = iniparser_getint(ini, CFG_KEY_UI_PORT, cfg->ui_port);
+     cfg->ui_port = (uint16_t) i;
+ 
++    s = iniparser_getstring(ini, CFG_KEY_BIND_ADDRESS, NULL);
++    if (s)
++        snprintf(cfg->bind_address, sizeof(cfg->bind_address), "%s", s);
++
+     s = iniparser_getstring(ini, CFG_KEY_UI_PROTOCOL, cfg->tls_enabled ? "wss" : "ws");
+     cfg->tls_enabled = (s && !strcmp(s, "wss"));
+ 
+@@ -560,6 +565,8 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
+     fprintf(f, "[main]\n");
+     fprintf(f, "ui_enabled = %s\n",      cfg->ui_enabled ? "true" : "false");
+     fprintf(f, "ui_port = %d\n",          cfg->ui_port);
++    if (cfg->bind_address[0])       /* unset reads back as all interfaces */
++        fprintf(f, "bind_address = %s\n", cfg->bind_address);
+     fprintf(f, "ui_protocol = %s\n",      cfg->tls_enabled ? "wss" : "ws");
+     fprintf(f, "ui_tls_cert = %s\n",      cfg->tls_cert);
+     fprintf(f, "ui_tls_key = %s\n",       cfg->tls_key);
+diff --git a/common/cfg_utils.h b/common/cfg_utils.h
+index a02b85d3..ac351db7 100644
+--- a/common/cfg_utils.h
++++ b/common/cfg_utils.h
+@@ -28,6 +28,7 @@
+ /* Configuration keys (section:key) */
+ #define CFG_KEY_UI_ENABLED          "main:ui_enabled"
+ #define CFG_KEY_UI_PORT             "main:ui_port"
++#define CFG_KEY_BIND_ADDRESS        "main:bind_address"
+ #define CFG_KEY_UI_PROTOCOL         "main:ui_protocol"
+ #define CFG_KEY_UI_TLS_CERT         "main:ui_tls_cert"
+ #define CFG_KEY_UI_TLS_KEY          "main:ui_tls_key"
+@@ -99,6 +100,8 @@
+ typedef struct {
+     bool     ui_enabled;
+     uint16_t ui_port;
++    char     bind_address[64];      /* IPv4 address the UI, TNC and broadcast
++                                     * listeners bind to; "" = all interfaces */
+     bool     tls_enabled;           /* false = ws, true = wss */
+     char     tls_cert[512];         /* PEM certificate chain, wss only */
+     char     tls_key[512];          /* PEM private key, wss only */
+diff --git a/common/mercury_engine.c b/common/mercury_engine.c
+index 09a1f829..9218cd23 100644
+--- a/common/mercury_engine.c
++++ b/common/mercury_engine.c
+@@ -352,8 +352,15 @@ int mercury_engine_init(const mercury_config *cfg,
+     broadcast_run(&g_modem);
+ 
+     /* ---- TCP interfaces ---- */
+-    HLOGI("engine", "Initialising TCP interfaces (arq=%d, bc=%d)", base_tcp_port, broadcast_port);
+-    if (interfaces_init(base_tcp_port, broadcast_port,
++    HLOGI("engine", "Initialising TCP interfaces (arq=%d, bc=%d, bind=%s)", base_tcp_port,
++          broadcast_port, cfg->bind_address[0] ? cfg->bind_address : "all interfaces");
++    /* A bad address fails closed: falling back to every interface would
++     * expose the TNC the operator meant to keep local. */
++    bool bind_ok = interfaces_set_bind_address(cfg->bind_address) == 0;
++    if (!bind_ok)
++        HLOGE("engine", "bind_address \"%s\" is not an IPv4 address", cfg->bind_address);
++    if (!bind_ok ||
++        interfaces_init(base_tcp_port, broadcast_port,
+                         g_modem.payload_bytes_per_modem_frame) != EXIT_SUCCESS)
+     {
+         fprintf(stderr, "mercury_engine: TCP init failed\n");
+diff --git a/data_interfaces/tcp_interfaces.c b/data_interfaces/tcp_interfaces.c
+index adb0ca99..852d9558 100644
+--- a/data_interfaces/tcp_interfaces.c
++++ b/data_interfaces/tcp_interfaces.c
+@@ -259,6 +259,24 @@ static int set_nonblocking(int fd)
+     return sock_set_nonblocking(fd);
+ }
+ 
++/* Network byte order; INADDR_ANY until interfaces_set_bind_address says else. */
++static uint32_t listen_addr_cfg = INADDR_ANY;
++
++int interfaces_set_bind_address(const char *addr)
++{
++    struct in_addr a;
++
++    if (addr == NULL || addr[0] == '\0')
++    {
++        listen_addr_cfg = htonl(INADDR_ANY);
++        return 0;
++    }
++    if (inet_pton(AF_INET, addr, &a) != 1)
++        return -1;
++    listen_addr_cfg = a.s_addr;
++    return 0;
++}
++
+ static int open_listener_socket(int port, int port_type, const char *tag)
+ {
+     int fd;
+@@ -277,11 +295,14 @@ static int open_listener_socket(int port, int port_type, const char *tag)
+ 
+     memset(&local_addr, 0, sizeof(local_addr));
+     local_addr.sin_family = AF_INET;
+-    local_addr.sin_addr.s_addr = INADDR_ANY;
++    local_addr.sin_addr.s_addr = listen_addr_cfg;
+     local_addr.sin_port = htons(port);
+ 
+     if (bind(fd, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0)
+     {
++        char ip[INET_ADDRSTRLEN] = "?";
++        inet_ntop(AF_INET, &local_addr.sin_addr, ip, sizeof(ip));
++        HLOGE(tag, "bind %s:%d failed: %s", ip, port, strerror(errno));
+         SOCK_CLOSE(fd);
+         return -1;
+     }
+@@ -2005,7 +2026,7 @@ void *tcp_server_thread(void *port_ptr)
+ 
+     memset(&local_addr, 0, sizeof(local_addr));
+     local_addr.sin_family = AF_INET;
+-    local_addr.sin_addr.s_addr = INADDR_ANY;
++    local_addr.sin_addr.s_addr = listen_addr_cfg;
+     local_addr.sin_port = htons(tcp_port);
+ 
+     if (bind(tcp_socket, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0)
+diff --git a/data_interfaces/tcp_interfaces.h b/data_interfaces/tcp_interfaces.h
+index 45bab859..d923447c 100644
+--- a/data_interfaces/tcp_interfaces.h
++++ b/data_interfaces/tcp_interfaces.h
+@@ -32,6 +32,11 @@
+ 
+ int interfaces_init(int arq_tcp_base_port, int broadcast_tcp_port, size_t broadcast_frame_size);
+ 
++/* IPv4 address the ARQ and broadcast listeners bind to, set before
++ * interfaces_init.  NULL or "" means every interface (the default).
++ * Returns -1, changing nothing, when addr is not an IPv4 address. */
++int interfaces_set_bind_address(const char *addr);
++
+ /* Re-frame the broadcast TCP plane after a listen-mode change.  The connected
+  * client (the server serves one at a time) picks the new size up on its next
+  * frame; its buffers are sized for the largest selectable frame, so no
+diff --git a/gui_interface/ui_communication.c b/gui_interface/ui_communication.c
+index bdd48942..0b0ed35e 100644
+--- a/gui_interface/ui_communication.c
++++ b/gui_interface/ui_communication.c
+@@ -1095,6 +1095,7 @@ int ui_comm_init(ui_ctx_t *ctx, uint16_t ws_port, bool tls_enabled,
+     // connect callback is registered before the server thread starts to avoid
+     // a race on aarch64 where the callback ptr and data could be seen
+     // out-of-order by the server thread.
++    ui_transport_set_bind_address(initial_cfg ? initial_cfg->bind_address : NULL);
+     if (ui_transport_init(ws_port, tls_enabled,
+                           initial_cfg ? initial_cfg->tls_cert : CFG_SSL_CERT,
+                           initial_cfg ? initial_cfg->tls_key  : CFG_SSL_KEY,
+diff --git a/gui_interface/ui_transport.h b/gui_interface/ui_transport.h
+index e3c5aff7..557989d3 100644
+--- a/gui_interface/ui_transport.h
++++ b/gui_interface/ui_transport.h
+@@ -35,6 +35,11 @@ typedef int (*ui_transport_command_fn)(const ws_command_t *cmd, void *user);
+  * gets once (device lists, radio list, history). */
+ typedef void (*ui_transport_connect_fn)(void *user);
+ 
++/* IPv4 address a listening transport binds to, set before ui_transport_init.
++ * NULL or "" means every interface; a transport that does not listen ignores
++ * it. */
++void ui_transport_set_bind_address(const char *addr);
++
+ /* Start the transport.  port and the TLS settings are the standalone
+  * server's; a transport that does not listen ignores them.  Both callbacks
+  * are registered before any client can be seen.  Returns 0 on success. */
+diff --git a/gui_interface/websocket/mercury_websocket.c b/gui_interface/websocket/mercury_websocket.c
+index ca3b5947..17b88d1e 100644
+--- a/gui_interface/websocket/mercury_websocket.c
++++ b/gui_interface/websocket/mercury_websocket.c
+@@ -109,6 +109,13 @@ static void on_ws_message(ws_conn_t *c, const void *data, size_t len,
+ 
+ /* ---- public API ---- */
+ 
++static char s_bind_addr[64];    /* "" = every interface */
++
++void ui_transport_set_bind_address(const char *addr)
++{
++    snprintf(s_bind_addr, sizeof(s_bind_addr), "%s", addr ? addr : "");
++}
++
+ int ui_transport_init(uint16_t port, bool tls_enabled,
+                       const char *tls_cert_path, const char *tls_key_path,
+                       ui_transport_command_fn on_command,
+@@ -118,7 +125,8 @@ int ui_transport_init(uint16_t port, bool tls_enabled,
+     char listen_url[128];
+ 
+     snprintf(listen_url, sizeof(listen_url),
+-             "%s://0.0.0.0:%u", tls_enabled ? "wss" : "ws", (unsigned) port);
++             "%s://%s:%u", tls_enabled ? "wss" : "ws",
++             s_bind_addr[0] ? s_bind_addr : "0.0.0.0", (unsigned) port);
+ 
+     /* Registered before the thread starts so a client that connects
+      * immediately cannot race ahead of the callback pointers. */
+@@ -128,7 +136,7 @@ int ui_transport_init(uint16_t port, bool tls_enabled,
+ 
+     memset(&opts, 0, sizeof(opts));
+     opts.port = port;
+-    opts.bind_addr = NULL;                      /* 0.0.0.0, as before */
++    opts.bind_addr = s_bind_addr;               /* "" = 0.0.0.0, as before */
+     opts.ws_path = "/websocket";
+     opts.max_message_size = UI_MAX_MESSAGE_SIZE;
+     opts.tls_enabled = tls_enabled;
+diff --git a/host/ui_host.c b/host/ui_host.c
+index e444e1dd..b78da88c 100644
+--- a/host/ui_host.c
++++ b/host/ui_host.c
+@@ -32,6 +32,8 @@ void mercury_host_set_ui(const mercury_host_ui_ops *ops)
+     pthread_mutex_unlock(&s_lock);
+ }
+ 
++void ui_transport_set_bind_address(const char *addr) { (void) addr; }
++
+ int ui_transport_init(uint16_t port, bool tls_enabled,
+                       const char *tls_cert_path, const char *tls_key_path,
+                       ui_transport_command_fn on_command,
+diff --git a/mercury.1 b/mercury.1
+index e0ca521e..e73050b6 100644
+--- a/mercury.1
++++ b/mercury.1
+@@ -367,6 +367,7 @@ Key	Default	Description
+ _
+ ui_enabled	false	Enable WebSocket UI server
+ ui_port	10000	WebSocket port
++bind_address	(all)	IPv4 address the UI, TNC and broadcast ports listen on
+ ui_protocol	ws	ws (plain) or wss (TLS)
+ ui_tls_cert	/etc/ssl/...	PEM certificate for wss
+ ui_tls_key	/etc/ssl/...	PEM private key for wss
+diff --git a/mercury.ini.example b/mercury.ini.example
+index e1383da6..6a0dfba1 100644
+--- a/mercury.ini.example
++++ b/mercury.ini.example
+@@ -17,6 +17,15 @@ ui_enabled = false
+ ; UI WebSocket port (default: 10000)
+ ui_port = 10000
+ 
++; IPv4 address the UI, ARQ TNC (arq_tcp_base_port and +1) and broadcast TCP
++; ports listen on.  Unset means every interface: anything that can reach this
++; machine can then drive the TNC and the UI, which includes keying the
++; transmitter.  127.0.0.1 keeps all of them on this machine; set a LAN address
++; to serve a remote UI, or BPQ32/Pat running on another host.  A LAN address
++; must already be up when Mercury starts (under systemd, order the unit
++; After=network-online.target), or the listeners fail to open.
++;bind_address = 127.0.0.1
++
+ ; WebSocket protocol: ws (plain) or wss (TLS) (default: ws)
+ ; wss needs a build with OpenSSL, which is used wherever the system provides
+ ; it.  Builds without it refuse wss at startup and say so.
+diff --git a/tests/common/test_cfg_utils.c b/tests/common/test_cfg_utils.c
+index be810135..7f3240fd 100644
+--- a/tests/common/test_cfg_utils.c
++++ b/tests/common/test_cfg_utils.c
+@@ -97,6 +97,23 @@ void test_arq_tunables_roundtrip(void)
+     TEST_ASSERT_EQUAL_STRING("Speakers \"A\" (3- USB Audio CODEC )", r.output_device_name);
+ }
+ 
++/* bind_address round-trips; left unset it is not written and reads as "". */
++void test_bind_address_roundtrips_and_defaults_to_all_interfaces(void)
++{
++    mercury_config w, r;
++    cfg_set_defaults(&w);
++    TEST_ASSERT_TRUE(cfg_write(&w, TMP));
++    cfg_set_defaults(&r);
++    TEST_ASSERT_TRUE(cfg_read(&r, TMP));
++    TEST_ASSERT_EQUAL_STRING("", r.bind_address);
++
++    snprintf(w.bind_address, sizeof(w.bind_address), "127.0.0.1");
++    TEST_ASSERT_TRUE(cfg_write(&w, TMP));
++    cfg_set_defaults(&r);
++    TEST_ASSERT_TRUE(cfg_read(&r, TMP));
++    TEST_ASSERT_EQUAL_STRING("127.0.0.1", r.bind_address);
++}
++
+ /* A config from before the names reads as before: no names, ids unchanged. */
+ void test_config_without_device_names_reads_as_before(void)
+ {
+@@ -573,5 +590,6 @@ int main(void)
+     RUN_TEST(test_invalid_line_and_invert_are_rejected);
+     RUN_TEST(test_cm108_report_encoding);
+     RUN_TEST(test_cm108_linux_device_path_validation);
++    RUN_TEST(test_bind_address_roundtrips_and_defaults_to_all_interfaces);
+     return UNITY_END();
+ }
+diff --git a/tests/data_interfaces/test_tcp_interfaces.c b/tests/data_interfaces/test_tcp_interfaces.c
+index c03551de..472918c0 100644
+--- a/tests/data_interfaces/test_tcp_interfaces.c
++++ b/tests/data_interfaces/test_tcp_interfaces.c
+@@ -2287,6 +2287,25 @@ void test_host_tnc_command_runs_a_control_line(void)
+     TEST_ASSERT_EQUAL_INT(1, captured_cmd_count);
+ }
+ 
++/* bind_address: an IPv4 literal is taken; anything else is refused without
++ * touching the current address, so a typo can never widen it to every
++ * interface; "" goes back to every interface. */
++void test_bind_address_accepts_ipv4_and_refuses_the_rest(void)
++{
++    TEST_ASSERT_EQUAL_INT(0, interfaces_set_bind_address("127.0.0.1"));
++    TEST_ASSERT_EQUAL_UINT32(htonl(INADDR_LOOPBACK), listen_addr_cfg);
++
++    TEST_ASSERT_EQUAL_INT(-1, interfaces_set_bind_address("localhost"));
++    TEST_ASSERT_EQUAL_INT(-1, interfaces_set_bind_address("::1"));
++    TEST_ASSERT_EQUAL_INT(-1, interfaces_set_bind_address("127.0.0.1 "));
++    TEST_ASSERT_EQUAL_UINT32(htonl(INADDR_LOOPBACK), listen_addr_cfg);
++
++    TEST_ASSERT_EQUAL_INT(0, interfaces_set_bind_address(""));
++    TEST_ASSERT_EQUAL_UINT32(htonl(INADDR_ANY), listen_addr_cfg);
++    TEST_ASSERT_EQUAL_INT(0, interfaces_set_bind_address(NULL));
++    TEST_ASSERT_EQUAL_UINT32(htonl(INADDR_ANY), listen_addr_cfg);
++}
++
+ void test_host_tnc_release_is_a_client_leaving_once(void)
+ {
+     mock_net_status[CTL_TCP_PORT] = NET_LISTENING;
+@@ -2421,5 +2440,6 @@ int main(void)
+     RUN_TEST(test_host_tnc_command_busy_while_a_tcp_client_is_attached);
+     RUN_TEST(test_host_tnc_command_runs_a_control_line);
+     RUN_TEST(test_host_tnc_release_is_a_client_leaving_once);
++    RUN_TEST(test_bind_address_accepts_ipv4_and_refuses_the_rest);
+     return UNITY_END();
+ }
+diff --git a/tests/gui_interface/test_ui_ptt_persist.c b/tests/gui_interface/test_ui_ptt_persist.c
+index 932e90ea..d29fed96 100644
+--- a/tests/gui_interface/test_ui_ptt_persist.c
++++ b/tests/gui_interface/test_ui_ptt_persist.c
+@@ -131,6 +131,7 @@ int  ui_status_to_json(const ui_status_t *st, char *buf, size_t buflen)
+ int  ui_transport_broadcast_binary(const void *data, size_t len)
+ { (void)data; (void)len; return 0; }
+ int  ui_transport_broadcast_json(const char *json) { (void)json; return 0; }
++void ui_transport_set_bind_address(const char *addr) { (void)addr; }
+ int  ui_transport_init(uint16_t port, bool tls_enabled, const char *tls_cert_path,
+                        const char *tls_key_path, ui_transport_command_fn on_command,
+                        ui_transport_connect_fn on_connect, void *user)

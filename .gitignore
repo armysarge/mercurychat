@@ -9,5 +9,6 @@ node_modules/
 /src-tauri/gen/
 # Lab build products and run data (manifests/hashes are recorded in docs/M0-progress.md)
 /lab/bin/
+/lab/bin-patched/
 /lab/run/
 /lab/pi-kit/

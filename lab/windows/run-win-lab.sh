@@ -17,7 +17,11 @@ CB_IN=${CB_IN:-'{0.0.0.00000000}.{964afa2f-cfaa-4fca-90ad-66241370063e}'}   # CA
 CB_OUT=${CB_OUT:-'{0.0.1.00000000}.{22742773-d4c6-4f25-bdd3-686ec5e365cb}'} # CABLE-B Output
 mkdir -p "$OUT/a" "$OUT/b"
 
-for s in a b; do printf '[store]\nenabled = false\n' > "$OUT/$s/mercury.ini"; done
+# BIND=127.0.0.1 keeps every listener on loopback (needs a Mercury with the
+# bind_address setting, upstream PR #565; see lab/mercury-patches).
+for s in a b; do
+  { [ -n "${BIND:-}" ] && printf '[main]\nbind_address = %s\n' "$BIND"; printf '[store]\nenabled = false\n'; } > "$OUT/$s/mercury.ini"
+done
 
 {
   echo "lab_started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
