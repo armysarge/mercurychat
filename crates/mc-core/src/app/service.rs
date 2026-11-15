@@ -5,7 +5,7 @@
 
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, Since};
-use super::modem::{self, ModemHandle, ModemOptions, ModemReport, ReportKind};
+use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use mc_storage::{StorageError, Store};
 use std::path::PathBuf;
@@ -138,6 +138,10 @@ struct App {
     pending: Option<Option<StationProfile>>,
 }
 
+fn conflict(message: String) -> AppError {
+    AppError::Conflict { message }
+}
+
 fn storage(e: StorageError) -> AppError {
     AppError::Storage { message: e.to_string() }
 }
@@ -179,6 +183,20 @@ impl App {
                     self.log.bump_generation();
                     self.emit(AppEvent::ActiveProfileChanged { id: None });
                     self.pending = Some(None);
+                }
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SetListen { on } => {
+                if !matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+                    let state = format!("{:?}", self.modem).to_lowercase();
+                    return Err(conflict(format!("the modem is {state}: listening can be changed once it is ready")));
+                }
+                let Some(mut p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+                p.listen_preferred = on;
+                self.store.save_profile(&to_row(&p)).map_err(storage)?;
+                self.emit(AppEvent::ProfilesChanged);
+                if !self.task.as_ref().is_some_and(|t| t.send(ModemCmd::SetListen(on))) {
+                    return Err(conflict("the modem is not accepting commands".into()));
                 }
                 Ok(CommandOk::Done)
             }
@@ -259,12 +277,15 @@ impl App {
         // A setting naming a profile that no longer exists reads as none.
         let active =
             self.store.setting(ACTIVE_PROFILE).map_err(storage)?.filter(|id| profiles.iter().any(|p| &p.id == id));
+        let listen_preferred =
+            active.as_ref().and_then(|id| profiles.iter().find(|p| &p.id == id)).is_some_and(|p| p.listen_preferred);
         Ok(AppSnapshot {
             seq: self.log.last_seq(),
             generation: self.log.generation(),
             modem: self.modem,
             modem_detail: self.modem_detail.clone(),
             profiles,
+            listen_preferred,
             active_profile_id: active,
         })
     }

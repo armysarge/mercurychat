@@ -58,7 +58,6 @@ pub struct ModemHandle {
 
 impl ModemHandle {
     /// Queue a command; false if the task has ended or is backed up.
-    #[allow(dead_code)] // first used by listening (M2 Task 4)
     pub fn send(&self, cmd: ModemCmd) -> bool {
         self.cmds.try_send(cmd).is_ok()
     }
@@ -129,6 +128,8 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
         return r.fault("no data folder for the station".into()).await;
     };
     let station_dir = stations.join(&profile.id);
+    // RF-02: a stored preference is shown, never applied by itself.
+    let unarmed = profile.listen_preferred.then(|| UNARMED.to_string());
     let call = match Callsign::parse(&profile.callsign) {
         Ok(c) => c,
         Err(e) => return r.fault(format!("callsign: {e}")).await,
@@ -150,19 +151,26 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
             };
             tokio::select! {
                 res = station.attach() => match res {
-                    Ok(()) => r.state(ModemState::Ready, None).await,
+                    Ok(()) => r.state(ModemState::Ready, unarmed).await,
                     Err(e) => return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await,
                 },
                 _ = stopped(&mut cmds) => return,
             }
-            serve(station, cmds).await;
+            let mut station = station;
+            serve(&mut station, cmds, &r).await;
         }
-        ModemTarget::Simulator => simulator(&station_dir, call, cmds, r).await,
+        ModemTarget::Simulator => simulator(&station_dir, call, unarmed, cmds, r).await,
     }
 }
 
 #[cfg(feature = "sim")]
-async fn simulator(station_dir: &Path, call: Callsign, mut cmds: mpsc::Receiver<ModemCmd>, r: Reporter) {
+async fn simulator(
+    station_dir: &Path,
+    call: Callsign,
+    unarmed: Option<String>,
+    mut cmds: mpsc::Receiver<ModemCmd>,
+    r: Reporter,
+) {
     r.state(ModemState::Attaching, None).await;
     let peer_dir = station_dir.join("sim-peer");
     let start = async {
@@ -185,28 +193,40 @@ async fn simulator(station_dir: &Path, call: Callsign, mut cmds: mpsc::Receiver<
         },
         _ = stopped(&mut cmds) => return,
     };
-    r.state(ModemState::Ready, Some("simulator".into())).await;
-    serve_sim(sim, cmds).await;
+    let detail = match unarmed {
+        Some(u) => format!("simulator; {u}"),
+        None => "simulator".into(),
+    };
+    r.state(ModemState::Ready, Some(detail)).await;
+    let mut sim = sim;
+    serve(&mut sim.station, cmds, &r).await;
 }
 
 #[cfg(not(feature = "sim"))]
-async fn simulator(_dir: &Path, _call: Callsign, _cmds: mpsc::Receiver<ModemCmd>, r: Reporter) {
+async fn simulator(
+    _dir: &Path,
+    _call: Callsign,
+    _unarmed: Option<String>,
+    _cmds: mpsc::Receiver<ModemCmd>,
+    r: Reporter,
+) {
     r.fault("the simulator is not part of this build".into()).await;
 }
 
-/// The attached modem: holds the station (and its locks) until stopped.
-/// Listening, calls and sessions are added by later M2 tasks.
-async fn serve(station: Station, cmds: mpsc::Receiver<ModemCmd>) {
-    stay(cmds).await;
-    drop(station);
-}
+/// Shown on Ready when the profile prefers listening but it is not armed.
+const UNARMED: &str = "listening is off until you turn it on";
 
-#[cfg(feature = "sim")]
-async fn serve_sim(sim: crate::sim::SimModem, cmds: mpsc::Receiver<ModemCmd>) {
-    stay(cmds).await;
-    drop(sim);
-}
-
-async fn stay(mut cmds: mpsc::Receiver<ModemCmd>) {
-    stopped(&mut cmds).await;
+/// The attached modem: holds the station (and so its locks) and carries out
+/// the actor's commands until stopped. Calls and sessions come in Task 5.
+async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporter) {
+    while let Some(cmd) = cmds.recv().await {
+        match cmd {
+            ModemCmd::Shutdown => return,
+            ModemCmd::SetListen(on) => match st.set_listen(on).await {
+                Ok(()) => r.state(if on { ModemState::Listening } else { ModemState::Ready }, None).await,
+                Err(e) => r.fault(format!("LISTEN {}: {e}", if on { "ON" } else { "OFF" })).await,
+            },
+            other => tracing::debug!(?other, "modem command not handled yet"),
+        }
+    }
 }

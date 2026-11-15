@@ -20,6 +20,9 @@ pub struct AppSnapshot {
     pub modem_detail: Option<String>,
     pub profiles: Vec<StationProfile>,
     pub active_profile_id: Option<String>,
+    /// The active profile's stored listen preference (RF-02): shown, never
+    /// applied by itself on start-up or recovery.
+    pub listen_preferred: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -27,10 +30,23 @@ pub struct AppSnapshot {
 #[ts(export)]
 pub enum AppCommand {
     Snapshot,
-    ValidateProfile { profile: StationProfile },
-    SaveProfile { profile: StationProfile },
-    DeleteProfile { id: String },
-    SelectProfile { id: Option<String> },
+    ValidateProfile {
+        profile: StationProfile,
+    },
+    SaveProfile {
+        profile: StationProfile,
+    },
+    DeleteProfile {
+        id: String,
+    },
+    SelectProfile {
+        id: Option<String>,
+    },
+    /// Turn listening (automatic answers to incoming calls) on or off, and
+    /// remember the choice on the active profile.
+    SetListen {
+        on: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -56,4 +72,7 @@ pub enum AppError {
     Storage { message: String },
     #[error("{message}")]
     Internal { message: String },
+    /// The request does not fit the current state (e.g. no modem attached).
+    #[error("{message}")]
+    Conflict { message: String },
 }

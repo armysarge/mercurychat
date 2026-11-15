@@ -6,4 +6,9 @@ export type AppSnapshot = { seq: number, generation: number, modem: ModemState,
 /**
  * Why the modem is in its state (a fault's reason), as last reported.
  */
-modemDetail: string | null, profiles: Array<StationProfile>, activeProfileId: string | null, };
+modemDetail: string | null, profiles: Array<StationProfile>, activeProfileId: string | null, 
+/**
+ * The active profile's stored listen preference (RF-02): shown, never
+ * applied by itself on start-up or recovery.
+ */
+listenPreferred: boolean, };
