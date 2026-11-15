@@ -125,7 +125,7 @@ async fn connect(app: &mut App) {
 
 async fn history(h: &AppHandle, peer: &str) -> Vec<ChatMessage> {
     match h.call(AppCommand::History { peer: peer.into(), before_seq: None, limit: 200 }).await.unwrap() {
-        CommandOk::History(v) => v,
+        CommandOk::History { messages } => messages,
         other => panic!("{other:?}"),
     }
 }
@@ -395,6 +395,23 @@ async fn duplicate_incoming_shows_once() {
     assert_eq!(h.iter().filter(|m| m.direction == "in").count(), 1);
 }
 
+/// Every chat reply crosses the IPC boundary as tagged JSON (docs/02 section 2).
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_replies_serialize_for_the_window() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = sim(dir.path()).await;
+    let m = send(&app.h, PEER, "json").await.unwrap();
+    let replies = [
+        CommandOk::Message(m),
+        app.h.call(AppCommand::Conversations).await.unwrap(),
+        app.h.call(AppCommand::History { peer: PEER.into(), before_seq: None, limit: 10 }).await.unwrap(),
+    ];
+    for r in replies {
+        let v = serde_json::to_value(&r).unwrap_or_else(|e| panic!("{r:?} does not serialize: {e}"));
+        assert!(v.get("type").is_some(), "{v}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn draft_survives_restart_and_is_never_sent() {
     let dir = tempfile::tempdir().unwrap();
@@ -408,7 +425,7 @@ async fn draft_survives_restart_and_is_never_sent() {
     tokio::time::sleep(Duration::from_millis(300)).await;
     let mut app = start(&db, dir.path(), None).await;
     let convs = match app.h.call(AppCommand::Conversations).await.unwrap() {
-        CommandOk::Conversations(c) => c,
+        CommandOk::Conversations { conversations } => conversations,
         other => panic!("{other:?}"),
     };
     let c = convs.iter().find(|c| c.peer == PEER).expect("the draft's conversation");
@@ -420,7 +437,7 @@ async fn draft_survives_restart_and_is_never_sent() {
     // An empty draft clears it.
     app.h.call(AppCommand::SaveDraft { peer: PEER.into(), text: String::new() }).await.unwrap();
     let convs = match app.h.call(AppCommand::Conversations).await.unwrap() {
-        CommandOk::Conversations(c) => c,
+        CommandOk::Conversations { conversations } => conversations,
         other => panic!("{other:?}"),
     };
     assert!(convs.iter().all(|c| c.draft.is_none()));

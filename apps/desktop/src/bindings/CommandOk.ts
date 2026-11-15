@@ -4,4 +4,4 @@ import type { ChatMessage } from "./ChatMessage";
 import type { Conversation } from "./Conversation";
 import type { StationProfile } from "./StationProfile";
 
-export type CommandOk = { "type": "snapshot" } & AppSnapshot | { "type": "profile" } & StationProfile | { "type": "message" } & ChatMessage | { "type": "conversations" } & Array<Conversation> | { "type": "history" } & Array<ChatMessage> | { "type": "done" };
+export type CommandOk = { "type": "snapshot" } & AppSnapshot | { "type": "profile" } & StationProfile | { "type": "message" } & ChatMessage | { "type": "conversations", conversations: Array<Conversation>, } | { "type": "history", messages: Array<ChatMessage>, } | { "type": "done" };

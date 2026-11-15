@@ -92,8 +92,8 @@ pub enum CommandOk {
     Snapshot(AppSnapshot),
     Profile(StationProfile),
     Message(ChatMessage),
-    Conversations(Vec<Conversation>),
-    History(Vec<ChatMessage>),
+    Conversations { conversations: Vec<Conversation> },
+    History { messages: Vec<ChatMessage> },
     Done,
 }
 

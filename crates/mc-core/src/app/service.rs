@@ -338,7 +338,7 @@ impl App {
                     draft: Some(text),
                 }));
                 list.sort_by(|a, b| b.last_utc.cmp(&a.last_utc));
-                Ok(CommandOk::Conversations(list))
+                Ok(CommandOk::Conversations { conversations: list })
             }
             AppCommand::History { peer, before_seq, limit } => {
                 let peer = parse_peer(&peer)?;
@@ -346,7 +346,7 @@ impl App {
                     .chat_store()?
                     .history(&peer, before_seq, limit.clamp(1, chat::HISTORY_PAGE))
                     .map_err(storage)?;
-                Ok(CommandOk::History(rows.iter().map(ChatMessage::from).collect()))
+                Ok(CommandOk::History { messages: rows.iter().map(ChatMessage::from).collect() })
             }
             AppCommand::SelectProfile { id } => {
                 let target = match &id {

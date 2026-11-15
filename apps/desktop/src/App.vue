@@ -1,9 +1,12 @@
 <script setup lang="ts">
 // M1 foundation: station profiles, the simulator modem and its state, all
-// through typed commands (api.ts). Not yet the operator interface (M2+).
+// through typed commands (api.ts), plus the thin M2 chat test panel. Not yet
+// the operator interface (docs/04 section 2).
 import { invoke } from "@tauri-apps/api/core";
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
+import type { ChatMessage } from "./bindings/ChatMessage";
+import type { Conversation } from "./bindings/Conversation";
 import type { StationProfile } from "./bindings/StationProfile";
 
 interface AppInfo {
@@ -36,12 +39,133 @@ const probing = ref(false);
 const probe = ref<ProbeResult | null>(null);
 const pingMs = ref<number[]>([]);
 const now = ref(new Date());
-const mirror = new Mirror((v) => (view.value = v));
+const mirror = new Mirror((v) => (view.value = v), { message: onMessage, resynced: () => void reloadChat() });
 let clock: ReturnType<typeof setInterval> | undefined;
 
 const profiles = computed(() => view.value?.snapshot.profiles ?? []);
 const activeId = computed(() => view.value?.snapshot.activeProfileId ?? null);
 const modemState = computed(() => view.value?.snapshot.modem.type ?? "unavailable");
+
+// ---- M2 chat test panel ----
+const MAX_BYTES = 4096; // CHT-01
+const peer = ref("SIM1"); // the call box, and the conversation shown
+const conversations = ref<Conversation[]>([]);
+const messages = ref<ChatMessage[]>([]);
+const composer = ref("");
+const chatError = ref("");
+let firstLoad = true;
+let draftTimer: ReturnType<typeof setTimeout> | undefined;
+let convTimer: ReturnType<typeof setTimeout> | undefined;
+
+const openPeer = computed(() => peer.value.trim().toUpperCase());
+const textBytes = computed(() => new TextEncoder().encode(composer.value).length);
+const listening = computed(() => modemState.value === "listening");
+const canCall = computed(() => modemState.value === "ready" || listening.value);
+const inSession = computed(() => modemState.value === "negotiating" || modemState.value === "connected");
+const canAbort = computed(() => inSession.value || modemState.value === "calling" || modemState.value === "draining");
+const recovering = computed(() => modemState.value === "recovering" || modemState.value === "faulted");
+
+const STATE_WORDS: Record<string, string> = {
+  queued: "queued",
+  submitting: "submitting",
+  awaiting_receipt: "awaiting receipt",
+  delivered: "delivered",
+  failed: "failed",
+  uncertain: "uncertain",
+  received: "received",
+};
+const stateWord = (s: string) => STATE_WORDS[s] ?? s;
+const msgTime = (m: ChatMessage) => (m.receivedUtc ?? m.createdUtc).slice(11, 19) + "Z";
+
+function onMessage(m: ChatMessage) {
+  if (m.peer === openPeer.value) {
+    const i = messages.value.findIndex((x) => x.id === m.id && x.direction === m.direction);
+    if (i >= 0) messages.value[i] = m;
+    else {
+      messages.value.push(m);
+      messages.value.sort((a, b) => a.seq - b.seq);
+    }
+  }
+  clearTimeout(convTimer);
+  convTimer = setTimeout(() => void loadConversations().catch(() => {}), 300);
+}
+
+async function loadConversations() {
+  const r = await call({ type: "conversations" });
+  if (r.type === "conversations") conversations.value = r.conversations;
+}
+
+/** The open conversation's history and draft. */
+async function loadPeer() {
+  chatError.value = "";
+  messages.value = [];
+  if (!activeId.value || !openPeer.value) return;
+  try {
+    const h = await call({ type: "history", peer: openPeer.value, beforeSeq: null, limit: 200 });
+    if (h.type === "history") messages.value = h.messages;
+    composer.value = conversations.value.find((c) => c.peer === openPeer.value)?.draft ?? "";
+  } catch (e) {
+    chatError.value = describeError(e);
+  }
+}
+
+async function reloadChat() {
+  if (!activeId.value) {
+    conversations.value = [];
+    messages.value = [];
+    return;
+  }
+  try {
+    await loadConversations();
+    if (firstLoad && conversations.value.length) peer.value = conversations.value[0].peer;
+    firstLoad = false;
+    await loadPeer();
+  } catch (e) {
+    chatError.value = describeError(e);
+  }
+}
+watch(activeId, () => void reloadChat());
+
+// The draft is kept (debounced) for the peer it was typed for; never sent.
+watch(composer, (text) => {
+  const forPeer = openPeer.value;
+  clearTimeout(draftTimer);
+  draftTimer = setTimeout(() => {
+    if (activeId.value && forPeer) call({ type: "saveDraft", peer: forPeer, text }).catch(() => {});
+  }, 500);
+});
+
+function openConversation(p: string) {
+  peer.value = p;
+  void loadPeer();
+}
+
+async function chat(step: () => Promise<unknown>) {
+  chatError.value = "";
+  try {
+    await step();
+  } catch (e) {
+    chatError.value = describeError(e);
+  }
+}
+
+function send() {
+  const text = composer.value;
+  if (!text.trim() || textBytes.value > MAX_BYTES) return;
+  const to = openPeer.value;
+  return chat(async () => {
+    const r = await call({ type: "sendChat", peer: to, text });
+    if (r.type === "message") onMessage(r);
+    if (composer.value === text) composer.value = "";
+  });
+}
+
+const setListen = (on: boolean) => chat(() => call({ type: "setListen", on }));
+const placeCall = () => chat(() => call({ type: "call", peer: openPeer.value }).then(() => loadPeer()));
+const cancelCall = () => chat(() => call({ type: "cancelCall" }));
+const disconnect = () => chat(() => call({ type: "disconnect" }));
+const abort = () => chat(() => call({ type: "abort" }));
+const retry = (m: ChatMessage) => chat(() => call({ type: "retryChat", peer: m.peer, id: m.id }));
 
 onMounted(async () => {
   clock = setInterval(() => (now.value = new Date()), 1000);
@@ -62,6 +186,8 @@ onMounted(async () => {
 onUnmounted(() => {
   mirror.stop();
   clearInterval(clock);
+  clearTimeout(draftTimer);
+  clearTimeout(convTimer);
 });
 
 async function act(step: () => Promise<unknown>) {
@@ -182,6 +308,79 @@ const utc = () => now.value.toISOString().slice(11, 19) + "Z";
         <p v-if="view?.lastFault" class="err">{{ view.lastFault }}</p>
       </section>
 
+      <section v-if="activeId" class="card chat" aria-labelledby="h-chat">
+        <h2 id="h-chat">Chat (M2 test panel)</h2>
+        <p v-if="recovering" class="banner" role="alert">
+          <template v-if="modemState === 'recovering'">Recovering the modem. Listening is off and nothing is resent automatically.</template>
+          <template v-else>The modem has a fault: {{ view?.snapshot.modemDetail }}. Select the station again to retry.</template>
+        </p>
+        <div class="row">
+          <label class="check">
+            <input
+              class="listen"
+              type="checkbox"
+              :checked="listening"
+              :disabled="!canCall"
+              @change="setListen(($event.target as HTMLInputElement).checked)"
+            />
+            Listen
+          </label>
+          <span v-if="listening" class="tag ok">Incoming calls answered automatically</span>
+        </div>
+        <form class="row" @submit.prevent="placeCall">
+          <label>Callsign <input v-model="peer" class="mono peer" maxlength="15" autocomplete="off" @change="loadPeer()" /></label>
+          <button type="submit" :disabled="!canCall">Call</button>
+          <button type="button" class="quiet" :disabled="modemState !== 'calling'" @click="cancelCall">Cancel</button>
+          <button type="button" class="quiet" :disabled="!inSession" @click="disconnect">Disconnect</button>
+          <button type="button" class="danger" :disabled="!canAbort" @click="abort">Abort (delivery uncertain)</button>
+        </form>
+        <p v-if="view?.snapshot.session" class="muted">
+          Session with <span class="mono">{{ view.snapshot.session.peer }}</span>
+          ({{ view.snapshot.session.direction }}, {{ view.snapshot.session.peerApp ?? "unknown app" }})
+        </p>
+        <p v-if="view?.callFailed" class="err" role="alert">Call failed: {{ view.callFailed }}</p>
+        <div class="chatgrid">
+          <ul class="convs" aria-label="Conversations">
+            <li v-for="c in conversations" :key="c.peer" :class="{ active: c.peer === openPeer }">
+              <button class="quiet mono" @click="openConversation(c.peer)">{{ c.peer }}</button>
+              <span class="muted">{{ c.messages }}<template v-if="c.uncertain"> · {{ c.uncertain }} uncertain</template><template v-if="c.draft"> · draft</template></span>
+            </li>
+          </ul>
+          <div>
+            <ol class="transcript" aria-label="Transcript" aria-live="polite">
+              <li
+                v-for="m in messages"
+                :key="m.direction + m.id"
+                :data-id="m.id"
+                :data-state="m.state"
+                :data-direction="m.direction"
+                :class="m.direction"
+              >
+                <div class="meta mono">
+                  {{ msgTime(m) }} · {{ m.direction === "out" ? "to" : "from" }} {{ m.peer }} · {{ stateWord(m.state) }}
+                  <button v-if="m.state === 'uncertain' || m.state === 'failed'" class="quiet" @click="retry(m)">Retry</button>
+                </div>
+                <div class="body">{{ m.body }}</div>
+              </li>
+            </ol>
+            <form class="compose" @submit.prevent="send">
+              <textarea
+                v-model="composer"
+                class="composer"
+                rows="3"
+                :aria-label="'Message to ' + openPeer"
+                @keydown.enter.ctrl.prevent="send"
+              ></textarea>
+              <div class="row">
+                <span :class="['mono', textBytes > MAX_BYTES ? 'err' : 'muted']">{{ textBytes }} / {{ MAX_BYTES }} bytes</span>
+                <button type="submit" :disabled="!composer.trim() || textBytes > MAX_BYTES">Send (Ctrl+Enter)</button>
+              </div>
+            </form>
+          </div>
+        </div>
+        <p v-if="chatError" class="err" role="alert">{{ chatError }}</p>
+      </section>
+
       <section class="card" aria-labelledby="h-build">
         <h2 id="h-build">Build and storage</h2>
         <dl v-if="info">
@@ -279,7 +478,31 @@ button.quiet { background: transparent; color: var(--text-2); border: 1px solid 
 .pill.ready, .pill.listening, .pill.connected { color: var(--success); }
 .pill.attaching, .pill.calling, .pill.negotiating, .pill.draining, .pill.recovering { color: var(--warning); }
 .pill.faulted { color: var(--danger); }
+.chat { grid-column: 1 / -1; }
+.banner { background: var(--raised); border-left: 3px solid var(--warning); padding: 6px 10px; border-radius: 6px; }
+.check { flex-direction: row; align-items: center; gap: 6px; color: var(--text); font-size: 14px; }
+.check input { width: auto; }
+button.danger { background: var(--danger); }
+.chatgrid { display: grid; grid-template-columns: minmax(140px, 1fr) 3fr; gap: calc(var(--space) * 2); margin-top: var(--space); }
+.convs { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; align-content: start; }
+.convs li { display: flex; align-items: center; gap: 6px; }
+.convs li.active button { outline: 1px solid var(--success); }
+.transcript {
+  list-style: none; margin: 0 0 var(--space); padding: 0; display: grid; gap: 6px;
+  max-height: 360px; overflow: auto;
+}
+.transcript li { background: var(--raised); border-radius: 8px; padding: 6px 8px; }
+.transcript li.out { margin-left: 15%; }
+.transcript li.in { margin-right: 15%; }
+.transcript .meta { font-size: 12px; color: var(--text-2); display: flex; align-items: center; gap: 6px; }
+.transcript .body { white-space: pre-wrap; overflow-wrap: anywhere; }
+.compose { display: grid; gap: 6px; }
+.composer {
+  width: 100%; box-sizing: border-box; background: var(--raised); color: var(--text);
+  border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font: inherit; resize: vertical;
+}
 @media (max-width: 820px) {
+  .chatgrid { grid-template-columns: 1fr; }
   .badge { display: none; }
 }
 </style>

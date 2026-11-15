@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { AppCommand } from "./bindings/AppCommand";
 import type { AppError } from "./bindings/AppError";
 import type { AppSnapshot } from "./bindings/AppSnapshot";
+import type { ChatMessage } from "./bindings/ChatMessage";
 import type { CommandOk } from "./bindings/CommandOk";
 import type { EventEnvelope } from "./bindings/EventEnvelope";
 import type { Since } from "./bindings/Since";
@@ -39,7 +40,7 @@ export function describeError(e: unknown): string {
       case "validation":
         return err.errors.map((f) => `${f.field}: ${f.message}`).join("; ");
       case "notFound":
-        return `No profile with id ${err.id}.`;
+        return `Nothing found with id ${err.id}.`;
       default:
         return err.message;
     }
@@ -50,6 +51,15 @@ export function describeError(e: unknown): string {
 export interface View {
   snapshot: AppSnapshot;
   lastFault: string | null;
+  /** The last call that did not lead to a session, as "PEER: reason". */
+  callFailed: string | null;
+}
+
+export interface MirrorHooks {
+  /** A message was queued, changed state, or arrived. */
+  message?: (m: ChatMessage) => void;
+  /** The local copy was rebuilt from a snapshot: message events may be missing. */
+  resynced?: () => void;
 }
 
 /**
@@ -62,7 +72,10 @@ export class Mirror {
   private queue: Promise<void> = Promise.resolve();
   private unlisten: UnlistenFn | null = null;
 
-  constructor(private readonly changed: (v: View) => void) {}
+  constructor(
+    private readonly changed: (v: View) => void,
+    private readonly hooks: MirrorHooks = {},
+  ) {}
 
   async start(): Promise<void> {
     // Listen first, then snapshot: anything the snapshot already holds is skipped by seq.
@@ -78,8 +91,9 @@ export class Mirror {
   /** Replace the local copy with a fresh snapshot. */
   resync(): Promise<void> {
     return snapshot().then((s) => {
-      this.view = { snapshot: s, lastFault: this.view?.lastFault ?? null };
+      this.view = { snapshot: s, lastFault: this.view?.lastFault ?? null, callFailed: this.view?.callFailed ?? null };
       this.publish();
+      this.hooks.resynced?.();
     });
   }
 
@@ -123,6 +137,16 @@ export class Mirror {
         break;
       case "fault":
         v.lastFault = ev.message;
+        break;
+      case "session":
+        v.snapshot.session = ev.session;
+        if (ev.session) v.callFailed = null;
+        break;
+      case "callFailed":
+        v.callFailed = `${ev.peer}: ${ev.reason}`;
+        break;
+      case "messageChanged":
+        this.hooks.message?.(ev.message);
         break;
       case "profilesChanged": {
         const fresh = await snapshot();
