@@ -22,10 +22,10 @@ const now = ref(new Date());
 let clock: ReturnType<typeof setInterval> | undefined;
 
 const RAIL: { page: ViewName; label: string; icon: string }[] = [
-  { page: "operate", label: "Operate", icon: "◉" },
-  { page: "conversations", label: "Conversations", icon: "▤" },
-  { page: "settings", label: "Settings", icon: "⚙" },
-  { page: "diagnostics", label: "Diagnostics", icon: "⌁" },
+  { page: "operate", label: "Operate", icon: "M12 12.5V21m-4 0h8M8.5 6.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7M5 3a10 10 0 0 0 0 14m14 0a10 10 0 0 0 0-14M12 9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" },
+  { page: "conversations", label: "Conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
+  { page: "settings", label: "Settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
+  { page: "diagnostics", label: "Diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
 ];
 
 const firstUse = computed(() => snapshot.value !== null && snapshot.value.profiles.length === 0);
@@ -113,7 +113,10 @@ onUnmounted(() => {
     <!-- The window has no system frame: this header is the title bar. Every
          non-interactive part of it drags the window; a double-click maximises. -->
     <header data-tauri-drag-region>
-      <div class="brand" data-tauri-drag-region><span class="mark" aria-hidden="true">M</span><b>MercuryChat</b><span class="alpha small">early alpha</span></div>
+      <div class="brand" data-tauri-drag-region>
+        <img class="mark" src="/mercurychat.svg" width="28" height="28" alt="" data-tauri-drag-region />
+        <b>MercuryChat</b><span class="alpha small">early alpha</span>
+      </div>
       <div v-if="activeProfile" class="station" data-tauri-drag-region>
         <b class="mono">{{ activeProfile.callsign }}</b>
         <span class="muted small">{{ where }}</span>
@@ -143,11 +146,13 @@ onUnmounted(() => {
         <button
           v-for="r in RAIL"
           :key="r.page"
-          :data-icon="r.icon"
           :class="{ selected: app.page === r.page && !firstUse }"
           :aria-current="app.page === r.page ? 'page' : undefined"
           @click="go(r.page)"
-        >{{ r.label }}</button>
+        >
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="r.icon" /></svg>
+          {{ r.label }}
+        </button>
       </nav>
       <main class="view">
         <p v-if="!snapshot" class="muted loading">Loading…</p>
@@ -175,10 +180,7 @@ header > .grow { flex: 1; align-self: stretch; }
 header > .state { flex: 0 1 auto; min-width: 0; }
 .utc { margin-right: var(--space); }
 .brand { display: flex; align-items: center; gap: var(--space); font-weight: 650; }
-.mark {
-  display: inline-grid; place-items: center; width: 28px; height: 28px; border-radius: 9px;
-  border: 1px solid var(--accent); color: var(--accent); font-weight: 800;
-}
+.mark { display: block; -webkit-user-drag: none; }
 .alpha { color: var(--warning); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
 .station { display: flex; flex-direction: column; line-height: 1.2; border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
 .mode { font-weight: 600; }
@@ -198,7 +200,10 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   display: grid; justify-items: center; gap: 2px; padding: 8px 2px; font-size: 11px;
   border-color: transparent; background: transparent; color: var(--text-2);
 }
-.rail button::before { content: attr(data-icon); font-size: 18px; line-height: 1; }
+.rail svg {
+  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
+}
 .rail button.selected { background: var(--raised); color: var(--accent); }
 .rail button:nth-child(3) { margin-top: auto; }
 .view { min-height: 0; min-width: 0; overflow: hidden; }

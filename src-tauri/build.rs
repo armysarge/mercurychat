@@ -1,4 +1,7 @@
 fn main() {
+    // Rebuild the native resources when the app icons are regenerated.
+    println!("cargo:rerun-if-changed=icons");
+
     // An explicit command allowlist (docs/02 §7): the window may call only the
     // commands the capability file grants, by name.
     let manifest = tauri_build::AppManifest::new().commands(&[

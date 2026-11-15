@@ -1,6 +1,20 @@
+<img src="apps/desktop/public/mercurychat.svg" width="96" height="96" alt="MercuryChat logo" />
+
 # MercuryChat
 
 Open-source radio messaging for Windows and Linux, powered by the Mercury HF modem.
+
+[![Status: Early alpha](https://img.shields.io/badge/status-early%20alpha-B45309)](#immediate-next-milestone)
+[![Platform: Windows and Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-24657D)](src-tauri/tauri.conf.json)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-31595F)](Cargo.toml)
+
+[![Rust](https://img.shields.io/badge/Rust-backend-A6442E?logo=rust)](https://www.rust-lang.org/)
+[![Tauri 2](https://img.shields.io/badge/Tauri%202-desktop-24657D?logo=tauri)](https://v2.tauri.app/)
+[![Vue 3](https://img.shields.io/badge/Vue%203-UI-237A57?logo=vuedotjs)](https://vuejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-frontend-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-storage-285771?logo=sqlite)](https://sqlite.org/)
+
+[Changelog](CHANGELOG.md) · [Modem lab](lab/README.md) · [CI workflow](.github/workflows/ci.yml) · [Report an issue](https://github.com/armysarge/mercurychat/issues)
 
 > **Early alpha: under active development.** MercuryChat is not ready for on-air use. Nothing is released, interfaces and stored data may change without notice, and it has not been tested on air.
 
@@ -38,3 +52,11 @@ MercuryChat-to-MercuryChat interoperability is the initial target. A VARA-like h
 ## Immediate next milestone
 
 M1, the desktop foundation ([plan](docs/M1-plan.md)). It starts with the parts that do not depend on the UI stack. The Raspberry Pi smoke test carried from M0 must pass before M1's UI-heavy work and before M1 exits ([go/no-go note](docs/M0-go-no-go.md)).
+
+## Regenerate the app icons
+
+The [MercuryChat logo](apps/desktop/public/mercurychat.svg) is the source for the desktop header, favicon and native icons. From the repository root, generate the icon set with Tauri, then copy the updated desktop files into `src-tauri/icons`:
+
+```bash
+npm run tauri -- icon apps/desktop/public/mercurychat.svg --output target/generated-icons
+```

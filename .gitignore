@@ -18,6 +18,7 @@ node_modules/
 
 # AI assistant settings, plans and working files
 .claude/
+.[c]odex/
 CLAUDE.md
 CLAUDE.local.md
 .superpowers/
