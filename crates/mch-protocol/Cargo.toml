@@ -1,0 +1,16 @@
+[package]
+name = "mch-protocol"
+description = "MercuryChat MCH/1 connected-session framing (draft)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+rand = "0.9"
+hex = "0.4"
+
+[dev-dependencies]
+hex = "0.4"

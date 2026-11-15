@@ -1,0 +1,6 @@
+# Keep LF in the repository and working tree (shell scripts run in Linux containers).
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary
+*.zip binary

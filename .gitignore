@@ -1,0 +1,13 @@
+
+/evidence/
+
+# Build outputs
+/target/
+node_modules/
+/apps/desktop/dist/
+/src-tauri/target/
+/src-tauri/gen/
+# Lab build products and run data (manifests/hashes are recorded in docs/M0-progress.md)
+/lab/bin/
+/lab/run/
+/lab/pi-kit/

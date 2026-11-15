@@ -1,0 +1,165 @@
+<script setup lang="ts">
+// M0 shell: proves the Vue <-> Tauri <-> Rust core <-> SQLite path and a
+// read-only modem probe. It is not the operator interface (that is M1+).
+import { invoke } from "@tauri-apps/api/core";
+import { onMounted, ref } from "vue";
+
+interface AppInfo {
+  app_version: string;
+  protocol: string;
+  os: string;
+  arch: string;
+  db_path: string;
+  db_schema: number;
+  startup_ms: number;
+}
+interface ProbeResult {
+  ok: boolean;
+  summary: string;
+  lines: string[];
+}
+
+const info = ref<AppInfo | null>(null);
+const infoError = ref("");
+const host = ref("127.0.0.1");
+const port = ref(8300);
+const probing = ref(false);
+const probe = ref<ProbeResult | null>(null);
+const pingMs = ref<number[]>([]);
+const now = ref(new Date());
+
+onMounted(async () => {
+  setInterval(() => (now.value = new Date()), 1000);
+  try {
+    info.value = await invoke<AppInfo>("app_info");
+    const selfMeasure = await invoke<boolean>("ui_ready");
+    if (selfMeasure) await measureIpc(200);
+  } catch (e) {
+    infoError.value = String(e);
+  }
+});
+
+async function runProbe() {
+  probing.value = true;
+  probe.value = null;
+  try {
+    probe.value = await invoke<ProbeResult>("modem_probe", { host: host.value, port: Number(port.value) });
+  } catch (e) {
+    probe.value = { ok: false, summary: String(e), lines: [] };
+  } finally {
+    probing.value = false;
+  }
+}
+
+// IPC round-trip latency sample (responsiveness measurement for M0/Pi).
+async function measureIpc(n = 50) {
+  const samples: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const t = performance.now();
+    await invoke("ping");
+    samples.push(performance.now() - t);
+  }
+  samples.sort((a, b) => a - b);
+  const q = (p: number) => samples[Math.min(n - 1, Math.floor(p * n))];
+  pingMs.value = [q(0.5), q(0.95), samples[n - 1]];
+  await invoke("report_ipc", { p50: pingMs.value[0], p95: pingMs.value[1], max: pingMs.value[2], samples: n });
+}
+
+const utc = () => now.value.toISOString().slice(11, 19) + "Z";
+</script>
+
+<template>
+  <div class="shell">
+    <header class="top">
+      <div class="brand"><span class="mark" aria-hidden="true">M</span> MercuryChat</div>
+      <div class="badge warn" role="status">M0 integration shell — no RF, PTT not controlled</div>
+      <div class="utc mono" aria-label="UTC time">{{ utc() }}</div>
+    </header>
+
+    <main class="grid">
+      <section class="card" aria-labelledby="h-build">
+        <h2 id="h-build">Build and storage</h2>
+        <p v-if="infoError" class="err">{{ infoError }}</p>
+        <dl v-else-if="info">
+          <dt>App</dt><dd class="mono">{{ info.app_version }}</dd>
+          <dt>Protocol</dt><dd class="mono">{{ info.protocol }}</dd>
+          <dt>Platform</dt><dd class="mono">{{ info.os }} / {{ info.arch }}</dd>
+          <dt>SQLite</dt><dd class="mono">schema v{{ info.db_schema }}</dd>
+          <dt>Database</dt><dd class="mono path">{{ info.db_path }}</dd>
+          <dt>Core ready</dt><dd class="mono">{{ info.startup_ms }} ms after launch</dd>
+        </dl>
+        <p v-else class="muted">Loading…</p>
+      </section>
+
+      <section class="card" aria-labelledby="h-modem">
+        <h2 id="h-modem">Modem probe (read-only)</h2>
+        <p class="muted">Attaches control + data, asks VERSION and BUFFER, reads 3 s of status lines, detaches. Changes no modem setting.</p>
+        <form class="row" @submit.prevent="runProbe">
+          <label>Host <input v-model="host" class="mono" size="14" /></label>
+          <label>Control port <input v-model.number="port" class="mono" type="number" min="1" max="65534" /></label>
+          <button type="submit" :disabled="probing">{{ probing ? "Probing…" : "Probe" }}</button>
+        </form>
+        <div v-if="probe" :class="['result', probe.ok ? 'ok' : 'err']" role="status">{{ probe.summary }}</div>
+        <pre v-if="probe?.lines.length" class="mono log">{{ probe.lines.join("\n") }}</pre>
+      </section>
+
+      <section class="card" aria-labelledby="h-perf">
+        <h2 id="h-perf">Responsiveness</h2>
+        <button @click="measureIpc()">Measure IPC round trip (50×)</button>
+        <p v-if="pingMs.length" class="mono">p50 {{ pingMs[0].toFixed(2) }} ms · p95 {{ pingMs[1].toFixed(2) }} ms · max {{ pingMs[2].toFixed(2) }} ms</p>
+      </section>
+    </main>
+  </div>
+</template>
+
+<style scoped>
+.shell { display: flex; flex-direction: column; min-height: 100vh; }
+.top {
+  display: flex; align-items: center; gap: calc(var(--space) * 2);
+  padding: var(--space) calc(var(--space) * 2);
+  background: var(--surface); border-bottom: 1px solid var(--border);
+}
+.brand { font-weight: 650; display: flex; align-items: center; gap: var(--space); }
+.mark {
+  display: inline-grid; place-items: center; width: 28px; height: 28px;
+  border-radius: 8px; background: var(--accent); color: var(--canvas); font-weight: 800;
+}
+.badge { font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor; }
+.warn { color: var(--warning); }
+.utc { margin-left: auto; color: var(--text-2); }
+.grid {
+  display: grid; gap: calc(var(--space) * 2); padding: calc(var(--space) * 2);
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+}
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: calc(var(--space) * 2);
+}
+h2 { font-size: 15px; margin: 0 0 var(--space); }
+dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 0; }
+dt { color: var(--text-2); }
+dd { margin: 0; }
+.path { word-break: break-all; font-size: 12px; }
+.muted { color: var(--text-2); margin: 0 0 var(--space); }
+.row { display: flex; flex-wrap: wrap; gap: var(--space); align-items: end; }
+label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); font-size: 12px; }
+input {
+  background: var(--raised); color: var(--text); border: 1px solid var(--border);
+  border-radius: 8px; padding: 6px 8px; width: 9em;
+}
+button {
+  background: var(--accent); color: var(--canvas); border: 0; border-radius: 8px;
+  padding: 7px 14px; font-weight: 600; cursor: pointer;
+}
+button:disabled { opacity: 0.6; cursor: default; }
+.result { margin-top: var(--space); font-weight: 600; }
+.ok { color: var(--success); }
+.err { color: var(--danger); }
+.log {
+  background: var(--raised); border-radius: 8px; padding: var(--space);
+  max-height: 220px; overflow: auto; font-size: 12px; margin: var(--space) 0 0;
+}
+@media (max-width: 820px) {
+  .badge { display: none; }
+}
+</style>

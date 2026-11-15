@@ -1,0 +1,20 @@
+[workspace]
+resolver = "2"
+members = [
+  "crates/mch-protocol",
+  "crates/mercury-adapter",
+  "crates/mc-storage",
+  "crates/mc-core",
+  "tools/m0-client",
+  "src-tauri",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+license = "GPL-3.0-or-later"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4
+strip = "debuginfo"

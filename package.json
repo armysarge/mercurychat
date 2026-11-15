@@ -1,0 +1,14 @@
+{
+  "name": "mercurychat",
+  "private": true,
+  "version": "0.0.1",
+  "license": "GPL-3.0-or-later",
+  "scripts": {
+    "dev": "npm --prefix apps/desktop run dev",
+    "build:ui": "npm --prefix apps/desktop run build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

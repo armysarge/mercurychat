@@ -1,0 +1,19 @@
+[package]
+name = "mercury-adapter"
+description = "Headless Mercury TNC control/data adapter and fake modem harness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[features]
+default = ["fake"]
+# Deterministic fake Mercury pair for L0 tests and the M0 client's self-test.
+fake = ["dep:rand"]
+
+[dependencies]
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
+thiserror = "2"
+rand = { version = "0.9", optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }

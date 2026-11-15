@@ -1,0 +1,21 @@
+[package]
+name = "mercurychat"
+description = "MercuryChat desktop shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+name = "mercurychat_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+tokio = { version = "1", features = ["time", "sync"] }
+mc-storage = { path = "../crates/mc-storage" }
+mch-protocol = { path = "../crates/mch-protocol" }
+mercury-adapter = { path = "../crates/mercury-adapter", default-features = false }

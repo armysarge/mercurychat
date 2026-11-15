@@ -1,0 +1,21 @@
+[package]
+name = "mc-core"
+description = "MercuryChat station and MCH/1 session engine (headless)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+mch-protocol = { path = "../mch-protocol" }
+mercury-adapter = { path = "../mercury-adapter", default-features = false }
+mc-storage = { path = "../mc-storage" }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros", "fs"] }
+thiserror = "2"
+sha2 = "0.10"
+hex = "0.4"
+rand = "0.9"
+
+[dev-dependencies]
+mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }
+tokio = { version = "1", features = ["full"] }
+tempfile = "3"
