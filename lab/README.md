@@ -18,13 +18,13 @@ Output: `lab/bin/{linux-amd64,linux-arm64,windows-x64}/` with `MANIFEST.txt` (co
 
 ### Mercury patches
 
-`lab/mercury-patches/*.patch` are applied in order to the pinned commit by `build-mercury.sh` when mounted at `/patches`; each build's `MANIFEST.txt` lists them. Currently: upstream PR #565 (`bind_address`). Patched builds go to `lab/bin-patched/`:
+`lab/mercury-patches/*.patch` are applied in order to the pinned commit by `build-mercury.sh` when mounted at `/patches`; each build's `MANIFEST.txt` lists them. Currently: upstream PR #565 (`bind_address`) and PR #566 (WebSocket Origin/Host checks, `ui_allowed_origins`; `0002` is #566 merged onto #565). Patched builds go to `lab/bin-patched/`:
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm -v "F:/Programming/mercury:/src:ro" -v "$PWD/lab/bin-patched:/out" -v "$PWD/lab/docker:/scripts:ro" -v "$PWD/lab/mercury-patches:/patches:ro" mercurychat-lab:m0 bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh'
 ```
 
-Exposure check (Windows; null audio, PTT none): `bash lab/windows/exposure-check.sh <mercury.exe> <out-dir> [bind_address]`. For the cable lab bound to loopback, add `BIND=127.0.0.1` and `M=lab/bin-patched/windows-x64/mercury.exe` to `run-win-lab.sh`.
+Exposure check (Windows; null audio, PTT none): `bash lab/windows/exposure-check.sh <mercury.exe> <out-dir> [bind_address]`. WebSocket Origin/Host check (stock vs patched, four configurations): `python lab/windows/ws-origin-check.py lab/bin/windows-x64/mercury.exe lab/bin-patched/windows-x64/mercury.exe lab/run/ws-origin`. For the cable lab bound to loopback, add `BIND=127.0.0.1` and `M=lab/bin-patched/windows-x64/mercury.exe` to `run-win-lab.sh`.
 
 ## 2. L0 — fake Mercury pair (no audio, seconds)
 

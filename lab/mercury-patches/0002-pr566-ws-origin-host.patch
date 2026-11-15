@@ -1,0 +1,524 @@
+diff --git a/common/cfg_utils.c b/common/cfg_utils.c
+index 33990c58..443421a4 100644
+--- a/common/cfg_utils.c
++++ b/common/cfg_utils.c
+@@ -38,6 +38,8 @@ void cfg_set_defaults(mercury_config *cfg)
+     cfg->ui_port            = UI_DEFAULT_PORT;       /* 10000  */
+     cfg->bind_address[0]    = '\0';                  /* all interfaces */
+     cfg->tls_enabled        = false;                 /* ws     */
++    snprintf(cfg->ui_allowed_origins, sizeof(cfg->ui_allowed_origins), "%s",
++             CFG_UI_ALLOWED_ORIGINS_DEFAULT);
+     snprintf(cfg->tls_cert, sizeof(cfg->tls_cert), "%s", CFG_SSL_CERT);
+     snprintf(cfg->tls_key,  sizeof(cfg->tls_key),  "%s", CFG_SSL_KEY);
+     cfg->waterfall_enabled  = true;
+@@ -252,6 +254,9 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
+     s = iniparser_getstring(ini, CFG_KEY_BIND_ADDRESS, NULL);
+     if (s)
+         snprintf(cfg->bind_address, sizeof(cfg->bind_address), "%s", s);
++    s = iniparser_getstring(ini, CFG_KEY_UI_ALLOWED_ORIGINS, NULL);
++    if (s)
++        snprintf(cfg->ui_allowed_origins, sizeof(cfg->ui_allowed_origins), "%s", s);
+ 
+     s = iniparser_getstring(ini, CFG_KEY_UI_PROTOCOL, cfg->tls_enabled ? "wss" : "ws");
+     cfg->tls_enabled = (s && !strcmp(s, "wss"));
+@@ -568,6 +573,11 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
+     if (cfg->bind_address[0])       /* unset reads back as all interfaces */
+         fprintf(f, "bind_address = %s\n", cfg->bind_address);
+     fprintf(f, "ui_protocol = %s\n",      cfg->tls_enabled ? "wss" : "ws");
++    /* Written only when changed, so a later default reaches existing files. */
++    if (strcmp(cfg->ui_allowed_origins, CFG_UI_ALLOWED_ORIGINS_DEFAULT) != 0) {
++        cfg_escape_str(escaped, sizeof(escaped), cfg->ui_allowed_origins);
++        fprintf(f, "ui_allowed_origins = \"%s\"\n", escaped);
++    }
+     fprintf(f, "ui_tls_cert = %s\n",      cfg->tls_cert);
+     fprintf(f, "ui_tls_key = %s\n",       cfg->tls_key);
+     fprintf(f, "waterfall_enabled = %s\n", cfg->waterfall_enabled ? "true" : "false");
+diff --git a/common/cfg_utils.h b/common/cfg_utils.h
+index ac351db7..f32c1b69 100644
+--- a/common/cfg_utils.h
++++ b/common/cfg_utils.h
+@@ -32,6 +32,9 @@
+ #define CFG_KEY_UI_PROTOCOL         "main:ui_protocol"
+ #define CFG_KEY_UI_TLS_CERT         "main:ui_tls_cert"
+ #define CFG_KEY_UI_TLS_KEY          "main:ui_tls_key"
++#define CFG_KEY_UI_ALLOWED_ORIGINS  "main:ui_allowed_origins"
++/* The hosted web app (README, docs/app/), served from GitHub Pages. */
++#define CFG_UI_ALLOWED_ORIGINS_DEFAULT "https://rhizomatica.github.io"
+ 
+ /* Defaults for wss://.  Overridable because these are only reachable by root
+  * on Linux and do not exist at all on Windows or macOS, which made wss://
+@@ -105,6 +108,8 @@ typedef struct {
+     bool     tls_enabled;           /* false = ws, true = wss */
+     char     tls_cert[512];         /* PEM certificate chain, wss only */
+     char     tls_key[512];          /* PEM private key, wss only */
++    char     ui_allowed_origins[512]; /* browser Origins the UI accepts besides
++                                       * its own pages; comma/space separated */
+     bool     waterfall_enabled;
+     ptt_config_t ptt;               /* selected PTT method and backend config */
+     char     input_device[512];
+diff --git a/gui_interface/ui_communication.c b/gui_interface/ui_communication.c
+index 0b0ed35e..15134647 100644
+--- a/gui_interface/ui_communication.c
++++ b/gui_interface/ui_communication.c
+@@ -1096,6 +1096,7 @@ int ui_comm_init(ui_ctx_t *ctx, uint16_t ws_port, bool tls_enabled,
+     // a race on aarch64 where the callback ptr and data could be seen
+     // out-of-order by the server thread.
+     ui_transport_set_bind_address(initial_cfg ? initial_cfg->bind_address : NULL);
++    ui_transport_set_allowed_origins(ctx->cfg.ui_allowed_origins);
+     if (ui_transport_init(ws_port, tls_enabled,
+                           initial_cfg ? initial_cfg->tls_cert : CFG_SSL_CERT,
+                           initial_cfg ? initial_cfg->tls_key  : CFG_SSL_KEY,
+diff --git a/gui_interface/ui_transport.h b/gui_interface/ui_transport.h
+index 557989d3..3eea1ff0 100644
+--- a/gui_interface/ui_transport.h
++++ b/gui_interface/ui_transport.h
+@@ -39,6 +39,10 @@ typedef void (*ui_transport_connect_fn)(void *user);
+  * NULL or "" means every interface; a transport that does not listen ignores
+  * it. */
+ void ui_transport_set_bind_address(const char *addr);
++/* Browser Origins a listening transport accepts besides its own pages (comma
++ * or space separated; see ws_origin_allowed).  Set before ui_transport_init;
++ * a transport that does not listen ignores it. */
++void ui_transport_set_allowed_origins(const char *list);
+ 
+ /* Start the transport.  port and the TLS settings are the standalone
+  * server's; a transport that does not listen ignores them.  Both callbacks
+diff --git a/gui_interface/websocket/mercury_websocket.c b/gui_interface/websocket/mercury_websocket.c
+index 17b88d1e..0ef102f9 100644
+--- a/gui_interface/websocket/mercury_websocket.c
++++ b/gui_interface/websocket/mercury_websocket.c
+@@ -116,6 +116,13 @@ void ui_transport_set_bind_address(const char *addr)
+     snprintf(s_bind_addr, sizeof(s_bind_addr), "%s", addr ? addr : "");
+ }
+ 
++static char s_allowed_origins[512];
++
++void ui_transport_set_allowed_origins(const char *list)
++{
++    snprintf(s_allowed_origins, sizeof(s_allowed_origins), "%s", list ? list : "");
++}
++
+ int ui_transport_init(uint16_t port, bool tls_enabled,
+                       const char *tls_cert_path, const char *tls_key_path,
+                       ui_transport_command_fn on_command,
+@@ -138,6 +145,7 @@ int ui_transport_init(uint16_t port, bool tls_enabled,
+     opts.port = port;
+     opts.bind_addr = s_bind_addr;               /* "" = 0.0.0.0, as before */
+     opts.ws_path = "/websocket";
++    opts.allowed_origins = s_allowed_origins;
+     opts.max_message_size = UI_MAX_MESSAGE_SIZE;
+     opts.tls_enabled = tls_enabled;
+     opts.tls_cert_path = tls_cert_path;
+diff --git a/gui_interface/websocket/ws_frame.c b/gui_interface/websocket/ws_frame.c
+index e13c824d..520f1219 100644
+--- a/gui_interface/websocket/ws_frame.c
++++ b/gui_interface/websocket/ws_frame.c
+@@ -8,6 +8,8 @@
+ 
+ #include "ws_frame.h"
+ 
++#include <string.h>
++
+ bool ws_frame_is_control(int opcode)
+ {
+     return (opcode & 0x08) != 0;
+@@ -136,3 +138,124 @@ size_t ws_frame_header(uint8_t hdr[WS_FRAME_MAX_HEADER], int opcode,
+         return 10;
+     }
+ }
++
++static bool ci_eq(const char *a, const char *b, size_t n)
++{
++    for (size_t i = 0; i < n; i++)
++    {
++        char x = a[i], y = b[i];
++        if (x >= 'A' && x <= 'Z') x = (char) (x - 'A' + 'a');
++        if (y >= 'A' && y <= 'Z') y = (char) (y - 'A' + 'a');
++        if (x != y)
++            return false;
++    }
++    return true;
++}
++
++/* "a.b.c.d", each part 1-3 digits and <= 255. */
++static bool is_ipv4_literal(const char *h, size_t n)
++{
++    int parts = 0, digits = 0, val = 0;
++
++    for (size_t i = 0; i <= n; i++)
++    {
++        if (i == n || h[i] == '.')
++        {
++            if (digits == 0 || val > 255)
++                return false;
++            parts++;
++            digits = val = 0;
++        }
++        else if (h[i] >= '0' && h[i] <= '9' && digits < 3)
++        {
++            val = val * 10 + (h[i] - '0');
++            digits++;
++        }
++        else
++            return false;
++    }
++    return parts == 4;
++}
++
++static bool has_suffix(const char *h, size_t n, const char *sfx)
++{
++    size_t k = strlen(sfx);
++    return n > k && ci_eq(h + n - k, sfx, k);
++}
++
++/* Hostnames an attacker's DNS cannot point at us. */
++static bool host_is_rebind_safe(const char *h, size_t n)
++{
++    if (n == 0)
++        return false;
++    if (h[0] == '[' || is_ipv4_literal(h, n))           /* IP literal */
++        return true;
++    if (n == 9 && ci_eq(h, "localhost", 9))
++        return true;
++    if (memchr(h, '.', n) == NULL)                      /* single label */
++        return true;
++    /* Names that only resolve on the local network: mDNS, the RFC 8375 and
++     * ICANN-reserved private zones, and the common undelegated .lan. */
++    return has_suffix(h, n, ".local") || has_suffix(h, n, ".home.arpa") ||
++           has_suffix(h, n, ".internal") || has_suffix(h, n, ".lan");
++}
++
++/* Is origin one of the comma- or space-separated entries of list? */
++static bool origin_listed(const char *origin, size_t origin_len, const char *list)
++{
++    const char *p = list;
++
++    while (p != NULL && *p != '\0')
++    {
++        size_t n;
++
++        while (*p == ',' || *p == ' ')
++            p++;
++        n = strcspn(p, ", ");
++        if (n != 0 && n == origin_len && ci_eq(p, origin, n))
++            return true;
++        p += n;
++    }
++    return false;
++}
++
++bool ws_origin_allowed(const char *origin, size_t origin_len,
++                       const char *host, size_t host_len, bool tls,
++                       const char *allowed_origins)
++{
++    const char *sep, *auth;
++    size_t auth_len, hn;
++
++    if (origin == NULL)
++        return true;
++    if (origin_listed(origin, origin_len, allowed_origins))
++        return true;
++    if (host == NULL || host_len == 0)
++        return false;
++
++    /* "scheme://authority"; "null" and anything else is refused. */
++    sep = NULL;
++    for (size_t i = 0; i + 3 <= origin_len; i++)
++        if (memcmp(origin + i, "://", 3) == 0) { sep = origin + i; break; }
++    if (sep == NULL)
++        return false;
++    auth = sep + 3;
++    auth_len = origin_len - (size_t) (auth - origin);
++    if (auth_len != host_len || !ci_eq(auth, host, host_len))
++        return false;
++    if (tls)
++        return true;
++
++    /* The host part of Host: up to the port, or the whole "[v6]". */
++    if (host[0] == '[')
++    {
++        const char *e = memchr(host, ']', host_len);
++        hn = e ? (size_t) (e - host) + 1 : host_len;
++    }
++    else
++    {
++        const char *c = memchr(host, ':', host_len);
++        hn = c ? (size_t) (c - host) : host_len;
++    }
++    return host_is_rebind_safe(host, hn);
++}
+diff --git a/gui_interface/websocket/ws_frame.h b/gui_interface/websocket/ws_frame.h
+index aae09f78..f9abf6b6 100644
+--- a/gui_interface/websocket/ws_frame.h
++++ b/gui_interface/websocket/ws_frame.h
+@@ -60,4 +60,18 @@ size_t ws_frame_header(uint8_t hdr[WS_FRAME_MAX_HEADER], int opcode,
+ /* True for opcodes 0x8..0xF. */
+ bool ws_frame_is_control(int opcode);
+ 
++/* May this upgrade proceed?  `origin`/`host` are the raw header values (NULL
++ * when absent).  No Origin: not a browser (Fyne, Pat, scripts), allowed.  A
++ * browser's Origin must name the same authority as Host, which stops another
++ * web page in the operator's browser from opening the UI socket.  Over plain
++ * ws the Host must also be a name DNS rebinding cannot hand an attacker: an IP
++ * literal, "localhost", a single label, or a .local, .home.arpa, .internal or
++ * .lan name.  Over wss a rebound name fails certificate validation anyway, so
++ * any Host is accepted.  An Origin listed exactly in `allowed_origins` (comma
++ * or space separated, NULL for none) is allowed outright: the hosted web app,
++ * or a LAN name the rules above cannot vouch for. */
++bool ws_origin_allowed(const char *origin, size_t origin_len,
++                       const char *host, size_t host_len, bool tls,
++                       const char *allowed_origins);
++
+ #endif /* WS_FRAME_H_ */
+diff --git a/gui_interface/websocket/ws_server.c b/gui_interface/websocket/ws_server.c
+index e56224e2..5cffd079 100644
+--- a/gui_interface/websocket/ws_server.c
++++ b/gui_interface/websocket/ws_server.c
+@@ -667,6 +667,26 @@ static int conn_handle_request(ws_conn_t *c, const char *req, size_t req_len)
+             return 0;
+         }
+ 
++        /* Browsers let any page open a WebSocket to any host, 127.0.0.1
++         * included, and send nothing to authenticate it: refuse a page that
++         * is not Mercury's own.  Clients without an Origin are unaffected. */
++        {
++            size_t olen = 0, hlen = 0;
++            const char *origin = header_find(hdrs, hdrs_len, "Origin", &olen);
++            const char *host = header_find(hdrs, hdrs_len, "Host", &hlen);
++
++            if (!ws_origin_allowed(origin, olen, host, hlen, s->opts.tls_enabled,
++                                   s->opts.allowed_origins))
++            {
++                HLOGW(WS_LOG_TAG, "refused a cross-origin upgrade (Origin \"%.*s\", Host \"%.*s\")",
++                      (int) (olen > 128 ? 128 : olen), origin ? origin : "",
++                      (int) (hlen > 128 ? 128 : hlen), host ? host : "");
++                http_reply(c, 403, "Forbidden", NULL, "text/plain",
++                           "origin not allowed", 18, true);
++                return 0;
++            }
++        }
++
+         key = header_find(hdrs, hdrs_len, "Sec-WebSocket-Key", &key_len);
+         if (key == NULL || key_len == 0 ||
+             key_len + strlen(WS_GUID) >= sizeof(accept_src))
+diff --git a/gui_interface/websocket/ws_server.h b/gui_interface/websocket/ws_server.h
+index 849cf8c6..ac1f80f2 100644
+--- a/gui_interface/websocket/ws_server.h
++++ b/gui_interface/websocket/ws_server.h
+@@ -39,6 +39,9 @@ typedef struct {
+     uint16_t port;
+     const char *bind_addr;        /* NULL or "" means 0.0.0.0 */
+     const char *ws_path;          /* endpoint that upgrades, e.g. "/websocket" */
++    const char *allowed_origins;  /* browser Origins allowed besides the
++                                   * server's own (ws_origin_allowed); must
++                                   * outlive the server.  NULL: none */
+     size_t max_message_size;      /* inbound cap; 0 means the built-in default */
+ 
+     bool tls_enabled;
+diff --git a/host/ui_host.c b/host/ui_host.c
+index b78da88c..7150db9e 100644
+--- a/host/ui_host.c
++++ b/host/ui_host.c
+@@ -33,6 +33,7 @@ void mercury_host_set_ui(const mercury_host_ui_ops *ops)
+ }
+ 
+ void ui_transport_set_bind_address(const char *addr) { (void) addr; }
++void ui_transport_set_allowed_origins(const char *list) { (void) list; }
+ 
+ int ui_transport_init(uint16_t port, bool tls_enabled,
+                       const char *tls_cert_path, const char *tls_key_path,
+diff --git a/mercury.1 b/mercury.1
+index e73050b6..cbf3527f 100644
+--- a/mercury.1
++++ b/mercury.1
+@@ -371,6 +371,7 @@ bind_address	(all)	IPv4 address the UI, TNC and broadcast ports listen on
+ ui_protocol	ws	ws (plain) or wss (TLS)
+ ui_tls_cert	/etc/ssl/...	PEM certificate for wss
+ ui_tls_key	/etc/ssl/...	PEM private key for wss
++ui_allowed_origins	rhizomatica.github.io	Other web origins allowed to open the UI WebSocket
+ waterfall_enabled	true	Send waterfall/spectrum data to UI
+ input_device	(empty)	Audio capture device
+ output_device	(empty)	Audio playback device
+diff --git a/mercury.ini.example b/mercury.ini.example
+index 6a0dfba1..b6194546 100644
+--- a/mercury.ini.example
++++ b/mercury.ini.example
+@@ -37,6 +37,16 @@ ui_protocol = ws
+ ;ui_tls_cert = /etc/ssl/certs/hermes.radio.crt
+ ;ui_tls_key = /etc/ssl/private/hermes.radio.key
+ 
++; Web pages, besides Mercury's own, that may open the UI WebSocket: exact
++; origins (scheme://host[:port]), comma or space separated.  Other sites'
++; pages are refused so they cannot drive the station from your browser.
++; Mercury's own pages are always allowed when reached by IP address,
++; localhost, a single-label name or a .local/.home.arpa/.internal/.lan name;
++; reaching it by another LAN name over ws needs that origin listed here,
++; e.g. "http://pi.fritz.box:10000".  Empty allows no other sites.
++; (default: the hosted web app, https://rhizomatica.github.io)
++;ui_allowed_origins = "https://rhizomatica.github.io"
++
+ ; Enable waterfall / spectrum data sent to the UI (default: true)
+ waterfall_enabled = true
+ 
+diff --git a/tests/common/test_cfg_utils.c b/tests/common/test_cfg_utils.c
+index 7f3240fd..8e33e555 100644
+--- a/tests/common/test_cfg_utils.c
++++ b/tests/common/test_cfg_utils.c
+@@ -114,6 +114,33 @@ void test_bind_address_roundtrips_and_defaults_to_all_interfaces(void)
+     TEST_ASSERT_EQUAL_STRING("127.0.0.1", r.bind_address);
+ }
+ 
++/* ui_allowed_origins: defaults to the hosted app, is not written while at the
++ * default, round-trips when changed, and can be emptied. */
++void test_ui_allowed_origins_default_roundtrip_and_empty(void)
++{
++    mercury_config w, r;
++    cfg_set_defaults(&w);
++    TEST_ASSERT_EQUAL_STRING(CFG_UI_ALLOWED_ORIGINS_DEFAULT, w.ui_allowed_origins);
++    TEST_ASSERT_TRUE(cfg_write(&w, TMP));
++    cfg_set_defaults(&r);
++    TEST_ASSERT_TRUE(cfg_read(&r, TMP));
++    TEST_ASSERT_EQUAL_STRING(CFG_UI_ALLOWED_ORIGINS_DEFAULT, r.ui_allowed_origins);
++
++    snprintf(w.ui_allowed_origins, sizeof(w.ui_allowed_origins),
++             "https://rhizomatica.github.io, http://pi.fritz.box:10000");
++    TEST_ASSERT_TRUE(cfg_write(&w, TMP));
++    cfg_set_defaults(&r);
++    TEST_ASSERT_TRUE(cfg_read(&r, TMP));
++    TEST_ASSERT_EQUAL_STRING("https://rhizomatica.github.io, http://pi.fritz.box:10000",
++                             r.ui_allowed_origins);
++
++    w.ui_allowed_origins[0] = '\0';
++    TEST_ASSERT_TRUE(cfg_write(&w, TMP));
++    cfg_set_defaults(&r);
++    TEST_ASSERT_TRUE(cfg_read(&r, TMP));
++    TEST_ASSERT_EQUAL_STRING("", r.ui_allowed_origins);
++}
++
+ /* A config from before the names reads as before: no names, ids unchanged. */
+ void test_config_without_device_names_reads_as_before(void)
+ {
+@@ -591,5 +618,6 @@ int main(void)
+     RUN_TEST(test_cm108_report_encoding);
+     RUN_TEST(test_cm108_linux_device_path_validation);
+     RUN_TEST(test_bind_address_roundtrips_and_defaults_to_all_interfaces);
++    RUN_TEST(test_ui_allowed_origins_default_roundtrip_and_empty);
+     return UNITY_END();
+ }
+diff --git a/tests/gui_interface/test_ui_ptt_persist.c b/tests/gui_interface/test_ui_ptt_persist.c
+index d29fed96..05a3a0ff 100644
+--- a/tests/gui_interface/test_ui_ptt_persist.c
++++ b/tests/gui_interface/test_ui_ptt_persist.c
+@@ -132,6 +132,7 @@ int  ui_transport_broadcast_binary(const void *data, size_t len)
+ { (void)data; (void)len; return 0; }
+ int  ui_transport_broadcast_json(const char *json) { (void)json; return 0; }
+ void ui_transport_set_bind_address(const char *addr) { (void)addr; }
++void ui_transport_set_allowed_origins(const char *list) { (void)list; }
+ int  ui_transport_init(uint16_t port, bool tls_enabled, const char *tls_cert_path,
+                        const char *tls_key_path, ui_transport_command_fn on_command,
+                        ui_transport_connect_fn on_connect, void *user)
+diff --git a/tests/gui_interface/test_ws_protocol.c b/tests/gui_interface/test_ws_protocol.c
+index 8ba25ec1..6ccc1e96 100644
+--- a/tests/gui_interface/test_ws_protocol.c
++++ b/tests/gui_interface/test_ws_protocol.c
+@@ -493,6 +493,87 @@ static void test_sanitiser_keeps_every_valid_length(void)
+     TEST_ASSERT_EQUAL_STRING("\xF4\x8F\xBF\xBF", s);
+ }
+ 
++static bool origin_ok(const char *origin, const char *host, bool tls)
++{
++    return ws_origin_allowed(origin, origin ? strlen(origin) : 0,
++                             host, host ? strlen(host) : 0, tls, NULL);
++}
++
++static bool listed_ok(const char *origin, const char *host, const char *list)
++{
++    return ws_origin_allowed(origin, strlen(origin), host, strlen(host), false, list);
++}
++
++/* ui_allowed_origins: the hosted web app reaching a Pi, and a LAN name the
++ * built-in rules cannot vouch for.  Exact, case-insensitive entries only. */
++void test_listed_origins_are_allowed_exactly(void)
++{
++    const char *list = "https://rhizomatica.github.io, http://pi.fritz.box:10000";
++
++    TEST_ASSERT_TRUE(listed_ok("https://rhizomatica.github.io", "pi:10000", list));
++    TEST_ASSERT_TRUE(listed_ok("https://Rhizomatica.GitHub.io", "192.168.1.5:10000", list));
++    TEST_ASSERT_TRUE(listed_ok("http://pi.fritz.box:10000", "pi.fritz.box:10000", list));
++    TEST_ASSERT_FALSE(listed_ok("https://rhizomatica.github.io.evil.example", "pi:10000", list));
++    TEST_ASSERT_FALSE(listed_ok("https://evil.github.io", "pi:10000", list));
++    TEST_ASSERT_FALSE(listed_ok("https://rhizomatica.github", "pi:10000", list));
++    TEST_ASSERT_FALSE(listed_ok("http://pi.fritz.box:10000", "pi.fritz.box:10000", ""));
++    TEST_ASSERT_FALSE(listed_ok("https://evil.example", "pi:10000", " , ,"));
++}
++
++/* Private-only DNS zones count as rebind-safe like .local. */
++void test_private_zone_names_are_allowed_over_plain_ws(void)
++{
++    TEST_ASSERT_TRUE(origin_ok("http://pi.home.arpa:10000", "pi.home.arpa:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://pi.internal:10000", "pi.internal:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://pi.lan:10000", "pi.lan:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://pi.lan.evil.example:10000",
++                                "pi.lan.evil.example:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://evil-lan:10000", "x.evil-lan.com:10000", false));
++}
++
++/* A client that sends no Origin is not a browser: Fyne, Pat, scripts. */
++void test_origin_absent_is_allowed(void)
++{
++    TEST_ASSERT_TRUE(origin_ok(NULL, "127.0.0.1:10000", false));
++    TEST_ASSERT_TRUE(origin_ok(NULL, "anything.example.com", false));
++}
++
++/* Mercury's own pages: Origin is the page's scheme://host:port = Host. */
++void test_same_origin_pages_are_allowed(void)
++{
++    TEST_ASSERT_TRUE(origin_ok("http://127.0.0.1:10000", "127.0.0.1:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://localhost:10000", "LOCALHOST:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://192.168.1.20:10000", "192.168.1.20:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://hermes-pi:10000", "hermes-pi:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://hermes.local:10000", "hermes.local:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("http://[::1]:10000", "[::1]:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("https://station.hermes.radio", "station.hermes.radio", true));
++}
++
++/* Another site's page, even one aimed at 127.0.0.1, is refused. */
++void test_cross_origin_pages_are_refused(void)
++{
++    TEST_ASSERT_FALSE(origin_ok("https://evil.example", "127.0.0.1:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://127.0.0.1:8080", "127.0.0.1:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("null", "127.0.0.1:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://127.0.0.1:10000", NULL, false));
++    TEST_ASSERT_FALSE(origin_ok("http://127.0.0.1:1000", "127.0.0.1:10000", false));
++}
++
++/* DNS rebinding: Origin and Host agree but name a domain the attacker owns.
++ * Over ws that must be refused; over wss the certificate would not match. */
++void test_rebindable_hosts_are_refused_over_plain_ws(void)
++{
++    TEST_ASSERT_FALSE(origin_ok("http://evil.example:10000", "evil.example:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://127.0.0.1.evil.example:10000",
++                                "127.0.0.1.evil.example:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://1.2.3.4.5:10000", "1.2.3.4.5:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://256.0.0.1:10000", "256.0.0.1:10000", false));
++    TEST_ASSERT_FALSE(origin_ok("http://x.local.evil.example:10000",
++                                "x.local.evil.example:10000", false));
++    TEST_ASSERT_TRUE(origin_ok("https://evil.example", "evil.example", true));
++}
++
+ int main(void)
+ {
+     UNITY_BEGIN();
+@@ -524,5 +605,12 @@ int main(void)
+     RUN_TEST(test_sanitiser_rejects_the_invalid_utf8_that_looks_well_formed);
+     RUN_TEST(test_sanitiser_keeps_every_valid_length);
+ 
++    RUN_TEST(test_origin_absent_is_allowed);
++    RUN_TEST(test_same_origin_pages_are_allowed);
++    RUN_TEST(test_cross_origin_pages_are_refused);
++    RUN_TEST(test_rebindable_hosts_are_refused_over_plain_ws);
++    RUN_TEST(test_listed_origins_are_allowed_exactly);
++    RUN_TEST(test_private_zone_names_are_allowed_over_plain_ws);
++
+     return UNITY_END();
+ }

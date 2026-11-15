@@ -9,6 +9,7 @@
 - Reviewed owner-supplied VarAC screenshots as a workflow checklist (docs/04 §8); owner decided Core includes rig control through one shared rigctld (D13). Dummy-rig lab 14/14.
 - Windows virtual-cable lab over VB-Audio Cable A/B: M0 scenario 17/17 at BW2300 and BW500; desktop shell alongside both modems with no measurable effect.
 - Closed Mercury's listener exposure with upstream PR #565 (`bind_address`): loopback-only binding proven, LAN refused, scenario 17/17; patch mechanism in `lab/mercury-patches/`.
+- Closed browser access to Mercury's UI WebSocket with upstream PR #566 (Origin/Host checks), merged onto #565: cross-origin, `null` and DNS-rebinding upgrades refused (36/36), scenario 17/17; managed mode writes `ui_allowed_origins = ""`.
 - Proved CQ and MCB/1 beacons over Mercury's broadcast plane (11/11): KISS codec, MCB/1 encoder/strict decoder with golden vectors, idle-only and capacity-limited broadcast gate.
 
 ## 0.2 — 14 November 2026
