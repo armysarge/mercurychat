@@ -59,10 +59,16 @@ pub enum Command {
     Listen(bool),
     Public(bool),
     Bw(Bandwidth),
-    Connect { mycall: Callsign, theircall: Callsign },
+    Connect {
+        mycall: Callsign,
+        theircall: Callsign,
+    },
     Disconnect,
     Abort,
-    CqFrame { source: Callsign, bw: Bandwidth },
+    CqFrame {
+        source: Callsign,
+        bw: Bandwidth,
+    },
     /// Listen mode index (`MODE n`). Mercury answers a bare `BUSY` while an ARQ
     /// session is up, so only send it while the link is idle.
     Mode(u8),

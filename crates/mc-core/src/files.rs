@@ -11,10 +11,7 @@ const RESERVED: [&str; 22] = [
 /// Reduce a peer-supplied name to a safe single path component.
 pub fn sanitize_name(offered: &str) -> String {
     let base = offered.rsplit(['/', '\\']).next().unwrap_or("");
-    let mut s: String = base
-        .chars()
-        .map(|c| if c.is_control() || "<>:\"|?*".contains(c) { '_' } else { c })
-        .collect();
+    let mut s: String = base.chars().map(|c| if c.is_control() || "<>:\"|?*".contains(c) { '_' } else { c }).collect();
     s = s.trim_matches(|c: char| c == '.' || c == ' ').to_string();
     if s.is_empty() {
         s = "file".into();

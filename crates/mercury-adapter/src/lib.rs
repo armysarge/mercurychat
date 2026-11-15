@@ -4,9 +4,9 @@
 pub mod client;
 pub mod command;
 pub mod control;
-pub mod kiss;
 #[cfg(feature = "fake")]
 pub mod fake;
+pub mod kiss;
 
 pub use client::{Ack, AdapterEvent, AttachError, Attachment, CommandError, Endpoint, MercuryClient, Timeouts};
 pub use command::{Bandwidth, Callsign, Command};

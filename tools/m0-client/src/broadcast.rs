@@ -26,7 +26,10 @@ pub enum GateRefusal {
     /// Calling, connected or draining: Mercury would accept and then drop it.
     SessionActive,
     /// Larger than the listen mode's wrapped capacity: Mercury would truncate it.
-    TooLarge { len: usize, capacity: usize },
+    TooLarge {
+        len: usize,
+        capacity: usize,
+    },
     UnknownListenMode,
 }
 
@@ -62,8 +65,12 @@ impl Side {
                     match ev {
                         AdapterEvent::Control(c) => {
                             match &c {
-                                ControlEvent::Connected { .. } | ControlEvent::Pending => *session.lock().unwrap() = true,
-                                ControlEvent::Disconnected | ControlEvent::CancelPending => *session.lock().unwrap() = false,
+                                ControlEvent::Connected { .. } | ControlEvent::Pending => {
+                                    *session.lock().unwrap() = true
+                                }
+                                ControlEvent::Disconnected | ControlEvent::CancelPending => {
+                                    *session.lock().unwrap() = false
+                                }
                                 _ => {}
                             }
                             events.lock().unwrap().push((Instant::now(), c));
@@ -132,7 +139,12 @@ impl Side {
         Ok(())
     }
 
-    pub async fn wait_event(&self, since: Instant, timeout: Duration, pred: impl Fn(&ControlEvent) -> bool) -> Option<Instant> {
+    pub async fn wait_event(
+        &self,
+        since: Instant,
+        timeout: Duration,
+        pred: impl Fn(&ControlEvent) -> bool,
+    ) -> Option<Instant> {
         let end = Instant::now() + timeout;
         loop {
             if let Some(t) = self.events.lock().unwrap().iter().find(|(t, e)| *t >= since && pred(e)).map(|(t, _)| *t) {
@@ -159,11 +171,22 @@ impl Side {
     }
 
     fn lines_since(&self, since: Instant, prefix: &str) -> Vec<String> {
-        self.lines.lock().unwrap().iter().filter(|(t, l)| *t >= since && l.starts_with(prefix)).map(|(_, l)| l.clone()).collect()
+        self.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(t, l)| *t >= since && l.starts_with(prefix))
+            .map(|(_, l)| l.clone())
+            .collect()
     }
 
     pub fn transcript(&self, start: Instant) -> String {
-        self.lines.lock().unwrap().iter().map(|(t, l)| format!("{:>9} {}\n", t.duration_since(start).as_millis(), l)).collect()
+        self.lines
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(t, l)| format!("{:>9} {}\n", t.duration_since(start).as_millis(), l))
+            .collect()
     }
 }
 
@@ -178,7 +201,11 @@ struct Steps {
 
 impl Steps {
     fn push(&mut self, step: &str, pass: bool, started: Instant, detail: String) {
-        println!("--> {step}\n    {} ({} ms) {detail}", if pass { "PASS" } else { "FAIL" }, started.elapsed().as_millis());
+        println!(
+            "--> {step}\n    {} ({} ms) {detail}",
+            if pass { "PASS" } else { "FAIL" },
+            started.elapsed().as_millis()
+        );
         self.steps.push(StepResult { step: step.into(), pass, millis: started.elapsed().as_millis(), detail });
     }
     fn measure(&mut self, k: &str, v: String) {
@@ -191,7 +218,9 @@ async fn cq(s: &mut Steps, tx: &Side, rx: &Side) {
     let t = Instant::now();
     let ack = tx.cmd(Command::CqFrame { source: tx.call.clone(), bw: Bandwidth::Bw2300 }).await;
     let src = tx.call.as_str().to_string();
-    let heard = rx.wait_event(t, Duration::from_secs(25), |e| matches!(e, ControlEvent::CqFrame { source, .. } if *source == src)).await;
+    let heard = rx
+        .wait_event(t, Duration::from_secs(25), |e| matches!(e, ControlEvent::CqFrame { source, .. } if *source == src))
+        .await;
     let pend = tx.wait_event(t, Duration::from_secs(1), |e| *e == ControlEvent::Pending).await;
     let done = tx.wait_event(t, Duration::from_secs(10), |e| *e == ControlEvent::CancelPending).await;
     let ok = heard.is_some() && pend.is_some() && done.is_some();
@@ -201,7 +230,10 @@ async fn cq(s: &mut Steps, tx: &Side, rx: &Side) {
         t,
         format!(
             "ack {ack}; PENDING..CANCELPENDING {}; {} reported CQFRAME {} after {}",
-            match (pend, done) { (Some(p), Some(d)) => secs(d - p), _ => "missing".into() },
+            match (pend, done) {
+                (Some(p), Some(d)) => secs(d - p),
+                _ => "missing".into(),
+            },
             rx.name,
             src,
             heard.map(|h| secs(h - t)).unwrap_or_else(|| "never".into())
@@ -225,7 +257,14 @@ async fn beacon_exchange(s: &mut Steps, tx: &Side, rx: &Side, grid: &str, seq: u
         &format!("MCB/1 beacon {}->{} (wrapped KISS 0x00, listen mode DATAC3)", tx.name, rx.name),
         ok,
         t,
-        format!("{} bytes, gate {:?}; {} got {:?} after {}", p.len(), sent, rx.name, class, got.map(|(g, _)| secs(g - t)).unwrap_or_else(|| "never".into())),
+        format!(
+            "{} bytes, gate {:?}; {} got {:?} after {}",
+            p.len(),
+            sent,
+            rx.name,
+            class,
+            got.map(|(g, _)| secs(g - t)).unwrap_or_else(|| "never".into())
+        ),
     );
     if let Some((g, _)) = rx.frames.lock().unwrap().iter().find(|(tt, _)| *tt >= t) {
         s.measure(&format!("beacon_latency_ms[{}->{}]", tx.name, rx.name), (*g - t).as_millis().to_string());
@@ -317,7 +356,11 @@ pub async fn run(a: &mut Side, b: &mut Side) -> Report {
     let after = a.gate(20);
     s.push(
         "broadcast gate: refused while calling and connected, open again after DISCONNECTED",
-        calling == Err(GateRefusal::SessionActive) && conn.is_some() && during == Err(GateRefusal::SessionActive) && da.is_some() && after.is_ok(),
+        calling == Err(GateRefusal::SessionActive)
+            && conn.is_some()
+            && during == Err(GateRefusal::SessionActive)
+            && da.is_some()
+            && after.is_ok(),
         t,
         format!(
             "calling {calling:?}; connected after {}; during {during:?}; disconnected after {}; after {after:?}",

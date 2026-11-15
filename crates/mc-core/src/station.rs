@@ -7,7 +7,9 @@
 
 use crate::session::{ModemSignal, Session, SessionCommand, SessionConfig, SessionEnd, SessionEvent};
 use mc_storage::Store;
-use mercury_adapter::{Ack, AdapterEvent, Attachment, Bandwidth, Callsign, Command, ControlEvent, Endpoint, MercuryClient, Timeouts};
+use mercury_adapter::{
+    Ack, AdapterEvent, Attachment, Bandwidth, Callsign, Command, ControlEvent, Endpoint, MercuryClient, Timeouts,
+};
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -89,7 +91,16 @@ impl Station {
     pub fn open(cfg: StationConfig) -> Result<Self, StationError> {
         std::fs::create_dir_all(cfg.data_dir.join("files")).ok();
         let store = Store::open(&cfg.data_dir.join("station.db"))?;
-        Ok(Station { cfg, store, att: None, started: std::time::Instant::now(), transcript: Vec::new(), ptt_events: 0, stale_bytes_discarded: 0, stale_tx_purged: 0 })
+        Ok(Station {
+            cfg,
+            store,
+            att: None,
+            started: std::time::Instant::now(),
+            transcript: Vec::new(),
+            ptt_events: 0,
+            stale_bytes_discarded: 0,
+            stale_tx_purged: 0,
+        })
     }
 
     pub fn files_dir(&self) -> PathBuf {
@@ -107,7 +118,11 @@ impl Station {
     fn note(&mut self, ev: &AdapterEvent) {
         if let AdapterEvent::RawLine(l) = ev {
             let generation = self.generation();
-            self.transcript.push(TranscriptLine { t_ms: self.started.elapsed().as_millis(), generation, line: l.clone() });
+            self.transcript.push(TranscriptLine {
+                t_ms: self.started.elapsed().as_millis(),
+                generation,
+                line: l.clone(),
+            });
             if self.transcript.len() > 20_000 {
                 self.transcript.drain(..5_000);
             }
@@ -132,7 +147,12 @@ impl Station {
     }
 
     /// Wait for a control event matching `f`, recording everything seen.
-    async fn wait_for<F>(&mut self, what: &'static str, timeout: Duration, mut f: F) -> Result<ControlEvent, StationError>
+    async fn wait_for<F>(
+        &mut self,
+        what: &'static str,
+        timeout: Duration,
+        mut f: F,
+    ) -> Result<ControlEvent, StationError>
     where
         F: FnMut(&ControlEvent) -> bool,
     {
@@ -182,16 +202,16 @@ impl Station {
     /// them before any session can start. Returns the bytes found queued.
     pub async fn purge_stale_tx(&mut self) -> Result<u64, StationError> {
         self.att.as_ref().ok_or(StationError::Detached)?.client.query("BUFFER").await?;
-        let queued = match self
-            .wait_for("BUFFER", Duration::from_secs(3), |e| matches!(e, ControlEvent::Buffer(_)))
-            .await
-        {
-            Ok(ControlEvent::Buffer(n)) => n,
-            _ => return Ok(0),
-        };
+        let queued =
+            match self.wait_for("BUFFER", Duration::from_secs(3), |e| matches!(e, ControlEvent::Buffer(_))).await {
+                Ok(ControlEvent::Buffer(n)) => n,
+                _ => return Ok(0),
+            };
         if queued > 0 {
             self.cmd(Command::Abort).await?;
-            let _ = self.wait_for("DISCONNECTED after purge", Duration::from_secs(3), |e| *e == ControlEvent::Disconnected).await;
+            let _ = self
+                .wait_for("DISCONNECTED after purge", Duration::from_secs(3), |e| *e == ControlEvent::Disconnected)
+                .await;
             self.stale_tx_purged += queued;
             self.store.log_event("modem", &format!("idle modem had {queued} queued TX byte(s); purged with ABORT"))?;
         }
@@ -224,7 +244,11 @@ impl Station {
             let attached = match attached {
                 Ok(()) => {
                     self.cmd(Command::Abort).await?;
-                    let _ = self.wait_for("post-recovery DISCONNECTED", Duration::from_secs(5), |e| *e == ControlEvent::Disconnected).await;
+                    let _ = self
+                        .wait_for("post-recovery DISCONNECTED", Duration::from_secs(5), |e| {
+                            *e == ControlEvent::Disconnected
+                        })
+                        .await;
                     let keyed = self.wait_teardown_keyed(Duration::from_secs(20)).await;
                     self.store.log_event("recovery", &format!("ABORT teardown frame keyed: {keyed}"))?;
                     self.init_modem().await
@@ -235,7 +259,10 @@ impl Station {
                 Ok(()) => {
                     let stale = self.discard_stale_data(Duration::from_millis(1500)).await;
                     self.stale_bytes_discarded += stale;
-                    self.store.log_event("recovery", &format!("discarded {stale} stale data byte(s) from the previous session"))?;
+                    self.store.log_event(
+                        "recovery",
+                        &format!("discarded {stale} stale data byte(s) from the previous session"),
+                    )?;
                     self.store.log_event("recovery", &format!("re-attached after {} attempt(s)", attempt + 1))?;
                     return Ok(());
                 }
@@ -269,7 +296,9 @@ impl Station {
     pub async fn call(&mut self, peer: &Callsign, timeout: Duration) -> Result<ConnectInfo, StationError> {
         self.cmd(Command::Connect { mycall: self.cfg.callsign.clone(), theircall: peer.clone() }).await?;
         let ev = match self
-            .wait_for("CONNECTED", timeout, |e| matches!(e, ControlEvent::Connected { .. } | ControlEvent::Disconnected))
+            .wait_for("CONNECTED", timeout, |e| {
+                matches!(e, ControlEvent::Connected { .. } | ControlEvent::Disconnected)
+            })
             .await
         {
             Ok(ev) => ev,

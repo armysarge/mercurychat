@@ -36,11 +36,23 @@ pub struct SessionConfig {
 #[derive(Debug)]
 pub enum SessionCommand {
     /// Send (or, with an existing `id`, deliberately retry) a chat message.
-    SendChat { id: ObjectId, text: String },
-    SendFile { path: PathBuf, opts: SendFileOpts },
-    AcceptFile { id: ObjectId },
-    RejectFile { id: ObjectId },
-    CancelFile { id: ObjectId },
+    SendChat {
+        id: ObjectId,
+        text: String,
+    },
+    SendFile {
+        path: PathBuf,
+        opts: SendFileOpts,
+    },
+    AcceptFile {
+        id: ObjectId,
+    },
+    RejectFile {
+        id: ObjectId,
+    },
+    CancelFile {
+        id: ObjectId,
+    },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -214,12 +226,28 @@ impl<'a> Session<'a> {
         // Truthful states on any ending: nothing in flight is "delivered".
         let _ = self.store.mark_in_flight_uncertain();
         if let Some(of) = self.out_file.take() {
-            let _ = self.store.update_transfer(&self.cfg.peer_call, "out", &of.id.0, "interrupted", Some(of.sent), None, None);
+            let _ = self.store.update_transfer(
+                &self.cfg.peer_call,
+                "out",
+                &of.id.0,
+                "interrupted",
+                Some(of.sent),
+                None,
+                None,
+            );
         }
         if let Some(inf) = self.in_file.take() {
             drop(inf.file);
             let _ = tokio::fs::remove_file(&inf.temp).await;
-            let _ = self.store.update_transfer(&self.cfg.peer_call, "in", &inf.id.0, "interrupted", Some(inf.received), None, None);
+            let _ = self.store.update_transfer(
+                &self.cfg.peer_call,
+                "in",
+                &inf.id.0,
+                "interrupted",
+                Some(inf.received),
+                None,
+                None,
+            );
         }
         let _ = self.store.log_event("session", &format!("gen {} ended: {end:?}", self.cfg.generation));
         end
@@ -350,7 +378,15 @@ impl<'a> Session<'a> {
                 let f = Frame::empty(FrameType::FileEnd, id);
                 self.write_frame(data, &f).await?;
                 let peer = self.cfg.peer_call.clone();
-                let _ = self.store.update_transfer(&peer, "out", &id.0, "awaiting_receipt", Some(self.out_file.as_ref().unwrap().sent), None, None);
+                let _ = self.store.update_transfer(
+                    &peer,
+                    "out",
+                    &id.0,
+                    "awaiting_receipt",
+                    Some(self.out_file.as_ref().unwrap().sent),
+                    None,
+                    None,
+                );
                 break;
             }
             let want = (of.size - of.sent).min(of.chunk as u64) as usize;
@@ -386,9 +422,10 @@ impl<'a> Session<'a> {
             SessionCommand::SendChat { id, text } => {
                 let peer = self.cfg.peer_call.clone();
                 if self.store.out_state(&peer, &id.0).ok().flatten().is_none()
-                    && self.store.insert_outgoing(&peer, &id.0, &text).is_err() {
-                        return;
-                    }
+                    && self.store.insert_outgoing(&peer, &id.0, &text).is_err()
+                {
+                    return;
+                }
                 match chat_frame(id, &text) {
                     Ok(f) => self.q_chat.push_back((id, f)),
                     Err(_) => {
@@ -431,7 +468,10 @@ impl<'a> Session<'a> {
             }
         };
         if size > self.cfg.max_file || size == 0 {
-            self.emit(SessionEvent::FileFailed { id, reason: format!("size {size} outside 1..={}", self.cfg.max_file) });
+            self.emit(SessionEvent::FileFailed {
+                id,
+                reason: format!("size {size} outside 1..={}", self.cfg.max_file),
+            });
             return;
         }
         let real_sha = sha.clone();
@@ -464,7 +504,8 @@ impl<'a> Session<'a> {
                 }
                 self.peer_hello_seen = true;
                 self.peer_max_chunk = h.max_chunk;
-                let caps: Vec<String> = h.capabilities.iter().filter(|c| *c == "chat" || *c == "file").cloned().collect();
+                let caps: Vec<String> =
+                    h.capabilities.iter().filter(|c| *c == "chat" || *c == "file").cloned().collect();
                 let ack = HelloAck { nonce: h.nonce.clone(), major: 1, minor: mch_protocol::MINOR, capabilities: caps };
                 self.q_proto.push_back(ack.to_frame().map_err(proto_err)?);
                 let chunk = self.agreed_chunk();
@@ -504,7 +545,8 @@ impl<'a> Session<'a> {
             FrameType::FileOffer => self.on_offer(&f).await?,
             FrameType::FileAccept => {
                 let a = FileAccept::from_frame(&f).map_err(proto_err)?;
-                let Some(of) = self.out_file.as_mut().filter(|o| o.id == f.id && o.state == OutFileState::Offered) else {
+                let Some(of) = self.out_file.as_mut().filter(|o| o.id == f.id && o.state == OutFileState::Offered)
+                else {
                     return Err(SessionEnd::Protocol("FILE_ACCEPT for no pending offer".into()));
                 };
                 of.chunk = (a.chunk as usize).min(mch_protocol::MAX_CHUNK_DATA).min(self.cfg.chunk as usize);
@@ -544,12 +586,23 @@ impl<'a> Session<'a> {
                     let inf = self.in_file.take().unwrap();
                     drop(inf.file);
                     let _ = tokio::fs::remove_file(&inf.temp).await;
-                    let _ = self.store.update_transfer(&peer, "in", &f.id.0, "cancelled", Some(inf.received), None, Some(&r.code));
+                    let _ = self.store.update_transfer(
+                        &peer,
+                        "in",
+                        &f.id.0,
+                        "cancelled",
+                        Some(inf.received),
+                        None,
+                        Some(&r.code),
+                    );
                     self.emit(SessionEvent::FileFailed { id: f.id, reason: format!("sender cancelled: {}", r.code) });
                 } else if self.out_file.as_ref().is_some_and(|o| o.id == f.id) {
                     self.out_file = None;
                     let _ = self.store.update_transfer(&peer, "out", &f.id.0, "failed", None, None, Some(&r.code));
-                    self.emit(SessionEvent::FileFailed { id: f.id, reason: format!("receiver cancelled: {} {}", r.code, r.text) });
+                    self.emit(SessionEvent::FileFailed {
+                        id: f.id,
+                        reason: format!("receiver cancelled: {} {}", r.code, r.text),
+                    });
                     self.start_next_file().await;
                 }
             }
@@ -565,13 +618,17 @@ impl<'a> Session<'a> {
         let peer = self.cfg.peer_call.clone();
         let o = FileOffer::from_frame(f).map_err(proto_err)?;
         if self.in_file.is_some() {
-            let r = Reason::new("busy", "one transfer at a time").to_frame(FrameType::FileReject, f.id).map_err(proto_err)?;
+            let r = Reason::new("busy", "one transfer at a time")
+                .to_frame(FrameType::FileReject, f.id)
+                .map_err(proto_err)?;
             self.q_proto.push_back(r);
             return Ok(());
         }
         let _ = self.store.upsert_transfer(&peer, "in", &f.id.0, &o.name, o.size, &o.sha256, "offered");
         if o.size == 0 || o.size > self.cfg.max_file {
-            let r = Reason::new("too_large", &format!("limit {}", self.cfg.max_file)).to_frame(FrameType::FileReject, f.id).map_err(proto_err)?;
+            let r = Reason::new("too_large", &format!("limit {}", self.cfg.max_file))
+                .to_frame(FrameType::FileReject, f.id)
+                .map_err(proto_err)?;
             self.q_proto.push_back(r);
             let _ = self.store.update_transfer(&peer, "in", &f.id.0, "rejected", None, None, Some("too_large"));
             return Ok(());

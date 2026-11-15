@@ -89,7 +89,14 @@ fn endpoint(s: &str) -> anyhow::Result<Endpoint> {
     Ok(Endpoint::base(h, p.parse()?))
 }
 
-fn station(name: &str, call: &Callsign, ep: Endpoint, work: &Path, bw: Bandwidth, radio: bool) -> anyhow::Result<Station> {
+fn station(
+    name: &str,
+    call: &Callsign,
+    ep: Endpoint,
+    work: &Path,
+    bw: Bandwidth,
+    radio: bool,
+) -> anyhow::Result<Station> {
     let dir = work.join(format!("station-{name}"));
     if dir.exists() {
         std::fs::remove_dir_all(&dir)?;
@@ -123,9 +130,18 @@ impl Faults for RadioFaults {}
 
 fn write_outputs(work: &Path, report: &Report, a: &lab::Snapshot, b: &lab::Snapshot) -> anyhow::Result<()> {
     std::fs::write(work.join("report.json"), serde_json::to_string_pretty(report)?)?;
-    let mut md = format!("# M0 run — {}\n\n{} passed, {} failed\n\n| Step | Result | ms | Detail |\n|---|---|---|---|\n", report.mode, report.passed, report.failed);
+    let mut md = format!(
+        "# M0 run — {}\n\n{} passed, {} failed\n\n| Step | Result | ms | Detail |\n|---|---|---|---|\n",
+        report.mode, report.passed, report.failed
+    );
     for s in &report.steps {
-        md += &format!("| {} | {} | {} | {} |\n", s.step, if s.pass { "PASS" } else { "**FAIL**" }, s.millis, s.detail.replace('|', "\\|"));
+        md += &format!(
+            "| {} | {} | {} | {} |\n",
+            s.step,
+            if s.pass { "PASS" } else { "**FAIL**" },
+            s.millis,
+            s.detail.replace('|', "\\|")
+        );
     }
     if !report.measurements.is_empty() {
         md += "\n## Measurements\n\n";
@@ -149,10 +165,19 @@ async fn main() -> anyhow::Result<()> {
             std::fs::create_dir_all(&work)?;
             let net = mercury_adapter::fake::FakeNet::start().await;
             let (ca, cb) = (Callsign::parse("LABA")?, Callsign::parse("LABB")?);
-            let mut a = Handle::new("A", station("a", &ca, Endpoint::base("127.0.0.1", net.a_base), &work, Bandwidth::Bw2300, false)?, "LABB");
-            let mut b = Handle::new("B", station("b", &cb, Endpoint::base("127.0.0.1", net.b_base), &work, Bandwidth::Bw2300, false)?, "LABA");
+            let mut a = Handle::new(
+                "A",
+                station("a", &ca, Endpoint::base("127.0.0.1", net.a_base), &work, Bandwidth::Bw2300, false)?,
+                "LABB",
+            );
+            let mut b = Handle::new(
+                "B",
+                station("b", &cb, Endpoint::base("127.0.0.1", net.b_base), &work, Bandwidth::Bw2300, false)?,
+                "LABA",
+            );
             let faults = FakeFaults(net.clone());
-            let report = scenario::run("L0 fake Mercury pair", &mut a, &mut b, &ca, &cb, &work, &faults, &Budgets::fast()).await;
+            let report =
+                scenario::run("L0 fake Mercury pair", &mut a, &mut b, &ca, &cb, &work, &faults, &Budgets::fast()).await;
             let (sa, sb) = (a.snapshot().await, b.snapshot().await);
             write_outputs(&work, &report, &sa, &sb)?;
             println!("{} passed, {} failed — {}", report.passed, report.failed, work.join("report.md").display());
@@ -169,7 +194,9 @@ async fn main() -> anyhow::Result<()> {
             let mut ha = Handle::new("A", station("a", &ca, endpoint(&a)?, &work, bw, true)?, cb.as_str());
             let mut hb = Handle::new("B", station("b", &cb, endpoint(&b)?, &work, bw, true)?, ca.as_str());
             let mode = format!("L1 Mercury {a} <-> {b}, BW{}", bw.token());
-            let report = scenario::run(&mode, &mut ha, &mut hb, &ca, &cb, &work, &RadioFaults, &Budgets::radio(file_bytes)).await;
+            let report =
+                scenario::run(&mode, &mut ha, &mut hb, &ca, &cb, &work, &RadioFaults, &Budgets::radio(file_bytes))
+                    .await;
             let (sa, sb) = (ha.snapshot().await, hb.snapshot().await);
             write_outputs(&work, &report, &sa, &sb)?;
             println!("{} passed, {} failed — {}", report.passed, report.failed, work.join("report.md").display());
@@ -182,9 +209,18 @@ async fn main() -> anyhow::Result<()> {
             let mut sb = broadcast::Side::attach("B", Callsign::parse(&call_b)?, &endpoint(&b)?, bcast_b).await?;
             let report = broadcast::run(&mut sa, &mut sb).await;
             std::fs::write(work.join("report.json"), serde_json::to_string_pretty(&report)?)?;
-            let mut md = format!("# {}\n\n{} passed, {} failed\n\n| Step | Result | ms | Detail |\n|---|---|---|---|\n", report.mode, report.passed, report.failed);
+            let mut md = format!(
+                "# {}\n\n{} passed, {} failed\n\n| Step | Result | ms | Detail |\n|---|---|---|---|\n",
+                report.mode, report.passed, report.failed
+            );
             for st in &report.steps {
-                md += &format!("| {} | {} | {} | {} |\n", st.step, if st.pass { "PASS" } else { "**FAIL**" }, st.millis, st.detail.replace('|', "\\|"));
+                md += &format!(
+                    "| {} | {} | {} | {} |\n",
+                    st.step,
+                    if st.pass { "PASS" } else { "**FAIL**" },
+                    st.millis,
+                    st.detail.replace('|', "\\|")
+                );
             }
             md += "\n## Measurements\n\n";
             for (k, v) in &report.measurements {

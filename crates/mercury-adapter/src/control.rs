@@ -65,7 +65,11 @@ pub enum ControlEvent {
     Wrong,
     Registered(String),
     /// `CONNECTED <source> <dest> <bw>` — source is always the initiator.
-    Connected { source: String, dest: String, bandwidth: String },
+    Connected {
+        source: String,
+        dest: String,
+        bandwidth: String,
+    },
     Disconnected,
     Pending,
     CancelPending,
@@ -75,7 +79,10 @@ pub enum ControlEvent {
     Bitrate(String),
     IAmAlive,
     Busy(bool),
-    CqFrame { source: String, bandwidth: String },
+    CqFrame {
+        source: String,
+        bandwidth: String,
+    },
     Monitor(String),
     /// Response to VERSION; a fixed VARA string, not Mercury's identity.
     Version(String),
@@ -90,11 +97,9 @@ pub fn parse_event(line: &str) -> ControlEvent {
         ("OK", []) => ControlEvent::Ok,
         ("WRONG", []) => ControlEvent::Wrong,
         ("REGISTERED", [c]) => ControlEvent::Registered((*c).to_string()),
-        ("CONNECTED", [s, d, bw]) => ControlEvent::Connected {
-            source: (*s).to_string(),
-            dest: (*d).to_string(),
-            bandwidth: (*bw).to_string(),
-        },
+        ("CONNECTED", [s, d, bw]) => {
+            ControlEvent::Connected { source: (*s).to_string(), dest: (*d).to_string(), bandwidth: (*bw).to_string() }
+        }
         ("DISCONNECTED", []) => ControlEvent::Disconnected,
         ("PENDING", []) => ControlEvent::Pending,
         ("CANCELPENDING", []) => ControlEvent::CancelPending,

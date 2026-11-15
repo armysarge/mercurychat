@@ -52,7 +52,9 @@ async fn connect_exchange_binary_disconnect() {
     let want = ControlEvent::Connected { source: "LABA".into(), dest: "LABB".into(), bandwidth: "2300".into() };
     assert_eq!(next_control(&mut a).await, want);
     loop {
-        if next_control(&mut b).await == want { break; }
+        if next_control(&mut b).await == want {
+            break;
+        }
     }
     let payload: Vec<u8> = (0..=255u8).cycle().take(5000).collect();
     a.data.write_all(&payload).await.unwrap();
@@ -61,6 +63,8 @@ async fn connect_exchange_binary_disconnect() {
     assert_eq!(got, payload);
     assert_eq!(a.client.command(&Command::Disconnect).await, Ok(Ack::Ok));
     loop {
-        if next_control(&mut b).await == ControlEvent::Disconnected { break; }
+        if next_control(&mut b).await == ControlEvent::Disconnected {
+            break;
+        }
     }
 }

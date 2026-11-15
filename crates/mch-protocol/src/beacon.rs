@@ -99,9 +99,7 @@ pub fn valid_grid(g: &str) -> bool {
 }
 
 fn normalise_grid(g: &str) -> String {
-    g.char_indices()
-        .map(|(i, c)| if i < 2 { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() })
-        .collect()
+    g.char_indices().map(|(i, c)| if i < 2 { c.to_ascii_uppercase() } else { c.to_ascii_lowercase() }).collect()
 }
 
 impl Beacon {

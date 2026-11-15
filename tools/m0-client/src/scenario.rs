@@ -124,7 +124,12 @@ fn write_vector(dir: &Path, name: &str, len: usize, seed: u64) -> (PathBuf, Vec<
     (p, v)
 }
 
-async fn connect_pair(a: &mut Handle, b: &mut Handle, call_b: &Callsign, t: Duration) -> Result<(ConnectInfo, ConnectInfo), String> {
+async fn connect_pair(
+    a: &mut Handle,
+    b: &mut Handle,
+    call_b: &Callsign,
+    t: Duration,
+) -> Result<(ConnectInfo, ConnectInfo), String> {
     b.listen(true).await?;
     let (ia, ib) = tokio::join!(a.call(call_b, t), b.wait_incoming(t));
     let (ia, ib) = (ia?, ib?);
@@ -140,11 +145,17 @@ async fn negotiate(a: &mut Handle, b: &mut Handle, t: Duration) -> Result<String
     Ok(format!("A sees {ea:?}; B sees {eb:?}"))
 }
 
-async fn send_chat_and_confirm(from: &mut Handle, to: &mut Handle, text: &str, t: Duration) -> Result<(ObjectId, Duration), String> {
+async fn send_chat_and_confirm(
+    from: &mut Handle,
+    to: &mut Handle,
+    text: &str,
+    t: Duration,
+) -> Result<(ObjectId, Duration), String> {
     let id = ObjectId::random();
     let start = Instant::now();
     from.send(SessionCommand::SendChat { id, text: text.into() }).await;
-    let got = to.expect("ChatReceived", t, |e| matches!(e, SessionEvent::ChatReceived { id: i, .. } if *i == id)).await?;
+    let got =
+        to.expect("ChatReceived", t, |e| matches!(e, SessionEvent::ChatReceived { id: i, .. } if *i == id)).await?;
     let SessionEvent::ChatReceived { text: body, duplicate, .. } = got else { unreachable!() };
     if body != text {
         return Err(format!("body mismatch: sent {} bytes, got {} bytes", text.len(), body.len()));
@@ -156,12 +167,20 @@ async fn send_chat_and_confirm(from: &mut Handle, to: &mut Handle, text: &str, t
     Ok((id, start.elapsed()))
 }
 
-async fn file_transfer(from: &mut Handle, to: &mut Handle, path: &Path, bytes: &[u8], t: Duration) -> Result<String, String> {
+async fn file_transfer(
+    from: &mut Handle,
+    to: &mut Handle,
+    path: &Path,
+    bytes: &[u8],
+    t: Duration,
+) -> Result<String, String> {
     from.clear_backlog();
     to.clear_backlog();
     let start = Instant::now();
     from.send(SessionCommand::SendFile { path: path.into(), opts: SendFileOpts::default() }).await;
-    let r = to.expect("FileReceived", t, |e| matches!(e, SessionEvent::FileReceived { .. } | SessionEvent::FileFailed { .. })).await?;
+    let r = to
+        .expect("FileReceived", t, |e| matches!(e, SessionEvent::FileReceived { .. } | SessionEvent::FileFailed { .. }))
+        .await?;
     let SessionEvent::FileReceived { path: out, sha256, .. } = r else { return Err(format!("receiver: {r:?}")) };
     let got = std::fs::read(&out).map_err(|e| e.to_string())?;
     if got != bytes || sha256 != sha256_hex(bytes) {
@@ -193,23 +212,28 @@ pub async fn run(
     std::fs::create_dir_all(work).ok();
 
     // 1. Attach in safe receive-only state.
-    if !run.step("attach both stations (MYCALL, PUBLIC OFF, LISTEN OFF, BW)", || async {
-        a.attach().await?;
-        b.attach().await?;
-        Ok("both attached; REGISTERED received".into())
-    }).await {
+    if !run
+        .step("attach both stations (MYCALL, PUBLIC OFF, LISTEN OFF, BW)", || async {
+            a.attach().await?;
+            b.attach().await?;
+            Ok("both attached; REGISTERED received".into())
+        })
+        .await
+    {
         return finish(mode, run);
     }
 
     // 2. Connect A -> B, verify endpoint order and peer derivation.
-    let mut ok = run.step("connect A->B and verify CONNECTED endpoint order", || async {
-        let t = Instant::now();
-        let (ia, ib) = connect_pair(a, b, call_b, bud.call).await?;
-        if !(ia.initiator && !ib.initiator && ia.peer == call_b.as_str() && ib.peer == call_a.as_str()) {
-            return Err(format!("unexpected endpoints A={ia:?} B={ib:?}"));
-        }
-        Ok(format!("CONNECTED {} {} {} after {} ms", ia.source, ia.dest, ia.bandwidth, t.elapsed().as_millis()))
-    }).await;
+    let mut ok = run
+        .step("connect A->B and verify CONNECTED endpoint order", || async {
+            let t = Instant::now();
+            let (ia, ib) = connect_pair(a, b, call_b, bud.call).await?;
+            if !(ia.initiator && !ib.initiator && ia.peer == call_b.as_str() && ib.peer == call_a.as_str()) {
+                return Err(format!("unexpected endpoints A={ia:?} B={ib:?}"));
+            }
+            Ok(format!("CONNECTED {} {} {} after {} ms", ia.source, ia.dest, ia.bandwidth, t.elapsed().as_millis()))
+        })
+        .await;
     if ok {
         ok = run.step("MCH/1 HELLO negotiation", || negotiate(a, b, bud.receipt)).await;
     }
@@ -231,7 +255,8 @@ pub async fn run(
             let (_, d) = send_chat_and_confirm(a, b, &text, bud.receipt).await?;
             lat = Some(d);
             Ok(format!("{} bytes, delivered (receipt) in {} ms", text.len(), d.as_millis()))
-        }).await;
+        })
+        .await;
         if let Some(d) = lat {
             run.measure(&format!("chat_latency_ms[{label}]"), d.as_millis().to_string());
         }
@@ -239,11 +264,15 @@ pub async fn run(
     run.step("chat B->A with application receipt", || async {
         let (_, d) = send_chat_and_confirm(b, a, "73 from LABB", bud.receipt).await?;
         Ok(format!("delivered in {} ms", d.as_millis()))
-    }).await;
+    })
+    .await;
 
     // 4. Binary file A -> B.
     let (fpath, fbytes) = write_vector(work, "vector-a.bin", bud.file_bytes, 1);
-    run.step("binary file A->B: offer, accept, chunks, SHA-256, receipt", || file_transfer(a, b, &fpath, &fbytes, bud.file)).await;
+    run.step("binary file A->B: offer, accept, chunks, SHA-256, receipt", || {
+        file_transfer(a, b, &fpath, &fbytes, bud.file)
+    })
+    .await;
 
     // 5. Chat priority while a file is queued B -> A.
     let (gpath, gbytes) = write_vector(work, "vector-b.bin", bud.chat_during_file_bytes, 2);
@@ -255,7 +284,11 @@ pub async fn run(
         b.expect("first FileProgress", bud.file, |e| matches!(e, SessionEvent::FileProgress { .. })).await?;
         let (_, chat_lat) = send_chat_and_confirm(a, b, "chat during transfer", bud.receipt).await?;
         let chat_done = fstart.elapsed();
-        let r = a.expect("FileReceived", bud.file, |e| matches!(e, SessionEvent::FileReceived { .. } | SessionEvent::FileFailed { .. })).await?;
+        let r = a
+            .expect("FileReceived", bud.file, |e| {
+                matches!(e, SessionEvent::FileReceived { .. } | SessionEvent::FileFailed { .. })
+            })
+            .await?;
         let SessionEvent::FileReceived { path, .. } = r else { return Err(format!("{r:?}")) };
         if std::fs::read(&path).map_err(|e| e.to_string())? != gbytes {
             return Err("file content mismatch".into());
@@ -264,9 +297,12 @@ pub async fn run(
         let file_done = fstart.elapsed();
         Ok(format!(
             "chat delivered {} ms after transfer start (latency {} ms); file finished at {} ms",
-            chat_done.as_millis(), chat_lat.as_millis(), file_done.as_millis()
+            chat_done.as_millis(),
+            chat_lat.as_millis(),
+            file_done.as_millis()
         ))
-    }).await;
+    })
+    .await;
 
     // 6. Integrity: declared hash wrong -> no receipt, nothing published.
     let (hpath, _) = write_vector(work, "bad-hash.bin", 3000, 3);
@@ -274,12 +310,21 @@ pub async fn run(
         a.clear_backlog();
         b.clear_backlog();
         let before = std::fs::read_dir(b.files_dir()).map(|d| d.count()).unwrap_or(0);
-        a.send(SessionCommand::SendFile { path: hpath.clone(), opts: SendFileOpts { corrupt_declared_hash: true } }).await;
-        let r = b.expect("FileFailed", bud.file, |e| matches!(e, SessionEvent::FileFailed { .. } | SessionEvent::FileReceived { .. })).await?;
+        a.send(SessionCommand::SendFile { path: hpath.clone(), opts: SendFileOpts { corrupt_declared_hash: true } })
+            .await;
+        let r = b
+            .expect("FileFailed", bud.file, |e| {
+                matches!(e, SessionEvent::FileFailed { .. } | SessionEvent::FileReceived { .. })
+            })
+            .await?;
         if !matches!(&r, SessionEvent::FileFailed { reason, .. } if reason.starts_with("hash_mismatch")) {
             return Err(format!("receiver: {r:?}"));
         }
-        let s = a.expect("sender sees failure", bud.receipt, |e| matches!(e, SessionEvent::FileFailed { .. } | SessionEvent::FileDelivered { .. })).await?;
+        let s = a
+            .expect("sender sees failure", bud.receipt, |e| {
+                matches!(e, SessionEvent::FileFailed { .. } | SessionEvent::FileDelivered { .. })
+            })
+            .await?;
         if matches!(s, SessionEvent::FileDelivered { .. }) {
             return Err("sender saw a receipt for a corrupt file".into());
         }
@@ -288,7 +333,8 @@ pub async fn run(
             return Err("a file was published".into());
         }
         Ok(format!("receiver: {r:?}; sender: {s:?}"))
-    }).await;
+    })
+    .await;
 
     // 7. Graceful disconnect.
     run.step("graceful DISCONNECT from A; both sessions end", || async {
@@ -297,26 +343,36 @@ pub async fn run(
         let ea = a.wait_end(bud.disconnect).await?;
         let eb = b.wait_end(bud.disconnect).await?;
         Ok(format!("A {ea:?}, B {eb:?} after {} ms", t.elapsed().as_millis()))
-    }).await;
+    })
+    .await;
 
     // 8. Interrupted connection: A crashes after sending; message is uncertain.
     let uncertain_id = ObjectId::random();
     let uncertain_text = "sent just before the host crashed";
-    let ok = run.step("reconnect, then drop A's sockets right after a send", || async {
-        let (_, _) = connect_pair(a, b, call_b, bud.call).await?;
-        negotiate(a, b, bud.receipt).await?;
-        faults.before_uncertain_send();
-        a.send(SessionCommand::SendChat { id: uncertain_id, text: uncertain_text.into() }).await;
-        a.expect("ChatSubmitted", bud.receipt, |e| matches!(e, SessionEvent::ChatSubmitted { id, .. } if *id == uncertain_id)).await?;
-        a.drop_sockets().await;
-        let ea = a.wait_end(bud.receipt).await?;
-        faults.after_drop();
-        let row = a.messages().into_iter().find(|m| m.wire_id == uncertain_id.0);
-        match row {
-            Some(m) if m.state == "uncertain" => Ok(format!("A session end {ea:?}; message state 'uncertain' (not failed, not delivered)")),
-            other => Err(format!("A message row {other:?}")),
-        }
-    }).await;
+    let ok = run
+        .step("reconnect, then drop A's sockets right after a send", || async {
+            let (_, _) = connect_pair(a, b, call_b, bud.call).await?;
+            negotiate(a, b, bud.receipt).await?;
+            faults.before_uncertain_send();
+            a.send(SessionCommand::SendChat { id: uncertain_id, text: uncertain_text.into() }).await;
+            a.expect(
+                "ChatSubmitted",
+                bud.receipt,
+                |e| matches!(e, SessionEvent::ChatSubmitted { id, .. } if *id == uncertain_id),
+            )
+            .await?;
+            a.drop_sockets().await;
+            let ea = a.wait_end(bud.receipt).await?;
+            faults.after_drop();
+            let row = a.messages().into_iter().find(|m| m.wire_id == uncertain_id.0);
+            match row {
+                Some(m) if m.state == "uncertain" => {
+                    Ok(format!("A session end {ea:?}; message state 'uncertain' (not failed, not delivered)"))
+                }
+                other => Err(format!("A message row {other:?}")),
+            }
+        })
+        .await;
 
     if ok {
         run.step("recover A: backoff re-attach, ABORT quarantine, stale data discarded", || async {
@@ -329,7 +385,8 @@ pub async fn run(
                 t.elapsed().as_millis(),
                 snap.stale_bytes_discarded
             ))
-        }).await;
+        })
+        .await;
 
         run.step("deliberate retry with the same message ID is deduplicated", || async {
             let first_copy = b.has_seen(|e| matches!(e, SessionEvent::ChatReceived { id, duplicate: false, .. } if *id == uncertain_id));
@@ -359,7 +416,8 @@ pub async fn run(
         let id = ObjectId::random();
         faults.before_uncertain_send();
         a.send(SessionCommand::SendChat { id, text: "queued then aborted ".repeat(20) }).await;
-        a.expect("ChatSubmitted", bud.receipt, |e| matches!(e, SessionEvent::ChatSubmitted { id: i, .. } if *i == id)).await?;
+        a.expect("ChatSubmitted", bud.receipt, |e| matches!(e, SessionEvent::ChatSubmitted { id: i, .. } if *i == id))
+            .await?;
         a.session_command(Command::Abort).await.map_err(|e| e.to_string())?;
         let ea = a.wait_end(bud.disconnect).await?;
         faults.after_drop();
@@ -369,7 +427,8 @@ pub async fn run(
             return Err("aborted message marked delivered".into());
         }
         Ok(format!("A {ea:?} / B {eb:?}; message state {st:?}"))
-    }).await;
+    })
+    .await;
 
     // 10. Final consistency check.
     run.step("final stores: no duplicates at B, no delivered-without-receipt at A", || async {
@@ -383,8 +442,12 @@ pub async fn run(
         }
         let sa = a.snapshot().await;
         let states: Vec<_> = sa.messages.iter().filter(|m| m.direction == "out").map(|m| m.state.clone()).collect();
-        Ok(format!("B incoming rows {n} (unique); A outgoing states {states:?}; PTT ON events A={} B={}", sa.ptt_events, sb.ptt_events))
-    }).await;
+        Ok(format!(
+            "B incoming rows {n} (unique); A outgoing states {states:?}; PTT ON events A={} B={}",
+            sa.ptt_events, sb.ptt_events
+        ))
+    })
+    .await;
 
     finish(mode, run)
 }

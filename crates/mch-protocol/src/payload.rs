@@ -128,9 +128,7 @@ impl FileOffer {
         if self.name.is_empty() {
             return Err(bad("empty file name"));
         }
-        if self.sha256.len() != 64
-            || !self.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-        {
+        if self.sha256.len() != 64 || !self.sha256.bytes().all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b)) {
             return Err(bad("sha256 must be 64 lowercase hex chars"));
         }
         if let Some(m) = &self.mime {

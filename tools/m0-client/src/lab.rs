@@ -37,11 +37,21 @@ pub fn spawn_station(st: Station, peer_hint: String) -> (mpsc::Sender<Ctl>, mpsc
         let mut st = st;
         while let Some(c) = rx.recv().await {
             match c {
-                Ctl::Attach(r) => { let _ = r.send(st.attach().await.map_err(|e| e.to_string())); }
-                Ctl::Recover(n, r) => { let _ = r.send(st.recover(n).await.map_err(|e| e.to_string())); }
-                Ctl::Listen(on, r) => { let _ = r.send(st.set_listen(on).await.map_err(|e| e.to_string())); }
-                Ctl::Call(p, t, r) => { let _ = r.send(st.call(&p, t).await.map_err(|e| e.to_string())); }
-                Ctl::WaitIncoming(t, r) => { let _ = r.send(st.wait_incoming(t).await.map_err(|e| e.to_string())); }
+                Ctl::Attach(r) => {
+                    let _ = r.send(st.attach().await.map_err(|e| e.to_string()));
+                }
+                Ctl::Recover(n, r) => {
+                    let _ = r.send(st.recover(n).await.map_err(|e| e.to_string()));
+                }
+                Ctl::Listen(on, r) => {
+                    let _ = r.send(st.set_listen(on).await.map_err(|e| e.to_string()));
+                }
+                Ctl::Call(p, t, r) => {
+                    let _ = r.send(st.call(&p, t).await.map_err(|e| e.to_string()));
+                }
+                Ctl::WaitIncoming(t, r) => {
+                    let _ = r.send(st.wait_incoming(t).await.map_err(|e| e.to_string()));
+                }
                 Ctl::Session { info, mut cmds, mut reqs, end } => {
                     let e = st.run_session(&info, &mut cmds, &mut reqs, ev_tx.clone()).await;
                     let _ = end.send(e);
@@ -114,22 +124,29 @@ impl Handle {
         rx.await.expect("station replied")
     }
 
-    pub async fn attach(&self) -> Result<(), String> { self.ask(Ctl::Attach).await }
-    pub async fn recover(&self, n: u32) -> Result<(), String> { self.ask(|r| Ctl::Recover(n, r)).await }
-    pub async fn listen(&self, on: bool) -> Result<(), String> { self.ask(|r| Ctl::Listen(on, r)).await }
-    pub async fn call(&self, p: &Callsign, t: Duration) -> Result<ConnectInfo, String> { self.ask(|r| Ctl::Call(p.clone(), t, r)).await }
-    pub async fn wait_incoming(&self, t: Duration) -> Result<ConnectInfo, String> { self.ask(|r| Ctl::WaitIncoming(t, r)).await }
+    pub async fn attach(&self) -> Result<(), String> {
+        self.ask(Ctl::Attach).await
+    }
+    pub async fn recover(&self, n: u32) -> Result<(), String> {
+        self.ask(|r| Ctl::Recover(n, r)).await
+    }
+    pub async fn listen(&self, on: bool) -> Result<(), String> {
+        self.ask(|r| Ctl::Listen(on, r)).await
+    }
+    pub async fn call(&self, p: &Callsign, t: Duration) -> Result<ConnectInfo, String> {
+        self.ask(|r| Ctl::Call(p.clone(), t, r)).await
+    }
+    pub async fn wait_incoming(&self, t: Duration) -> Result<ConnectInfo, String> {
+        self.ask(|r| Ctl::WaitIncoming(t, r)).await
+    }
     /// Station-side snapshot (transcript, counters). Only answered while no
     /// session is running; times out rather than hanging otherwise.
     pub async fn snapshot(&self) -> Snapshot {
         match tokio::time::timeout(Duration::from_secs(5), self.ask(Ctl::Snapshot)).await {
             Ok(s) => s,
-            Err(_) => Snapshot {
-                transcript: Vec::new(),
-                ptt_events: 0,
-                stale_bytes_discarded: 0,
-                messages: self.messages(),
-            },
+            Err(_) => {
+                Snapshot { transcript: Vec::new(), ptt_events: 0, stale_bytes_discarded: 0, messages: self.messages() }
+            }
         }
     }
 

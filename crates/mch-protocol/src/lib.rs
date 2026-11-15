@@ -232,11 +232,8 @@ impl Decoder {
         if have > 4 && b[4] != MAJOR {
             return Err(ProtocolError::BadMajor(b[4]));
         }
-        let ftype = if have > 5 {
-            Some(FrameType::from_u8(b[5]).ok_or(ProtocolError::UnknownType(b[5]))?)
-        } else {
-            None
-        };
+        let ftype =
+            if have > 5 { Some(FrameType::from_u8(b[5]).ok_or(ProtocolError::UnknownType(b[5]))?) } else { None };
         if have >= 8 {
             let flags = u16::from_be_bytes([b[6], b[7]]);
             if flags != 0 {
