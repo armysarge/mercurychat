@@ -364,6 +364,36 @@ async fn no_receipt_without_a_durable_store() {
     assert_eq!(hex::encode(at_sim1[0].1), m.id);
 }
 
+/// RF-03: Disconnect drains. A message still awaiting its receipt keeps the
+/// link up until the receipt arrives (bounded); only then is DISCONNECT sent,
+/// and the message ends delivered, not uncertain (final review I4).
+#[tokio::test(flavor = "multi_thread")]
+async fn disconnect_waits_for_outstanding_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let _peer = spawn_peer(&net, &dir.path().join("peer"), vec![]);
+    let mut app = start(&dir.path().join("app.db"), dir.path(), Some(existing(net.a_base))).await;
+    connect(&mut app).await;
+    net.set_hold_from(1, true); // SIM1's receipt is slow to come back
+    let m = send(&app.h, PEER, "last words").await.unwrap();
+    states_of(&mut app.rx, &m.id, "awaiting_receipt", 10).await;
+    wait_for("the receipt to be held", || net.held_len() > 0).await;
+
+    assert_eq!(app.h.call(AppCommand::Disconnect).await.unwrap(), CommandOk::Done);
+    until(&mut app.rx, ModemState::Draining, 5).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!net.log().iter().any(|l| l == "A> DISCONNECT"), "DISCONNECT sent with a receipt outstanding");
+
+    let receipt = net.take_held();
+    net.set_hold_from(1, false);
+    for (from, bytes) in receipt {
+        net.inject(from, bytes);
+    }
+    assert_eq!(message(&mut app.rx, Some(&m.id), 10).await.state, "delivered");
+    until(&mut app.rx, ModemState::Ready, 15).await;
+    assert!(net.log().iter().any(|l| l == "A> DISCONNECT"), "the link was ended once drained");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn uncertain_is_not_resent_on_reconnect() {
     let dir = tempfile::tempdir().unwrap();

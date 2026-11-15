@@ -120,6 +120,11 @@ pub fn spawn(
 /// modem. A stopping task ends a call it was placing first (about 7 s).
 const HANDOVER: Duration = Duration::from_secs(30);
 
+/// How long a Disconnect waits for receipts of messages already handed to the
+/// session before it ends the link anyway (they then go uncertain). Abort
+/// still ends it at once.
+const RECEIPT_DRAIN: Duration = Duration::from_secs(120);
+
 /// What cut a long modem wait short.
 enum Cut {
     Stop,
@@ -508,6 +513,13 @@ impl Link {
         Some(ChatMessage::from(&row))
     }
 
+    /// Whether a message handed to this session has no receipt yet.
+    fn unconfirmed(&self) -> bool {
+        self.submitted
+            .iter()
+            .any(|id| self.row(id).is_some_and(|m| matches!(m.state.as_str(), "queued" | "submitting" | "awaiting_receipt")))
+    }
+
     async fn report(&mut self, r: &Reporter, id: &[u8; 16]) {
         if let Some(m) = self.row(id) {
             r.message(m).await;
@@ -621,43 +633,68 @@ async fn link(
     let mut aborted = false;
     let mut stop = false;
 
+    // Disconnect was asked for (no new submissions from then on).
+    let mut ending = false;
+    // Disconnect waits for receipts until then (RF-03: a disconnect drains).
+    let mut drain_until: Option<tokio::time::Instant> = None;
+    // The session's control pump sends it; its reply is not awaited here,
+    // because the pump only runs while the session is polled.
+    let send_wire = |wire: Command| {
+        let (reply, _) = oneshot::channel();
+        let _ = req_tx.try_send(StationRequest::Command(wire, reply));
+    };
+
     let end = {
         let run = st.run_session(&info, &mut chat_rx, &mut req_rx, ev_tx);
         tokio::pin!(run);
         loop {
             tokio::select! {
                 end = &mut run => break end,
-                Some(ev) = ev_rx.recv() => link.on_event(r, ev).await,
-                c = cmds.recv() => {
-                    let wire = match c {
-                        Some(ModemCmd::Disconnect) => Command::Disconnect,
-                        Some(ModemCmd::Abort) => {
-                            aborted = true;
-                            Command::Abort
-                        }
-                        Some(ModemCmd::Submit { peer, id }) => {
-                            if peer == link.info.peer {
-                                link.submit(r, id.0).await;
-                            }
-                            continue;
-                        }
-                        Some(ModemCmd::Shutdown) | None => {
-                            // Leaving: the modem ends the link when our sockets close.
-                            stop = true;
-                            break SessionEnd::CommandsClosed;
-                        }
-                        Some(other) => {
-                            tracing::debug!(?other, "ignored during a session");
-                            continue;
-                        }
-                    };
-                    // The session's control pump sends it; its reply is not awaited
-                    // here, because the pump only runs while the session is polled.
-                    let (reply, _) = tokio::sync::oneshot::channel();
-                    let _ = req_tx.try_send(StationRequest::Command(wire, reply));
-                    let detail = if aborted { "aborting" } else { "sending what the modem holds, then disconnecting" };
-                    r.state(ModemState::Draining, Some(detail.into())).await;
+                Some(ev) = ev_rx.recv() => {
+                    link.on_event(r, ev).await;
+                    if drain_until.is_some() && !link.unconfirmed() {
+                        drain_until = None;
+                        send_wire(Command::Disconnect);
+                    }
                 }
+                _ = tokio::time::sleep_until(drain_until.unwrap_or_else(tokio::time::Instant::now)), if drain_until.is_some() => {
+                    tracing::info!("receipts still outstanding after {} s; disconnecting", RECEIPT_DRAIN.as_secs());
+                    drain_until = None;
+                    send_wire(Command::Disconnect);
+                }
+                c = cmds.recv() => match c {
+                    Some(ModemCmd::Disconnect) => {
+                        if ending || aborted {
+                            continue; // one DISCONNECT is enough
+                        }
+                        ending = true;
+                        let detail = if link.unconfirmed() {
+                            drain_until = Some(tokio::time::Instant::now() + RECEIPT_DRAIN);
+                            "waiting for receipts, then disconnecting"
+                        } else {
+                            send_wire(Command::Disconnect);
+                            "sending what the modem holds, then disconnecting"
+                        };
+                        r.state(ModemState::Draining, Some(detail.into())).await;
+                    }
+                    Some(ModemCmd::Abort) => {
+                        aborted = true;
+                        drain_until = None;
+                        send_wire(Command::Abort);
+                        r.state(ModemState::Draining, Some("aborting".into())).await;
+                    }
+                    Some(ModemCmd::Submit { peer, id }) => {
+                        if peer == link.info.peer && !ending && !aborted {
+                            link.submit(r, id.0).await;
+                        }
+                    }
+                    Some(ModemCmd::Shutdown) | None => {
+                        // Leaving: the modem ends the link when our sockets close.
+                        stop = true;
+                        break SessionEnd::CommandsClosed;
+                    }
+                    Some(other) => tracing::debug!(?other, "ignored during a session"),
+                },
             }
         }
     };
