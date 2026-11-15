@@ -2,7 +2,8 @@
 // WebView2 DevTools protocol (no RF, simulator only):
 //   1. first instance: "Use simulator" for a callsign -> the modem shows ready
 //   2. second instance on the same data root -> the window shows the busy text
-//   3. restart -> the profile is still there, still in use, and ready again
+//   3. restart -> the window opens on the workspace (not first use); Settings
+//      lists the profile, still in use, and the modem is ready again
 // Usage: node lab/windows/m1-ui-check.mjs <mercurychat.exe> <data dir> [port]
 import { spawn, execFileSync } from "node:child_process";
 
@@ -100,8 +101,8 @@ async function until(s, expr, what, ms = 10000) {
   throw new Error(`timed out waiting for ${what}: ${await s.eval("document.body.innerText")}`);
 }
 
-const pill = "document.querySelector('.pill')?.textContent.trim()";
-const detail = "document.querySelector('.state .detail')?.textContent.trim()";
+const pill = "document.querySelector('header .pill')?.textContent.trim()";
+const detail = "document.querySelector('header .state .detail')?.textContent.trim()";
 const results = [];
 let first, second, third;
 try {
@@ -128,7 +129,8 @@ try {
   await sleep(1500);
 
   third = launch();
-  s = await page((t) => t.includes("Use simulator") && t.includes(CALL), "the restarted window");
+  s = await page((t) => t.includes(CALL) && t.includes("Operate") && !t.includes("Use simulator"), "the restarted window");
+  await s.eval("[...document.querySelectorAll('nav.rail button')].find(b => b.textContent.trim() === 'Settings').click()");
   await until(s, `${pill} === 'ready' && ${detail} === 'simulator' && document.querySelector('.profiles li.active')?.innerText.includes(${JSON.stringify(CALL)})`, "ready after restart");
   results.push(`PASS restart: ${CALL} still listed and in use, simulator re-attached, modem state "ready", detail "simulator"`);
   s.close();

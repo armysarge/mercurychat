@@ -12,24 +12,9 @@ import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { kill, launch, page, sleep, until } from "./cdp.mjs";
+import { click, compose, mode, pill, setInput, transcript } from "./m2-dom.mjs";
 
 const TEXT = "héllo 👋\r\nline two\n\tשלום";
-const pill = "document.querySelector('.pill')?.textContent.trim()";
-const button = (label) =>
-  `[...document.querySelectorAll('button')].find(b => b.textContent.trim() === ${JSON.stringify(label)})`;
-const click = (label) => `(() => { const b = ${button(label)}; if (!b) throw new Error('no button ' + ${JSON.stringify(label)}); b.click(); })()`;
-const transcript = `[...document.querySelectorAll('.transcript [data-id]')].map(e => ({
-  id: e.dataset.id, state: e.dataset.state, direction: e.dataset.direction,
-  body: e.querySelector('.body').textContent }))`;
-const compose = (text) => `(() => {
-  const t = document.querySelector('textarea.composer');
-  t.value = ${JSON.stringify(text)};
-  t.dispatchEvent(new Event('input'));
-  t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }));
-  return t.value;
-})()`;
-const appCall = (cmd) => `window.__TAURI_INTERNALS__.invoke('app_call', { cmd: ${JSON.stringify(cmd)} })`;
-
 /** The peer's JSON lines that record a stored message. */
 function peerReceived(log) {
   try {
@@ -63,23 +48,28 @@ export async function existingRun({ exe, dataDir, port, host, controlPort, peer,
   let app;
   try {
     app = launch(exe, dataDir, port);
-    let s = await page(port, (t) => t.includes("Use simulator"), "the window");
-    const saved = await s.eval(`${appCall({
-      type: "saveProfile",
-      profile: {
-        id: "", callsign: "ZS6WIN", name: "M2 lab", grid: null, lab: true, listenPreferred: false,
-        modem: { kind: "existing", host, controlPort, dataPort: controlPort + 1, broadcastPort: null, telemetryUrl: null },
-      },
-    })}.then(p => p.id)`);
-    await s.eval(appCall({ type: "selectProfile", id: saved }));
-    await until(s, `${pill} === 'ready' && document.querySelector('.chat')`, "Mercury A attached", 30000);
+    let s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
+    // The first-use form for an existing Mercury (the same form is in Settings).
+    await s.eval(setInput('form.existing input[name="callsign"]', "ZS6WIN"));
+    await s.eval(setInput('form.existing input[name="host"]', host));
+    await s.eval(setInput('form.existing input[name="controlPort"]', String(controlPort)));
+    await s.eval(setInput('form.existing input[name="dataPort"]', String(controlPort + 1)));
+    await s.eval(click("Use this Mercury"));
+    await until(s, `${pill} === 'ready' && document.querySelector('textarea.composer')`, "Mercury A attached", 30000);
     if (await s.eval("document.querySelector('input.listen').checked")) throw new Error("listening was on by itself");
-    results.push(`PASS attach: Mercury at ${host}:${controlPort}, ready, listening off`);
+    if ((await s.eval(mode)) !== "Receive-only") throw new Error(`header mode ${await s.eval(mode)}`);
+    results.push(`PASS attach: first-use form, Mercury at ${host}:${controlPort}, ready, header Receive-only`);
 
-    await s.eval(`(() => { const i = document.querySelector('input.peer'); i.value = ${JSON.stringify(peer)}; i.dispatchEvent(new Event('input')); })()`);
+    await s.eval(setInput("input.peer", peer));
     let t0 = Date.now();
+    const seen = new Set();
+    const watch = setInterval(() => s.eval(mode).then((m) => m && seen.add(m)).catch(() => {}), 200);
     await call(s, peer, 300000);
-    results.push(`PASS call: ${peer} answered over Mercury, connected after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
+    clearInterval(watch);
+    for (const want of [`Calling ${peer}`, `Negotiating with ${peer}`, `Connected to ${peer}`]) {
+      if (![...seen].includes(want)) throw new Error(`header never said "${want}": ${[...seen].join(" / ")}`);
+    }
+    results.push(`PASS call: header Calling → Negotiating with → Connected to ${peer}, after ${((Date.now() - t0) / 1000).toFixed(1)} s`);
 
     const sent = await s.eval(compose(TEXT));
     t0 = Date.now();

@@ -49,6 +49,15 @@ function connect(wsUrl) {
     ws.onerror = j;
   });
   return ready.then(() => ({
+    /** Any DevTools method (e.g. Emulation.setDeviceMetricsOverride). */
+    async send(method, params = {}) {
+      const n = ++id;
+      const reply = new Promise((r) => waiting.set(n, r));
+      ws.send(JSON.stringify({ id: n, method, params }));
+      const msg = await reply;
+      if (msg.error) throw new Error(`${method}: ${msg.error.message}`);
+      return msg.result;
+    },
     async eval(expr) {
       const n = ++id;
       const reply = new Promise((r) => waiting.set(n, r));
