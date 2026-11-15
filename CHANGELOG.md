@@ -1,6 +1,10 @@
 # Planning changes
 
-## 0.3 — 15 November 2026 (M0 in progress)
+## 0.4 — 15 November 2026 (M1 started)
+
+- Closed M0 with the Raspberry Pi run as an exception: go for M1 on Tauri/Vue/Rust, on condition that the Pi smoke test passes before M1's UI work. Re-estimated to 14–21.5 developer-weeks (12–18.5 to go). See docs/M0-go-no-go.md.
+
+## 0.3 — 15 November 2026 (M0)
 
 - Implemented the M0 foundation: Rust workspace (`mch-protocol`, `mercury-adapter`, `mc-storage`, `mc-core`, `tools/m0-client`), Tauri 2 + Vue 3 shell (`apps/desktop`, `src-tauri`), SQLite schema v1, MCH/1 golden vectors.
 - Built Mercury 1.9.24 (274bd5c9) for Windows x64, Linux amd64 and arm64 in Docker; built MercuryChat for Windows (NSIS), Debian amd64 and arm64 (.deb).

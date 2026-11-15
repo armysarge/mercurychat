@@ -2,7 +2,7 @@
 
 Open-source radio messaging for Windows and Linux, powered by the Mercury HF modem.
 
-**Status:** M0 (modem-integration proof) in progress, 15 November 2026. A headless core, test client and M0 desktop shell exist and pass the M0 scenario against two real Mercury modems over crossed virtual audio; this is not yet a usable operator app. No radio transmissions have been made. Progress, evidence and open items: [docs/M0-progress.md](docs/M0-progress.md); how to reproduce: [lab/README.md](lab/README.md).
+**Status:** M0 (modem-integration proof) closed 15 November 2026, with the Raspberry Pi run carried as an exception ([go/no-go note](docs/M0-go-no-go.md)); M1 (desktop foundation) in progress. A headless core, test client and M0 desktop shell exist and pass the M0 scenario against two real Mercury modems over crossed virtual audio; this is not yet a usable operator app. No radio transmissions have been made. Progress, evidence and open items: [docs/M0-progress.md](docs/M0-progress.md); how to reproduce: [lab/README.md](lab/README.md).
 
 ## Decisions confirmed with the owner
 
@@ -35,4 +35,4 @@ MercuryChat-to-MercuryChat interoperability is the initial target. A VARA-like h
 
 ## Immediate next milestone
 
-Complete M0: virtual-cable integration on Windows, Linux x64 and Raspberry Pi ARM64 package proofs, plus an actual Pi smoke test. Then freeze the application protocol and supported modem builds. Read the M0 exit criteria before starting the app shell.
+M1, the desktop foundation ([plan](docs/M1-plan.md)). It starts with the parts that do not depend on the UI stack. The Raspberry Pi smoke test carried from M0 must pass before M1's UI-heavy work and before M1 exits ([go/no-go note](docs/M0-go-no-go.md)).
