@@ -318,7 +318,9 @@ def main():
         kill_info["mercury_reported_ptt_on_without_rig"] = len(merc_keys_after) > 0 and not keyed_after
         record("mercury_hamlib_session_after_rigctld_restart", len(keyed_after) > 0,
                f"Mercury reported PTT ON {len(merc_keys_after)}x after restart; rig keyed {len(keyed_after)}x; "
-               f"payload 3 still delivered={kill_info['payload3_ok']} (virtual audio does not need PTT)", kind="finding")
+               f"payload 3 still delivered={kill_info['payload3_ok']} (virtual audio does not need PTT)",
+               # A Mercury with the Hamlib reopen fix (fork branch radio-hamlib-reopen) must key again.
+               kind="check" if os.environ.get("EXPECT_REOPEN") else "finding")
         record("data_after_rig_outage", bytes(db.received[3000:6000]) == payload2,
                f"B received {len(db.received) - 3000}/3000 of payload 2")
     else:

@@ -26,6 +26,20 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "F:/Programming/mercury:/src:ro" -v "$PWD/
 
 Exposure check (Windows; null audio, PTT none): `bash lab/windows/exposure-check.sh <mercury.exe> <out-dir> [bind_address]`. WebSocket Origin/Host check (stock vs patched, four configurations): `python lab/windows/ws-origin-check.py lab/bin/windows-x64/mercury.exe lab/bin-patched/windows-x64/mercury.exe lab/run/ws-origin`. For the cable lab bound to loopback, add `BIND=127.0.0.1` and `M=lab/bin-patched/windows-x64/mercury.exe` to `run-win-lab.sh`.
 
+### Testing Mercury changes for upstream
+
+Changes meant for Mercury upstream live on branches of the owner's fork ([armysarge/mercury](https://github.com/armysarge/mercury)), cloned at `F:\Programming\mercury-fork`. `lab/docker/mercury-it/run-it.sh` builds the branch's merge base with upstream and the working tree, runs the named unit tests, and runs a Go integration test against both builds, so a new test is seen to fail before and pass after:
+
+```bash
+docker build -t mercurychat-lab:it lab/docker/mercury-it
+```
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "F:/Programming/mercury-fork:/src:ro" -v "$PWD/lab/run/it-N:/out" -v "$PWD/lab/docker/mercury-it:/scripts:ro" mercurychat-lab:it bash /scripts/run-it.sh TestHamlibSessionSurvivesRigctldRestart test_radio_io_frequency test_radio_port
+```
+
+To run the rig lab on a fork build, build `linux-amd64` with `/src` mounted from the fork into `lab/bin-fork/<branch>` and mount that at `/mercury`. Add `-e EXPECT_REOPEN=1` for a build with the Hamlib reopen fix: the post-restart keying finding then becomes a check. PR drafts are in `lab/upstream/`.
+
 ## 2. L0 — fake Mercury pair (no audio, seconds)
 
 ```bash

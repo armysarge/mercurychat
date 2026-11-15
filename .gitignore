@@ -10,5 +10,6 @@ node_modules/
 # Lab build products and run data (manifests/hashes are recorded in docs/M0-progress.md)
 /lab/bin/
 /lab/bin-patched/
+/lab/bin-fork/
 /lab/run/
 /lab/pi-kit/
