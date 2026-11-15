@@ -33,7 +33,7 @@ struct Cli {
 enum Cmd {
     /// A headless MercuryChat station on one Mercury: LISTEN ON, answer every
     /// call, run the session, and print one JSON line per stored message
-    /// ({"event":"received", peer, id, bytes, sha256}). With --echo, reply
+    /// ({"event":"received", utc, peer, id, bytes, sha256}). With --echo, reply
     /// "echo: <text>" to each.
     Peer {
         #[arg(long, default_value = "127.0.0.1")]
@@ -184,7 +184,10 @@ async fn main() -> anyhow::Result<()> {
             use sha2::{Digest, Sha256};
             std::fs::create_dir_all(&work)?;
             let c = Callsign::parse(&call)?;
-            let mut st = Station::open(StationConfig::defaults(c.clone(), Endpoint::base(&host, port), &work))?;
+            let mut cfg = StationConfig::defaults(c.clone(), Endpoint::base(&host, port), &work);
+            // A real Mercury takes tens of seconds for HELLO (M0: 23 s at BW2300).
+            cfg.hello_timeout = mc_core::station::RADIO_HELLO_TIMEOUT;
+            let mut st = Station::open(cfg)?;
             st.attach().await?;
             st.set_listen(true).await?;
             println!(
@@ -198,6 +201,7 @@ async fn main() -> anyhow::Result<()> {
                     "{}",
                     serde_json::json!({
                         "event": "received",
+                        "utc": mc_storage::now_utc(),
                         "peer": from,
                         "id": id.to_hex(),
                         "bytes": text.len(),

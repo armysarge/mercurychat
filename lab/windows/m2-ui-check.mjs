@@ -7,12 +7,31 @@
 //   4. a burst of long messages, then Abort -> "uncertain", nothing in limbo
 //   5. restart -> history is there, not listening, nothing resent
 // Usage: node lab/windows/m2-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
+//   Against a real Mercury instead (Task 10, see m2-existing.mjs):
+//   ... --existing HOST:PORT --peer SIM2 --peer-log FILE --stop-a CMD --start-a CMD
 import { kill, launch, page, sleep, until } from "./cdp.mjs";
+import { existingRun } from "./m2-existing.mjs";
 
-const [exe, dataDir, port = "9334"] = process.argv.slice(2);
-if (!exe || !dataDir) {
-  console.error("usage: node m2-ui-check.mjs <mercurychat.exe> <data dir> [port]");
+const args = process.argv.slice(2);
+const flag = (name) => {
+  const i = args.indexOf(name);
+  return i >= 0 ? args.splice(i, 2)[1] : undefined;
+};
+const existing = flag("--existing");
+const peerCall = flag("--peer") ?? "SIM2";
+const peerLog = flag("--peer-log");
+const stopA = flag("--stop-a");
+const startA = flag("--start-a");
+const [exe, dataDir, port = "9334"] = args;
+if (!exe || !dataDir || (existing && !(peerLog && stopA && startA))) {
+  console.error("usage: node m2-ui-check.mjs <mercurychat.exe> <data dir> [port] [--existing HOST:PORT --peer CALL --peer-log FILE --stop-a CMD --start-a CMD]");
   process.exit(2);
+}
+if (existing) {
+  const [host, cp] = existing.split(":");
+  const results = await existingRun({ exe, dataDir, port, host, controlPort: Number(cp), peer: peerCall, peerLog, stopA, startA });
+  console.log(results.join("\n"));
+  process.exit(results.some((r) => r.startsWith("FAIL")) ? 1 : 0);
 }
 const CALL = "ZS6SIM";
 // A textarea normalises CR LF to LF, so the window sends LF line breaks; the

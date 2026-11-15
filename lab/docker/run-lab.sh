@@ -120,5 +120,11 @@ echo "lab_ready_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$OUT/lab-manifest.txt"
     done
   done ) >> "$OUT/resources.log" &
 
+# KEEP=1 (M2): keep the lab up when a modem exits, so Mercury A can be
+# stopped and started again from outside with /scripts/mercury-a.sh.
+if [ "${KEEP:-0}" = 1 ]; then
+  echo "keep=1 (Mercury A restartable)" >> "$OUT/lab-manifest.txt"
+  exec sleep infinity
+fi
 wait -n "$(cat "$OUT/a/pid")" "$(cat "$OUT/b/pid")" || true
 echo "a Mercury process exited" | tee -a "$OUT/lab-manifest.txt"
