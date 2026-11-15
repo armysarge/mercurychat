@@ -17,6 +17,17 @@ async fn snapshot(h: &mc_core::app::AppHandle) -> mc_core::app::AppSnapshot {
     }
 }
 
+/// The next event that is not a modem state change (selection drives the
+/// modem, whose events are covered in tests/sim.rs).
+async fn next_app_event(rx: &mut tokio::sync::broadcast::Receiver<mc_core::app::EventEnvelope>) -> AppEvent {
+    loop {
+        let ev = rx.recv().await.unwrap().event;
+        if !matches!(ev, AppEvent::ModemState { .. }) {
+            return ev;
+        }
+    }
+}
+
 async fn save(h: &mc_core::app::AppHandle, p: StationProfile) -> StationProfile {
     match h.call(AppCommand::SaveProfile { profile: p }).await.unwrap() {
         CommandOk::Profile(p) => p,
@@ -65,10 +76,10 @@ async fn select_and_deselect() {
     let p = save(&h, StationProfile::new_simulator("ZS6ABC")).await;
     let mut rx = h.subscribe();
     assert_eq!(h.call(AppCommand::SelectProfile { id: Some(p.id.clone()) }).await.unwrap(), CommandOk::Done);
-    assert_eq!(rx.recv().await.unwrap().event, AppEvent::ActiveProfileChanged { id: Some(p.id.clone()) });
+    assert_eq!(next_app_event(&mut rx).await, AppEvent::ActiveProfileChanged { id: Some(p.id.clone()) });
     assert_eq!(snapshot(&h).await.active_profile_id, Some(p.id.clone()));
     h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
-    assert_eq!(rx.recv().await.unwrap().event, AppEvent::ActiveProfileChanged { id: None });
+    assert_eq!(next_app_event(&mut rx).await, AppEvent::ActiveProfileChanged { id: None });
     assert_eq!(snapshot(&h).await.active_profile_id, None);
 }
 
@@ -125,7 +136,7 @@ async fn events_since_follows_the_log() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn full_queue_is_busy_not_blocking() {
-    let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions { command_queue: 1, event_ring: 1024 });
+    let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions { command_queue: 1, ..AppOptions::default() });
     let calls =
         (0..50).map(|i| {
             let h = h.clone();

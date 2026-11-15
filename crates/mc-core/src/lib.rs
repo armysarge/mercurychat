@@ -8,6 +8,8 @@ pub mod lock;
 pub mod logs;
 pub mod profile;
 pub mod session;
+#[cfg(feature = "sim")]
+pub mod sim;
 pub mod station;
 
 pub use session::{ModemSignal, SendFileOpts, SessionCommand, SessionEnd, SessionEvent};

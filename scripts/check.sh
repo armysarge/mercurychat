@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+cargo test --workspace --features mc-core/sim
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

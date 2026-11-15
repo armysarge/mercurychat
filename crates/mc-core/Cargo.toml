@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# The in-process simulator modem (fake Mercury pair) for UI work without RF.
+sim = ["mercury-adapter/fake"]
+
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
