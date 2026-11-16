@@ -8,6 +8,7 @@
 //! The actor owns one [`Telemetry`]. It also supplies the frequency and
 //! offset a heard station is recorded with ([`Tuning`]), only while fresh.
 
+use super::broadcast::ListenMode;
 use super::chat::ChatMessage;
 use super::discovery::Reading;
 use mc_storage::now_utc;
@@ -199,14 +200,18 @@ impl Telemetry {
         }
     }
 
-    /// The modem task ended in a fault. A client it had started reports its
-    /// own loss; one it never started (attach failed) must not stay
-    /// "connecting" for ever.
-    pub fn modem_faulted(&mut self) {
-        if self.link == TelemetryLinkView::Connecting {
-            let reason = "the modem is not attached".to_string();
+    /// The modem task ended in a fault, so its telemetry client is gone
+    /// (or never started, when attach failed). Any configured link (connecting or up) becomes lost here, with every
+    /// reading cleared and the gate's live listen mode re-synced (ruling P2:
+    /// back to the attach value). This rests on the awaited Faulted report,
+    /// so it holds even when the dying task's own Lost (a `try_send`) is
+    /// dropped on a full report channel.
+    pub fn modem_faulted(&mut self, listen: &mut ListenMode) {
+        if matches!(self.link, TelemetryLinkView::Connecting | TelemetryLinkView::Up) {
+            let reason = "the modem connection ended".to_string();
             self.set_link(TelemetryLinkView::Lost { since_utc: now_utc(), reason });
         }
+        listen.set_live(self.live_listen_mode());
     }
 
     fn set_link(&mut self, link: TelemetryLinkView) {
@@ -427,12 +432,44 @@ mod tests {
         let mut t = Telemetry::default();
         t.reset(true);
         assert_eq!(t.view(Instant::now()).link, TelemetryLinkView::Connecting);
-        t.modem_faulted();
+        let mut listen = ListenMode::default();
+        t.modem_faulted(&mut listen);
         assert!(matches!(t.view(Instant::now()).link, TelemetryLinkView::Lost { .. }));
         // Unconfigured stays so.
         t.reset(false);
-        t.modem_faulted();
+        t.modem_faulted(&mut listen);
         assert_eq!(t.view(Instant::now()).link, TelemetryLinkView::Unconfigured);
+    }
+
+    /// Fix round 1: the awaited Faulted report alone clears an Up link, its
+    /// readings and the gate's live listen mode; the client's own Lost (a
+    /// try_send from the dying task) may never arrive.
+    #[tokio::test(start_paused = true)]
+    async fn a_modem_fault_clears_an_up_link_and_the_live_listen_mode() {
+        let mut t = Telemetry::default();
+        let now = Instant::now();
+        up(&mut t, now);
+        t.on_msg(
+            status(
+                r#"{"type":"status","snr":5.0,"arq_tx_mode":"DATAC3","audio_ok":true,"listen_mode":200,
+                    "radio_frequency_hz":7100000,"radio_frequency_age_ms":10,
+                    "freq_offset_hz":2.0,"freq_offset_age_ms":10}"#,
+            ),
+            now,
+        );
+        let mut listen = ListenMode::default();
+        listen.set_attach(Some(1));
+        listen.set_live(t.live_listen_mode());
+        assert_eq!(listen.current(), Some(200), "telemetry's live mode is preferred while up");
+        t.take_event(now);
+
+        t.modem_faulted(&mut listen);
+        let v = t.view(now);
+        assert!(matches!(v.link, TelemetryLinkView::Lost { .. }), "{:?}", v.link);
+        assert_eq!((v.snr_db, v.tx_mode, v.audio, v.frequency, v.listen_mode), (None, None, None, None, None));
+        assert_eq!(t.tuning(now), Tuning::default());
+        assert_eq!(listen.current(), Some(1), "the gate falls back to the attach value");
+        assert!(t.take_event(now + EVENT_GAP).is_some(), "the loss is published");
     }
 
     #[tokio::test(start_paused = true)]

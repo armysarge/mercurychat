@@ -690,7 +690,8 @@ impl App {
         let out = self.broadcasts.state(state);
         self.publish_broadcasts(out);
         if state == ModemState::Faulted {
-            self.telemetry.modem_faulted();
+            // Also re-syncs the gate's live listen mode (ruling P2).
+            self.telemetry.modem_faulted(&mut self.listen_mode);
         }
     }
 

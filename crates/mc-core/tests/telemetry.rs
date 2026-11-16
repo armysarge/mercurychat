@@ -411,3 +411,87 @@ async fn stale_offset_is_not_attached() {
         assert!(st.freq.is_some(), "the frequency is still fresh");
     }
 }
+
+/// The beacon gate's answer to one SendBeaconNow: Ok, or the refusal's text.
+async fn beacon_now(h: &AppHandle) -> Result<(), String> {
+    match h.call(AppCommand::SendBeaconNow).await {
+        Ok(_) => Ok(()),
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+/// Fix round 1 (review Important 1): after one good status the socket sends
+/// only garbage and spectrum frames. That is not telemetry: the link is lost,
+/// every reading goes, and the beacon gate falls back to the attach listen
+/// mode (ruling P2) instead of a stale live one.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_socket_without_statuses_is_lost_and_the_gate_falls_back_to_attach() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    // A live listen mode the gate has no capacity for: beacons are refused.
+    let odd = LIVE.replace(r#""listen_mode":1,"#, r#""listen_mode":200,"#);
+    ws.set_status(Some(&odd));
+    let (h, mut rx) = start(dir.path(), existing(&net, Some(ws.url.clone()))).await;
+    telemetry(&mut rx, 10, |t| t.listen_mode == Some(200)).await;
+    let why = beacon_now(&h).await.expect_err("live mode 200 has no known capacity");
+    assert!(why.contains("listen mode unknown"), "{why}");
+
+    // From now on: no status, only garbage and good spectrum frames.
+    ws.set_status(None);
+    let mut spectrum = 0x4D43_5259u32.to_le_bytes().to_vec();
+    spectrum.extend_from_slice(&64u16.to_le_bytes());
+    spectrum.extend_from_slice(&8000u16.to_le_bytes());
+    for _ in 0..64 {
+        spectrum.extend_from_slice(&(-90.0f32).to_le_bytes());
+    }
+    let deadline = Instant::now() + Duration::from_secs(15);
+    let lost = loop {
+        ws.send_text("not json".into());
+        ws.send_text(r#"{"type":"history","messages":[]}"#.into());
+        ws.send_binary(spectrum.clone());
+        let got = tokio::time::timeout(
+            Duration::from_millis(200),
+            telemetry(&mut rx, 5, |t| matches!(t.link, TelemetryLinkView::Lost { .. })),
+        )
+        .await;
+        if let Ok(t) = got {
+            break t;
+        }
+        assert!(Instant::now() < deadline, "a status-less socket stayed up");
+    };
+    no_telemetry_readings(&lost);
+    let s = snapshot(&h).await;
+    assert_eq!(s.telemetry.listen_mode, None);
+    assert_eq!(s.telemetry.snr_db, None, "no control SN either: nothing is shown");
+    // The gate is back on the attach value (MODE 1, DATAC3): the beacon goes.
+    beacon_now(&h).await.expect("the attach listen mode applies again");
+}
+
+/// Fix round 1 (review Important 2): the modem task faults while telemetry is
+/// up. The Faulted report alone shows the link lost with every reading gone.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_modem_fault_with_telemetry_up_shows_it_lost() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    ws.set_status(Some(LIVE));
+    let (h, mut rx) = start(dir.path(), existing(&net, Some(ws.url.clone()))).await;
+    telemetry(&mut rx, 10, up_with_status).await;
+    // A refused LISTEN OFF faults the modem (Mercury may still answer calls).
+    net.set_listen_off_wrong(0, true);
+    h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    // wait_for treats Faulted as a failure: here it is the point.
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        match tokio::time::timeout_at(deadline, rx.recv()).await.expect("Faulted within 10 s") {
+            Ok(env) if matches!(env.event, AppEvent::ModemState { state: ModemState::Faulted, .. }) => break,
+            Ok(_) | Err(RecvError::Lagged(_)) => continue,
+            Err(RecvError::Closed) => panic!("the event stream closed"),
+        }
+    }
+    let s = snapshot(&h).await;
+    assert_eq!(s.modem, ModemState::Faulted);
+    assert!(matches!(s.telemetry.link, TelemetryLinkView::Lost { .. }), "{:?}", s.telemetry.link);
+    no_telemetry_readings(&s.telemetry);
+}

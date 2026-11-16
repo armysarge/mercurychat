@@ -34,8 +34,9 @@ pub const BACKOFF: [Duration; 5] = [
 ];
 /// How long a connection attempt may take.
 pub const DIAL_TIMEOUT: Duration = Duration::from_secs(5);
-/// Mercury publishes `status` every 500 ms: this long with nothing at all is
-/// a lost connection, so a hung socket never keeps old values looking live.
+/// Mercury publishes `status` every 500 ms: this long without a valid
+/// status is a lost connection, whatever else arrives (garbage, other
+/// events, spectrum frames), so a stale status is never kept looking live.
 pub const SILENCE: Duration = Duration::from_secs(5);
 /// The spectrum frame's magic, read little-endian (wire bytes `59 52 43 4D`).
 pub const SPECTRUM_MAGIC: u32 = 0x4D43_5259;
@@ -330,15 +331,18 @@ async fn run<D, F>(
                 if out.send(TelemetryMsg::Link(TelemetryLink::Up)).await.is_err() {
                     return;
                 }
+                // Only a valid status moves this deadline on.
+                let mut status_due = tokio::time::Instant::now() + SILENCE;
                 let reason = loop {
-                    match tokio::time::timeout(SILENCE, conn.next()).await {
-                        Err(_) => break format!("nothing from Mercury for {} s", SILENCE.as_secs()),
+                    match tokio::time::timeout_at(status_due, conn.next()).await {
+                        Err(_) => break format!("no status from Mercury for {} s", SILENCE.as_secs()),
                         Ok(None) => break "closed by Mercury".to_string(),
                         Ok(Some(Err(e))) => break e,
                         // Garbage is dropped; only good telemetry counts.
                         Ok(Some(Ok(Frame::Text(t)))) => {
                             if let Ok(Some(st)) = parse_text(&t) {
                                 step = 0;
+                                status_due = tokio::time::Instant::now() + SILENCE;
                                 if out.send(TelemetryMsg::Status(st)).await.is_err() {
                                     return;
                                 }

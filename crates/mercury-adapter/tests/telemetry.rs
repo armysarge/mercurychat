@@ -257,3 +257,55 @@ async fn reconnect_follows_backoff() {
     );
     client.abort();
 }
+
+/// Fix round 1: only a valid `status` keeps the link up. A socket that, after
+/// one good status, sends nothing but garbage and spectrum frames is lost
+/// within SILENCE, so no stale status stays live.
+#[tokio::test(start_paused = true)]
+async fn only_a_status_keeps_the_link_up() {
+    let mut good = 0x4D43_5259u32.to_le_bytes().to_vec();
+    good.extend_from_slice(&64u16.to_le_bytes());
+    good.extend_from_slice(&8000u16.to_le_bytes());
+    for _ in 0..64 {
+        good.extend_from_slice(&(-90.0f32).to_le_bytes());
+    }
+    let dialled: Arc<Mutex<u32>> = Arc::default();
+    let seen = dialled.clone();
+    let dial = move || {
+        let seen = seen.clone();
+        let good = good.clone();
+        async move {
+            *seen.lock().unwrap() += 1;
+            // One status, then every 100 ms garbage text and a valid spectrum, for ever.
+            let first = futures_util::stream::iter([Ok(Frame::Text(r#"{"type":"status","snr":4.0}"#.into()))]);
+            let rest = futures_util::stream::unfold(0u32, move |i| {
+                let good = good.clone();
+                async move {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    let f = if i % 2 == 0 { Frame::Text("not json".into()) } else { Frame::Binary(good) };
+                    Some((Ok(f), i + 1))
+                }
+            });
+            let conn: telemetry::Conn = Box::pin(futures_util::StreamExt::chain(first, rest));
+            Ok(conn)
+        }
+    };
+    let (tx, mut rx) = mpsc::channel(64);
+    let (spectrum, feed) = watch::channel(None);
+    let start = Instant::now();
+    let client = TelemetryClient::spawn_with(dial, tx, spectrum, |d| d);
+    assert_eq!(rx.recv().await, Some(TelemetryMsg::Link(TelemetryLink::Connecting)));
+    assert_eq!(rx.recv().await, Some(TelemetryMsg::Link(TelemetryLink::Up)));
+    assert!(matches!(rx.recv().await, Some(TelemetryMsg::Status(_))));
+    // Bounded: a client that never notices would run the paused clock for ever.
+    match tokio::time::timeout(Duration::from_secs(30), rx.recv()).await.expect("Lost within 30 s") {
+        Some(TelemetryMsg::Link(TelemetryLink::Lost { reason })) => {
+            assert!(reason.contains("status"), "{reason}");
+        }
+        other => panic!("expected Lost, got {other:?}"),
+    }
+    let after = Instant::now() - start;
+    assert!(after >= telemetry::SILENCE && after < telemetry::SILENCE + Duration::from_millis(200), "{after:?}");
+    assert!(feed.borrow().is_none(), "the spectrum is cleared with the link");
+    client.abort();
+}
