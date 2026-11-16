@@ -1,6 +1,7 @@
 //! The application layer the UI talks to: typed commands in, one event stream
 //! out (docs/02 §2–§3).
 
+mod beacon;
 mod broadcast;
 mod chat;
 mod contract;
@@ -9,6 +10,10 @@ mod events;
 mod modem;
 mod service;
 
+pub use beacon::{
+    BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus, ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN,
+    MAX_INTERVAL_MIN, MIN_INTERVAL_MIN,
+};
 pub use broadcast::{broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, TRANSMIT_WINDOW};
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
@@ -31,5 +36,7 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     DiscoveryStats::export_all(&cfg)?;
     BroadcastKind::export_all(&cfg)?;
     BroadcastOutcome::export_all(&cfg)?;
+    BeaconStatus::export_all(&cfg)?;
+    ChannelState::export_all(&cfg)?;
     Since::export_all(&cfg)
 }

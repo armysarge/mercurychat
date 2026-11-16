@@ -2,6 +2,7 @@
 //! and gets `CommandOk` or `AppError`; it never touches sockets, files or the
 //! database directly (docs/02 §2, §7).
 
+use super::beacon::BeaconStatus;
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
@@ -25,6 +26,9 @@ pub struct AppSnapshot {
     /// The active profile's stored listen preference (RF-02): shown, never
     /// applied by itself on start-up or recovery.
     pub listen_preferred: bool,
+    /// Periodic beacons (DSC-03): the stored preference is shown, never
+    /// applied by itself; `active` is for this run only.
+    pub beacon: BeaconStatus,
     /// The MCH/1 session in progress, once negotiated.
     pub session: Option<SessionInfo>,
     /// Broadcast traffic that was not a station, since the app started.
@@ -98,6 +102,24 @@ pub enum AppCommand {
     /// Call CQ once (Mercury's CQFRAME), only while the modem is idle
     /// (DSC-02). A refused CQ is never queued for later.
     SendCq,
+    /// Arm or disarm periodic beacons for this run, and remember the choice
+    /// on the active profile. Arming needs an idle modem; a stored
+    /// preference never arms by itself (RF-02).
+    SetBeacon {
+        on: bool,
+    },
+    /// The beacon interval in minutes, 5 to 60 (default 10), kept per profile.
+    SetBeaconInterval {
+        minutes: u32,
+    },
+    /// Send one beacon now, through the same gate as a CQ. It neither arms
+    /// nor moves the scheduled beacon.
+    SendBeaconNow,
+    /// Whether beacons carry the profile's locator (default yes), kept per
+    /// profile. An MCB/1 beacon has only callsign, locator and capabilities.
+    SetBeaconContent {
+        include_grid: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

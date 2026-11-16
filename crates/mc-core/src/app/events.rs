@@ -3,6 +3,7 @@
 //! to. A bounded ring keeps the recent ones; a client asking for events older
 //! than the ring holds is told to take a snapshot, never handed a gap.
 
+use super::beacon::BeaconStatus;
 use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
@@ -88,6 +89,10 @@ pub enum AppEvent {
     Broadcast {
         kind: BroadcastKind,
         outcome: BroadcastOutcome,
+    },
+    /// The beacon schedule, its suppression or the channel state changed.
+    Beacon {
+        status: BeaconStatus,
     },
 }
 

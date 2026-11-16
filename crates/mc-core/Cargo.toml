@@ -31,7 +31,7 @@ rand = "0.9"
 futures = "0.3"
 filetime = "0.2"
 mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }
-tokio = { version = "1", features = ["full"] }
+tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"
 # Same version as mc-storage: lets a test break the peer's store on purpose.
 rusqlite = { version = "0.37", features = ["bundled"] }

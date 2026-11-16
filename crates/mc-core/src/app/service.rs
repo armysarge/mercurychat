@@ -3,6 +3,7 @@
 //! refused at once rather than making the UI wait. Every state change is
 //! persisted first, then published as an event.
 
+use super::beacon::{BeaconPrefs, BeaconState, Tick, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN};
 use super::broadcast::{
     activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, Tracker,
 };
@@ -12,6 +13,7 @@ use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
+use crate::station::Observation;
 use mc_storage::{OutState, StorageError, Store};
 use mch_protocol::ObjectId;
 use mercury_adapter::Callsign;
@@ -52,6 +54,7 @@ type Reply<T> = oneshot::Sender<Result<T, AppError>>;
 enum Request {
     Command(AppCommand, Reply<CommandOk>),
     Since(u64, Reply<Since>),
+    #[cfg(any(test, feature = "sim"))]
     Beacon(Vec<u8>, Reply<CommandOk>),
 }
 
@@ -81,7 +84,8 @@ impl AppHandle {
 
     /// Send one wrapped payload as a beacon, through the same gate and
     /// outcome tracking as the periodic beacons. Not a UI command: the UI
-    /// never sends arbitrary payloads. For tests and the beacon scheduler.
+    /// never sends arbitrary payloads, so release builds do not carry this.
+    #[cfg(any(test, feature = "sim"))]
     #[doc(hidden)]
     pub async fn send_beacon_payload(&self, payload: Vec<u8>) -> Result<CommandOk, AppError> {
         let (reply, rx) = oneshot::channel();
@@ -128,6 +132,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         discovery: Discovery::default(),
         listen_mode: ListenMode::default(),
         broadcasts: Tracker::default(),
+        beacon: BeaconState::new(),
     };
     tokio::spawn(async move {
         // The selection survives a restart, so its modem is attached again (attach
@@ -137,6 +142,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         }
         loop {
             let due = app.broadcasts.deadline();
+            let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
@@ -151,6 +157,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                         Request::Since(seq, reply) => {
                             let _ = reply.send(Ok(app.log.since(seq)));
                         }
+                        #[cfg(any(test, feature = "sim"))]
                         Request::Beacon(payload, reply) => {
                             let sent = app.send_broadcast(BroadcastKind::Beacon, payload);
                             let _ = reply.send(sent.map(|_| CommandOk::Done));
@@ -162,7 +169,11 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     let out = app.broadcasts.expired(tokio::time::Instant::now());
                     app.publish_broadcasts(out);
                 }
+                _ = tokio::time::sleep_until(beacon_wake.unwrap_or_else(tokio::time::Instant::now)), if beacon_wake.is_some() => {
+                    app.beacon_due();
+                }
             }
+            app.sync_beacon();
         }
     });
     AppHandle { tx, events }
@@ -193,6 +204,8 @@ struct App {
     listen_mode: ListenMode,
     /// The one CQ or beacon awaiting its outcome.
     broadcasts: Tracker,
+    /// Periodic beacons: the schedule, the profile's settings, the status shown.
+    beacon: BeaconState,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -247,6 +260,7 @@ impl App {
                     return Err(AppError::NotFound { id });
                 }
                 self.emit(AppEvent::ProfilesChanged);
+                BeaconPrefs::forget(&mut self.store, &id);
                 if self.store.setting(ACTIVE_PROFILE).map_err(storage)?.as_deref() == Some(id.as_str()) {
                     self.store.delete_setting(ACTIVE_PROFILE).map_err(storage)?;
                     self.log.bump_generation();
@@ -416,6 +430,15 @@ impl App {
             }
             AppCommand::Activity => Ok(CommandOk::Activity { entries: self.discovery.entries() }),
             AppCommand::SendCq => self.send_broadcast(BroadcastKind::Cq, Vec::new()).map(|_| CommandOk::Done),
+            AppCommand::SetBeacon { on } => self.set_beacon(on).map(|_| CommandOk::Done),
+            AppCommand::SetBeaconInterval { minutes } => self.set_beacon_interval(minutes).map(|_| CommandOk::Done),
+            AppCommand::SetBeaconContent { include_grid } => {
+                let id = self.beacon_profile()?;
+                BeaconPrefs::save_include_grid(&mut self.store, &id, include_grid).map_err(storage)?;
+                self.beacon.prefs.include_grid = include_grid;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SendBeaconNow => self.send_beacon().map(|_| CommandOk::Done),
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -468,6 +491,67 @@ impl App {
         }
         self.broadcasts.start(kind, tokio::time::Instant::now());
         Ok(())
+    }
+
+    fn beacon_profile(&self) -> Result<String, AppError> {
+        self.beacon.profile.clone().ok_or_else(|| conflict("no station is selected".into()))
+    }
+
+    /// Arm or disarm beacons for this run, and remember the choice. Arming
+    /// needs an idle modem, as listening does (RF-02).
+    fn set_beacon(&mut self, on: bool) -> Result<(), AppError> {
+        let id = self.beacon_profile()?;
+        if on && !matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+            let state = self.state_word();
+            return Err(conflict(format!("the modem is {state}: beacons can be turned on once it is ready")));
+        }
+        BeaconPrefs::save_preferred(&mut self.store, &id, on).map_err(storage)?;
+        self.beacon.prefs.preferred = on;
+        match (on, self.beacon.sched.active()) {
+            (true, false) => self.beacon.sched.arm(tokio::time::Instant::now()),
+            (false, _) => self.beacon.sched.disarm(),
+            (true, true) => {}
+        }
+        Ok(())
+    }
+
+    fn set_beacon_interval(&mut self, minutes: u32) -> Result<(), AppError> {
+        if !(MIN_INTERVAL_MIN..=MAX_INTERVAL_MIN).contains(&minutes) {
+            let why = format!("use {MIN_INTERVAL_MIN} to {MAX_INTERVAL_MIN} minutes");
+            return Err(AppError::Validation { errors: chat::field("minutes", why) });
+        }
+        let id = self.beacon_profile()?;
+        BeaconPrefs::save_interval(&mut self.store, &id, minutes).map_err(storage)?;
+        self.beacon.prefs.interval_min = minutes;
+        self.beacon.sched.set_interval(minutes, tokio::time::Instant::now());
+        Ok(())
+    }
+
+    /// One beacon now, from the active profile, through the broadcast gate.
+    fn send_beacon(&mut self) -> Result<(), AppError> {
+        let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+        let payload = match self.beacon.payload(&p.callsign, p.grid.as_deref()) {
+            Ok(payload) => payload,
+            Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
+        };
+        self.send_broadcast(BroadcastKind::Beacon, payload)?;
+        self.beacon.submitted();
+        Ok(())
+    }
+
+    /// The scheduler's deadline passed. Whatever happens, the next beacon is
+    /// already an interval away: a refused one is never retried.
+    fn beacon_due(&mut self) {
+        if self.beacon.sched.tick(tokio::time::Instant::now()) == Tick::Send {
+            let _ = self.send_beacon(); // a refusal is already published and logged
+        }
+    }
+
+    /// Publish the beacon status if it changed.
+    fn sync_beacon(&mut self) {
+        if let Some(status) = self.beacon.changed(tokio::time::Instant::now()) {
+            self.emit(AppEvent::Beacon { status });
+        }
     }
 
     fn refuse_broadcast(&mut self, kind: BroadcastKind, reason: String) -> AppError {
@@ -561,6 +645,7 @@ impl App {
         let line = self.discovery.state(state, detail.as_deref());
         self.emit(AppEvent::ModemState { state, detail });
         self.emit(line);
+        self.beacon.sched.on_state(state, tokio::time::Instant::now());
         let out = self.broadcasts.state(state);
         self.publish_broadcasts(out);
     }
@@ -574,6 +659,8 @@ impl App {
         let abandoned = self.broadcasts.abandon();
         self.publish_broadcasts(abandoned);
         self.listen_mode = ListenMode::default();
+        // Beacons are armed for one run: a new modem or profile starts disarmed (RF-02).
+        self.beacon.select(target.as_ref().map(|p| p.id.clone()), &self.store);
         self.set_session(None);
         self.chat = None;
         self.discovery.modem_changed();
@@ -610,6 +697,9 @@ impl App {
             ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
             ReportKind::Message(message) => self.emit(AppEvent::MessageChanged { message }),
             ReportKind::Observation(o) => {
+                if let Observation::Busy(on) = &o {
+                    self.beacon.on_busy(*on, tokio::time::Instant::now());
+                }
                 let out = self.broadcasts.observe(&o);
                 self.publish_broadcasts(out);
                 let events = self.discovery.observation(self.chat.as_mut(), o);
@@ -639,10 +729,18 @@ impl App {
                 let out = self.broadcasts.refused(kind, reason);
                 self.publish_broadcasts(out);
             }
+            ReportKind::BroadcastUnconfirmed { kind, note } => {
+                let out = self.broadcasts.unconfirmed(kind);
+                if !out.is_empty() {
+                    self.publish_broadcasts(out);
+                    let line = self.discovery.note("broadcast", note);
+                    self.emit(line);
+                }
+            }
         }
     }
 
-    fn snapshot(&self) -> Result<AppSnapshot, AppError> {
+    fn snapshot(&mut self) -> Result<AppSnapshot, AppError> {
         let mut profiles = Vec::new();
         for row in self.store.profiles().map_err(storage)? {
             match from_row(&row) {
@@ -662,6 +760,7 @@ impl App {
             modem_detail: self.modem_detail.clone(),
             profiles,
             listen_preferred,
+            beacon: self.beacon.status(tokio::time::Instant::now()),
             session: self.session.clone(),
             active_profile_id: active,
             discovery: self.discovery.stats(),

@@ -96,6 +96,29 @@ pub enum ReportKind {
         kind: BroadcastKind,
         reason: String,
     },
+    /// The command was written but the modem did not answer: it may have
+    /// gone out, so it is neither refused nor confirmed (03 section 6).
+    BroadcastUnconfirmed {
+        kind: BroadcastKind,
+        note: String,
+    },
+}
+
+/// What a failed CQFRAME means, truthfully (03 section 6): a modem that never
+/// took the command, or refused it, did not send it; one that gave no answer
+/// may have.
+fn cq_failure(e: &StationError) -> ReportKind {
+    let kind = BroadcastKind::Cq;
+    match e {
+        StationError::ControlLost | StationError::Detached => {
+            ReportKind::BroadcastRefused { kind, reason: GateRefusal::Detached.message() }
+        }
+        StationError::Timeout(_) => ReportKind::BroadcastUnconfirmed {
+            kind,
+            note: "CQ not confirmed: no answer from the modem; it may have been sent".into(),
+        },
+        other => ReportKind::BroadcastRefused { kind, reason: format!("not sent: the modem refused CQ ({other})") },
+    }
 }
 
 /// The actor's end of one modem task. Dropping it stops the task.
@@ -618,16 +641,17 @@ async fn serve(
                     r.send(ReportKind::BroadcastSubmitted(BroadcastKind::Cq)).await;
                     continue;
                 }
-                Err(e @ (StationError::ControlLost | StationError::Detached)) => {
-                    tracing::warn!("modem control lost sending CQ: {e}");
-                    let reason = GateRefusal::Detached.message();
-                    r.send(ReportKind::BroadcastRefused { kind: BroadcastKind::Cq, reason }).await;
-                    After::Recover
-                }
                 Err(e) => {
-                    let reason = format!("not sent: the modem refused CQ ({e})");
-                    r.send(ReportKind::BroadcastRefused { kind: BroadcastKind::Cq, reason }).await;
-                    continue;
+                    let lost = matches!(e, StationError::ControlLost | StationError::Detached);
+                    if lost {
+                        tracing::warn!("modem control lost sending CQ: {e}");
+                    }
+                    r.send(cq_failure(&e)).await;
+                    if lost {
+                        After::Recover
+                    } else {
+                        continue;
+                    }
                 }
             },
             Idle::Cmd(Some(ModemCmd::Broadcast(payload))) => {
@@ -979,6 +1003,35 @@ async fn link(
                     Ok(()) => After::Idle(Some("aborted: delivery of anything not yet confirmed is uncertain".into())),
                     Err(_) => After::Recover,
                 },
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_cq_that_timed_out_may_have_gone_out_so_it_is_not_refused() {
+        match cq_failure(&StationError::Timeout("OK")) {
+            ReportKind::BroadcastUnconfirmed { kind, note } => {
+                assert_eq!(kind, BroadcastKind::Cq);
+                assert!(note.contains("may have been sent"), "{note}");
+            }
+            other => panic!("a CQ with no answer is not Refused: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_cq_the_modem_never_took_or_refused_is_refused() {
+        for e in [StationError::Detached, StationError::ControlLost, StationError::Wrong("CQFRAME".into())] {
+            match cq_failure(&e) {
+                ReportKind::BroadcastRefused { kind, reason } => {
+                    assert_eq!(kind, BroadcastKind::Cq);
+                    assert!(reason.starts_with("not sent: "), "{reason}");
+                }
+                other => panic!("{e:?}: {other:?}"),
             }
         }
     }

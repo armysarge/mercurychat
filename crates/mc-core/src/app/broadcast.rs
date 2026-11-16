@@ -219,6 +219,15 @@ impl Tracker {
         self.finish(BroadcastOutcome::Refused { reason })
     }
 
+    /// The modem was sent `kind` but never answered: it may or may not have
+    /// gone out, so it is reported as not confirmed, not as refused.
+    pub fn unconfirmed(&mut self, kind: BroadcastKind) -> Outcomes {
+        if !self.in_flight.is_some_and(|f| f.kind == kind && !f.submitted) {
+            return Vec::new();
+        }
+        self.finish(BroadcastOutcome::NotConfirmed)
+    }
+
     /// An observation from the modem's control stream.
     pub fn observe(&mut self, o: &Observation) -> Outcomes {
         let Some(f) = self.in_flight.as_mut().filter(|f| !f.left_idle) else { return Vec::new() };
@@ -358,6 +367,16 @@ mod tests {
         t.state(ModemState::Recovering);
         let out = kinds(&t.submitted(BroadcastKind::Cq));
         assert_eq!(out, [BroadcastOutcome::Submitted, BroadcastOutcome::NotConfirmed]);
+    }
+
+    #[test]
+    fn an_unanswered_command_is_not_confirmed_never_refused() {
+        let mut t = Tracker::default();
+        assert!(t.unconfirmed(BroadcastKind::Cq).is_empty());
+        t.start(BroadcastKind::Cq, Instant::now());
+        assert!(t.unconfirmed(BroadcastKind::Beacon).is_empty(), "another kind's answer");
+        assert_eq!(kinds(&t.unconfirmed(BroadcastKind::Cq)), [BroadcastOutcome::NotConfirmed]);
+        assert!(!t.busy());
     }
 
     #[test]
