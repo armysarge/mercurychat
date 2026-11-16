@@ -41,7 +41,7 @@ function useSimulator() {
   const wanted = simCall.value.trim().toUpperCase();
   const existing = snapshot.value?.profiles.find((p) => p.modem.kind === "simulator" && p.callsign === wanted);
   const draft: StationProfile = existing ?? {
-    id: "", callsign: simCall.value, name: null, grid: null, modem: { kind: "simulator" }, lab: true, listenPreferred: false,
+    id: "", callsign: simCall.value, name: null, grid: null, modem: { kind: "simulator" }, lab: true, receiveOnly: false,
   };
   return use(draft, "sim");
 }
@@ -72,7 +72,7 @@ function useExisting() {
       telemetryUrl: null,
     },
     lab: false,
-    listenPreferred: false,
+    receiveOnly: false,
   };
   return use(draft, "ex");
 }
@@ -90,7 +90,7 @@ function useExisting() {
 
     <form class="card stack existing" @submit.prevent="useExisting">
       <h2>Existing Mercury</h2>
-      <p class="muted small">A Mercury modem already running, on this computer or one you name. MercuryChat attaches to its control and data ports; listening stays off until you turn it on.</p>
+      <p class="muted small">A Mercury modem already running, on this computer or one you name. MercuryChat attaches to its control and data ports; it answers incoming calls unless you turn on Receive only.</p>
       <label>Your callsign <input v-model="ex.callsign" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
       <span v-if="errors['ex.callsign']" class="field-error">{{ errors["ex.callsign"] }}</span>
       <div class="row">

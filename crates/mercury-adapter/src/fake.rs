@@ -24,6 +24,8 @@ struct Station {
     mode: Option<u8>,
     monitor: bool,
     mode_wrong: bool,
+    /// Answer `LISTEN ON` with WRONG (fault injection).
+    listen_wrong: bool,
 }
 
 impl Station {
@@ -179,6 +181,16 @@ impl FakeNet {
         self.shared.lock().unwrap().st[i].mode_wrong = wrong;
     }
 
+    /// Make station `i` answer `LISTEN ON` with WRONG.
+    pub fn set_listen_wrong(&self, i: usize, wrong: bool) {
+        self.shared.lock().unwrap().st[i].listen_wrong = wrong;
+    }
+
+    /// Whether station `i` is listening now, as the fake modem sees it.
+    pub fn listening(&self, i: usize) -> bool {
+        self.shared.lock().unwrap().st[i].listen
+    }
+
     /// Broadcasts put on the air, as (sender, payload as transmitted). Dropped
     /// ones (session up) are not listed; over-capacity ones are truncated.
     pub fn broadcast_log(&self) -> Vec<(usize, Vec<u8>)> {
@@ -277,8 +289,12 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             send_line(&s, i, &format!("REGISTERED {c}"));
         }
         ["LISTEN", v] => {
-            s.st[i].listen = *v != "OFF";
-            send_line(&s, i, "OK");
+            if *v != "OFF" && s.st[i].listen_wrong {
+                send_line(&s, i, "WRONG");
+            } else {
+                s.st[i].listen = *v != "OFF";
+                send_line(&s, i, "OK");
+            }
         }
         ["MODE", n] => {
             let n = n.parse::<u8>();

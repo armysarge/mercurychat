@@ -116,9 +116,9 @@ fn simulator_needs_no_endpoint() {
 }
 
 #[test]
-fn listen_preference_defaults_off() {
-    assert!(!StationProfile::new_existing("ZS6ABC").listen_preferred);
-    assert!(!StationProfile::new_simulator("ZS6ABC").listen_preferred);
+fn profiles_answer_calls_by_default() {
+    assert!(!StationProfile::new_existing("ZS6ABC").receive_only);
+    assert!(!StationProfile::new_simulator("ZS6ABC").receive_only);
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn profile_survives_reopen() {
     p.name = Some("Home".into());
     p.grid = Some("KG33xi".into());
     p.lab = true;
-    p.listen_preferred = true;
+    p.receive_only = true;
     let p = p.validate().unwrap();
     let sim = StationProfile::new_simulator("ZS6ABC").validate().unwrap();
     {

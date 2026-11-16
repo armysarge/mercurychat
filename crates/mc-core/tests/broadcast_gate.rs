@@ -179,7 +179,7 @@ async fn ready(root: &Path, profile: StationProfile) -> (AppHandle, Receiver<Eve
     };
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
-    until_state(&mut rx, ModemState::Ready).await;
+    until_state(&mut rx, ModemState::Listening).await;
     (h, rx)
 }
 
@@ -238,11 +238,10 @@ async fn cq_refused_while_calling_and_not_sent_later() {
     assert_eq!(got, [BroadcastOutcome::Refused { reason: why.clone() }]);
     // The call ends; the refused CQ must not go out afterwards.
     assert_eq!(h.call(AppCommand::CancelCall).await.unwrap(), CommandOk::Done);
-    until_state(&mut rx, ModemState::Ready).await;
-    // The modem takes commands in order: once LISTEN is through, anything
-    // queued before it would have been sent.
-    h.call(AppCommand::SetListen { on: true }).await.unwrap();
     until_state(&mut rx, ModemState::Listening).await;
+    // The modem takes commands in order: once LISTEN is through, anything
+    // queued before it would have been sent. Listening is on by default, so
+    // the state after the call is Listening and LISTEN ON went out at attach.
     assert!(net.log().iter().any(|l| l == "A> LISTEN ON"), "{:?}", net.log());
     assert_eq!(cq_lines(&net), Vec::<String>::new());
     let lines = broadcast_lines(&h).await;

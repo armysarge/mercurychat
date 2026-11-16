@@ -1,9 +1,14 @@
 <script setup lang="ts">
-// The right pane: listening (RF-02, explicit), the session, the open peer's
+import { computed } from "vue";
+// The right pane: Receive only switch (D18; listening is the default), the session, the open peer's
 // queue, and the link. No telemetry exists yet, so none is shown: a missing
 // metric is never drawn as a value.
-import { activeProfile, canCall, chat, modemState, queuedBytes, session, setListen, snapshot } from "../store";
+import { activeProfile, chat, modemState, queuedBytes, session, setReceiveOnly, snapshot } from "../store";
 
+// Receive only can change while idle and mid-session (LISTEN does not end a link).
+const canSwitch = computed(() =>
+  ["ready", "listening", "negotiating", "connected", "draining"].includes(modemState.value),
+);
 const since = (utc: string) => utc.slice(11, 16) + " UTC";
 function where() {
   const p = activeProfile.value;
@@ -20,14 +25,15 @@ function where() {
         <input
           class="listen"
           type="checkbox"
-          :checked="modemState === 'listening'"
-          :disabled="!canCall"
-          @change="setListen(($event.target as HTMLInputElement).checked)"
+          :checked="snapshot?.receiveOnly ?? false"
+          :disabled="!canSwitch"
+          @change="setReceiveOnly(($event.target as HTMLInputElement).checked)"
         />
-        Listen
+        Receive only
       </label>
-      <p v-if="modemState === 'listening'" class="ok small">Incoming calls answered automatically</p>
-      <p v-else class="muted small">Not answering calls. Listening is off after every start and every recovery until you turn it on.</p>
+      <p v-if="snapshot?.receiveOnly" class="muted small">Receive only: incoming calls are not answered.</p>
+      <p v-else-if="snapshot?.listening" class="ok small">Incoming calls answered automatically</p>
+      <p v-else class="muted small">Not answering calls right now.</p>
     </section>
 
     <section class="card stack" aria-labelledby="h-session">

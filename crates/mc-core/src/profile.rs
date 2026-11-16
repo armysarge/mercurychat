@@ -19,7 +19,7 @@ pub struct StationProfile {
     pub grid: Option<String>,
     pub modem: ModemTarget,
     pub lab: bool,
-    pub listen_preferred: bool,
+    pub receive_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -79,7 +79,7 @@ impl StationProfile {
             grid: None,
             modem,
             lab: false,
-            listen_preferred: false,
+            receive_only: false,
         }
     }
 
@@ -170,7 +170,7 @@ pub fn to_row(p: &StationProfile) -> ProfileRow {
         broadcast_port,
         telemetry_url,
         lab: p.lab,
-        listen_preferred: p.listen_preferred,
+        receive_only: p.receive_only,
         qth: None,
         rig: None,
         power: None,
@@ -199,6 +199,6 @@ pub fn from_row(r: &ProfileRow) -> Result<StationProfile, FieldError> {
         grid: r.grid.clone(),
         modem,
         lab: r.lab,
-        listen_preferred: r.listen_preferred,
+        receive_only: r.receive_only,
     })
 }

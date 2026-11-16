@@ -103,7 +103,7 @@ async fn stale_generation_reports_are_dropped() {
     h.call(AppCommand::SelectProfile { id: Some(b) }).await.unwrap();
     loop {
         match next_state(&mut rx, Duration::from_secs(5)).await {
-            Some((ModemState::Ready, _)) => break,
+            Some((ModemState::Listening, _)) => break,
             Some(_) => continue,
             None => panic!("simulator never became ready"),
         }
@@ -129,7 +129,7 @@ async fn occupied_endpoint_faults_once() {
     first.call(AppCommand::SelectProfile { id: Some(id1) }).await.unwrap();
     loop {
         match next_state(&mut rx1, Duration::from_secs(10)).await {
-            Some((ModemState::Ready, _)) => break,
+            Some((ModemState::Listening, _)) => break,
             Some((ModemState::Faulted, d)) => panic!("first attach faulted: {d:?}"),
             Some(_) => continue,
             None => panic!("first never ready"),
@@ -157,7 +157,7 @@ async fn deselect_releases_the_endpoint_lock() {
     let id = save(&h, existing("ZS6AAA", net.a_base, net.a_base + 1)).await;
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
-    while !matches!(next_state(&mut rx, Duration::from_secs(10)).await, Some((ModemState::Ready, _))) {}
+    while !matches!(next_state(&mut rx, Duration::from_secs(10)).await, Some((ModemState::Listening, _))) {}
     assert!(lock_endpoint(&dir.path().join("locks"), "127.0.0.1", net.a_base).is_err(), "held while attached");
     h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
     let end = Instant::now() + Duration::from_secs(2);

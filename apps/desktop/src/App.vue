@@ -40,7 +40,7 @@ const where = computed(() => {
 const banner = computed(() => {
   switch (modemState.value) {
     case "recovering":
-      return { tone: "warn", role: "alert", text: "Reconnecting to the modem after the connection was lost. Listening is off and nothing is resent automatically." };
+      return { tone: "warn", role: "alert", text: "Reconnecting to the modem after the connection was lost. Nothing is resent automatically." };
     case "faulted":
       return { tone: "err", role: "alert", text: `Modem fault: ${detail.value ?? "unknown"}. Use the station again in Settings to retry.` };
     case "draining":

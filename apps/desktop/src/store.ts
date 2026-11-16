@@ -61,9 +61,9 @@ export const modeWord = computed(() => {
     case "attaching":
       return "Attaching";
     case "ready":
-      return "Receive-only";
+      return snapshot.value?.receiveOnly ? "Receive only" : "Not answering calls";
     case "listening":
-      return "Listening";
+      return "Answering calls";
     case "calling":
       return `Calling ${detail.value ?? ""}`.trim();
     case "negotiating":
@@ -237,7 +237,7 @@ export function saveDraft(text: string) {
 }
 
 export const retry = (m: ChatMessage) => act(() => call({ type: "retryChat", peer: m.peer, id: m.id }));
-export const setListen = (on: boolean) => act(() => call({ type: "setListen", on }));
+export const setReceiveOnly = (on: boolean) => act(() => call({ type: "setReceiveOnly", on }));
 export const placeCall = () => act(() => call({ type: "call", peer: chat.open }));
 export const cancelCall = () => act(() => call({ type: "cancelCall" }));
 export const disconnect = () => act(() => call({ type: "disconnect" }));

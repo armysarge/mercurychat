@@ -270,16 +270,26 @@ impl App {
                 }
                 Ok(CommandOk::Done)
             }
-            AppCommand::SetListen { on } => {
-                if !matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+            AppCommand::SetReceiveOnly { on } => {
+                // Also mid-session: LISTEN OFF does not end the link.
+                if !matches!(
+                    self.modem,
+                    ModemState::Ready
+                        | ModemState::Listening
+                        | ModemState::Negotiating
+                        | ModemState::Connected
+                        | ModemState::Draining
+                ) {
                     let state = format!("{:?}", self.modem).to_lowercase();
-                    return Err(conflict(format!("the modem is {state}: listening can be changed once it is ready")));
+                    return Err(conflict(format!(
+                        "the modem is {state}: Receive only can be changed once it is ready"
+                    )));
                 }
                 let Some(mut p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
-                p.listen_preferred = on;
+                p.receive_only = on;
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
-                if !self.task.as_ref().is_some_and(|t| t.send(ModemCmd::SetListen(on))) {
+                if !self.task.as_ref().is_some_and(|t| t.send(ModemCmd::SetListen(!on))) {
                     return Err(conflict("the modem is not accepting commands".into()));
                 }
                 Ok(CommandOk::Done)
@@ -754,15 +764,16 @@ impl App {
         // A setting naming a profile that no longer exists reads as none.
         let active =
             self.store.setting(ACTIVE_PROFILE).map_err(storage)?.filter(|id| profiles.iter().any(|p| &p.id == id));
-        let listen_preferred =
-            active.as_ref().and_then(|id| profiles.iter().find(|p| &p.id == id)).is_some_and(|p| p.listen_preferred);
+        let receive_only =
+            active.as_ref().and_then(|id| profiles.iter().find(|p| &p.id == id)).is_some_and(|p| p.receive_only);
         Ok(AppSnapshot {
             seq: self.log.last_seq(),
             generation: self.log.generation(),
             modem: self.modem,
             modem_detail: self.modem_detail.clone(),
             profiles,
-            listen_preferred,
+            receive_only,
+            listening: self.modem == ModemState::Listening,
             beacon: self.beacon.status(tokio::time::Instant::now()),
             session: self.session.clone(),
             active_profile_id: active,

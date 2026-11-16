@@ -11,10 +11,16 @@ export type AppSnapshot = { seq: number, generation: number, modem: ModemState,
  */
 modemDetail: string | null, profiles: Array<StationProfile>, activeProfileId: string | null, 
 /**
- * The active profile's stored listen preference (RF-02): shown, never
- * applied by itself on start-up or recovery.
+ * The active profile is Receive only (D18): it never answers calls by
+ * itself. Stored on the profile; the default is to answer calls.
  */
-listenPreferred: boolean, 
+receiveOnly: boolean, 
+/**
+ * The modem is listening for calls right now (actual state, not the
+ * setting): false while attaching, receive-only, or after a LISTEN ON
+ * failure.
+ */
+listening: boolean, 
 /**
  * Periodic beacons (DSC-03): the stored preference is shown, never
  * applied by itself; `active` is for this run only.

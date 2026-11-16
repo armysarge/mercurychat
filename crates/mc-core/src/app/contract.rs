@@ -23,9 +23,13 @@ pub struct AppSnapshot {
     pub modem_detail: Option<String>,
     pub profiles: Vec<StationProfile>,
     pub active_profile_id: Option<String>,
-    /// The active profile's stored listen preference (RF-02): shown, never
-    /// applied by itself on start-up or recovery.
-    pub listen_preferred: bool,
+    /// The active profile is Receive only (D18): it never answers calls by
+    /// itself. Stored on the profile; the default is to answer calls.
+    pub receive_only: bool,
+    /// The modem is listening for calls right now (actual state, not the
+    /// setting): false while attaching, receive-only, or after a LISTEN ON
+    /// failure.
+    pub listening: bool,
     /// Periodic beacons (DSC-03): the stored preference is shown, never
     /// applied by itself; `active` is for this run only.
     pub beacon: BeaconStatus,
@@ -52,9 +56,10 @@ pub enum AppCommand {
     SelectProfile {
         id: Option<String>,
     },
-    /// Turn listening (automatic answers to incoming calls) on or off, and
-    /// remember the choice on the active profile.
-    SetListen {
+    /// Receive only on: the station stops answering calls (LISTEN OFF, at
+    /// once, even mid-session). Off: it answers calls again. Stored on the
+    /// active profile (D18).
+    SetReceiveOnly {
         on: bool,
     },
     /// Call a station; the session starts once it answers with MCH/1.

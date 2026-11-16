@@ -499,7 +499,7 @@ mod service {
             }
         }
         done(&h, AppCommand::CancelCall).await;
-        state(&mut rx, ModemState::Ready).await;
+        state(&mut rx, ModemState::Listening).await;
         settle().await;
 
         // Idle: it goes, once, and the schedule is as it was.

@@ -534,7 +534,7 @@ pub struct ProfileRow {
     pub broadcast_port: Option<u16>,
     pub telemetry_url: Option<String>,
     pub lab: bool,
-    pub listen_preferred: bool,
+    pub receive_only: bool,
     pub qth: Option<String>,
     pub rig: Option<String>,
     pub power: Option<String>,
@@ -549,14 +549,14 @@ impl Store {
         let now = now_utc();
         self.conn.execute(
             "INSERT INTO station_profiles (id, callsign, name, grid, modem_kind, host, control_port, data_port,
-               broadcast_port, telemetry_url, lab, listen_preferred, created_utc, updated_utc,
+               broadcast_port, telemetry_url, lab, receive_only, created_utc, updated_utc,
                qth, rig, power, antenna, email, about)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT (id) DO UPDATE SET callsign = excluded.callsign, name = excluded.name,
                grid = excluded.grid, modem_kind = excluded.modem_kind, host = excluded.host,
                control_port = excluded.control_port, data_port = excluded.data_port,
                broadcast_port = excluded.broadcast_port, telemetry_url = excluded.telemetry_url,
-               lab = excluded.lab, listen_preferred = excluded.listen_preferred, updated_utc = excluded.updated_utc,
+               lab = excluded.lab, receive_only = excluded.receive_only, updated_utc = excluded.updated_utc,
                qth = excluded.qth, rig = excluded.rig, power = excluded.power, antenna = excluded.antenna,
                email = excluded.email, about = excluded.about",
             params![
@@ -571,7 +571,7 @@ impl Store {
                 r.broadcast_port,
                 r.telemetry_url,
                 r.lab,
-                r.listen_preferred,
+                r.receive_only,
                 now,
                 r.qth,
                 r.rig,
@@ -588,7 +588,7 @@ impl Store {
     pub fn profiles(&self) -> Result<Vec<ProfileRow>> {
         let mut st = self.conn.prepare(
             "SELECT id, callsign, name, grid, modem_kind, host, control_port, data_port, broadcast_port,
-                    telemetry_url, lab, listen_preferred, qth, rig, power, antenna, email, about
+                    telemetry_url, lab, receive_only, qth, rig, power, antenna, email, about
              FROM station_profiles ORDER BY created_utc, rowid",
         )?;
         let rows = st.query_map([], |r| {
@@ -604,7 +604,7 @@ impl Store {
                 broadcast_port: r.get(8)?,
                 telemetry_url: r.get(9)?,
                 lab: r.get(10)?,
-                listen_preferred: r.get(11)?,
+                receive_only: r.get(11)?,
                 qth: r.get(12)?,
                 rig: r.get(13)?,
                 power: r.get(14)?,

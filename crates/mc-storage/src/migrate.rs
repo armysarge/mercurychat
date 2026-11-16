@@ -21,6 +21,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 2, sql: MIGRATION_2 },
     Migration { to: 3, sql: MIGRATION_3 },
     Migration { to: 4, sql: MIGRATION_4 },
+    Migration { to: 5, sql: MIGRATION_5 },
 ];
 
 const MIGRATION_1: &str = r#"
@@ -209,3 +210,10 @@ fn backup_before(conn: &Connection, db_path: &Path, from: i64) -> Result<PathBuf
     conn.backup(rusqlite::MAIN_DB, &dest, None).map_err(|e| err(e.to_string()))?;
     Ok(dest)
 }
+
+/// Listening is on by default (D18, owner decision): `receive_only` replaces
+/// `listen_preferred`, which stays in the table but is no longer read, so every
+/// existing profile starts as "answering calls".
+const MIGRATION_5: &str = r#"
+ALTER TABLE station_profiles ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0;
+"#;

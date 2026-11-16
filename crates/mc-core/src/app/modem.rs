@@ -379,8 +379,6 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
         return r.fault("no data folder for the station".into()).await;
     };
     let station_dir = stations.join(&profile.id);
-    // RF-02: a stored preference is shown, never applied by itself.
-    let unarmed = profile.listen_preferred.then(|| UNARMED.to_string());
     let call = match Callsign::parse(&profile.callsign) {
         Ok(c) => c,
         Err(e) => return r.fault(format!("callsign: {e}")).await,
@@ -432,11 +430,11 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 _ = stopped(&mut cmds, &r) => return,
             }
             r.send(ReportKind::ListenMode(station.listen_mode())).await;
-            r.state(ModemState::Ready, unarmed).await;
+            r.state(ModemState::Ready, None).await;
             let mut station = station;
-            serve(&mut station, cmds, &r, profile.listen_preferred, &mut broadcast).await;
+            serve(&mut station, cmds, &r, profile.receive_only, &mut broadcast).await;
         }
-        ModemTarget::Simulator => simulator(&station_dir, call, unarmed, cmds, r, &mut forwarders).await,
+        ModemTarget::Simulator => simulator(&station_dir, call, profile.receive_only, cmds, r, &mut forwarders).await,
     }
 }
 
@@ -444,7 +442,7 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
 async fn simulator(
     station_dir: &Path,
     call: Callsign,
-    unarmed: Option<String>,
+    receive_only: bool,
     mut cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
     forwarders: &mut Forwarders,
@@ -471,24 +469,19 @@ async fn simulator(
         },
         _ = stopped(&mut cmds, &r) => return,
     };
-    let listen_preferred = unarmed.is_some();
-    let detail = match unarmed {
-        Some(u) => format!("simulator; {u}"),
-        None => "simulator".into(),
-    };
     r.send(ReportKind::ListenMode(sim.station.listen_mode())).await;
-    r.state(ModemState::Ready, Some(detail)).await;
+    r.state(ModemState::Ready, Some("simulator".into())).await;
     let mut sim = sim;
     forwarders.observe(&mut sim.station, &r);
     let mut broadcast = Broadcast::new(None, &r);
-    serve(&mut sim.station, cmds, &r, listen_preferred, &mut broadcast).await;
+    serve(&mut sim.station, cmds, &r, receive_only, &mut broadcast).await;
 }
 
 #[cfg(not(feature = "sim"))]
 async fn simulator(
     _dir: &Path,
     _call: Callsign,
-    _unarmed: Option<String>,
+    _receive_only: bool,
     _cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
     _forwarders: &mut Forwarders,
@@ -496,8 +489,21 @@ async fn simulator(
     r.fault("the simulator is not part of this build".into()).await;
 }
 
-/// Shown on Ready when the profile prefers listening but it is not armed.
-const UNARMED: &str = "listening is off until you turn it on";
+/// Turn listening on after attach or recovery (D18). One attempt, never
+/// retried: a refusal leaves the modem Ready with the reason shown, and the
+/// next successful recovery tries again.
+async fn arm(st: &mut Station, r: &Reporter, listening: &mut bool) {
+    match st.set_listen(true).await {
+        Ok(()) => {
+            *listening = true;
+            r.state(ModemState::Listening, None).await;
+        }
+        Err(e) => {
+            *listening = false;
+            r.state(ModemState::Ready, Some(format!("not answering calls: {e}"))).await;
+        }
+    }
+}
 
 /// How long a call may ring before it is given up (docs/04 section 3).
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -569,11 +575,15 @@ async fn serve(
     st: &mut Station,
     mut cmds: mpsc::Receiver<ModemCmd>,
     r: &Reporter,
-    listen_preferred: bool,
+    receive_only: bool,
     broadcast: &mut Broadcast,
 ) {
     let mut listening = false;
-    let mut preferred = listen_preferred;
+    // Answering calls is the default (D18); Receive only turns it off.
+    let mut want_listen = !receive_only;
+    if want_listen {
+        arm(st, r, &mut listening).await;
+    }
     let idle = |listening: bool| if listening { ModemState::Listening } else { ModemState::Ready };
     loop {
         let step = tokio::select! {
@@ -583,7 +593,7 @@ async fn serve(
         let after = match step {
             Idle::Cmd(None | Some(ModemCmd::Shutdown)) => return,
             Idle::Cmd(Some(ModemCmd::SetListen(on))) => {
-                preferred = on;
+                want_listen = on;
                 match st.set_listen(on).await {
                     Ok(()) => {
                         listening = on;
@@ -615,7 +625,9 @@ async fn serve(
                             None => After::Stop,
                         }
                     }
-                    Calling::Answered(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Outgoing).await,
+                    Calling::Answered(Ok(info)) => {
+                        link(st, &mut cmds, r, info, SessionDirection::Outgoing, &mut listening, &mut want_listen).await
+                    }
                     Calling::Answered(Err(StationError::ControlLost | StationError::Detached)) => After::Recover,
                     Calling::Answered(Err(StationError::BadPeer(p))) => {
                         tokio::select! {
@@ -676,7 +688,9 @@ async fn serve(
                 tracing::debug!(?other, "no call or session for this command");
                 continue;
             }
-            Idle::Incoming(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Incoming).await,
+            Idle::Incoming(Ok(info)) => {
+                link(st, &mut cmds, r, info, SessionDirection::Incoming, &mut listening, &mut want_listen).await
+            }
             Idle::Incoming(Err(StationError::Timeout(_))) => continue,
             Idle::Incoming(Err(StationError::BadPeer(p))) => {
                 tokio::select! {
@@ -697,7 +711,7 @@ async fn serve(
             After::Stop => return,
             After::Idle(detail) => r.state(idle(listening), detail).await,
             After::Recover => {
-                // Recovery leaves the modem not listening (RF-02).
+                // A recovered modem is not listening until told to be (below).
                 listening = false;
                 r.session(None).await;
                 r.state(ModemState::Recovering, None).await;
@@ -715,7 +729,10 @@ async fn serve(
                     _ = cut_short(&mut cmds, false, r, RECOVERING) => return,
                 }
                 r.send(ReportKind::ListenMode(st.listen_mode())).await;
-                r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await;
+                r.state(ModemState::Ready, None).await;
+                if want_listen {
+                    arm(st, r, &mut listening).await;
+                }
             }
         }
     }
@@ -849,6 +866,8 @@ async fn link(
     r: &Reporter,
     info: ConnectInfo,
     direction: SessionDirection,
+    listening: &mut bool,
+    want_listen: &mut bool,
 ) -> After {
     r.state(ModemState::Negotiating, Some(info.peer.clone())).await;
     let records = match Store::open(&st.cfg.data_dir.join("station.db")) {
@@ -923,6 +942,13 @@ async fn link(
                         drain_until = None;
                         send_wire(Command::Abort);
                         r.state(ModemState::Draining, Some("aborting".into())).await;
+                    }
+                    Some(ModemCmd::SetListen(on)) => {
+                        // Receive only changes LISTEN, never the session; the
+                        // modem takes LISTEN mid-link. The state shown stays.
+                        send_wire(Command::Listen(on));
+                        *want_listen = on;
+                        *listening = on;
                     }
                     Some(ModemCmd::Submit { peer, id }) => {
                         if peer == link.info.peer && !ending && !aborted {
