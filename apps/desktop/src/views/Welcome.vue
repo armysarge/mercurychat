@@ -29,6 +29,6 @@ const startReceiveOnly = ref(false);
 
 <style scoped>
 .welcome { padding: calc(var(--space) * 4); display: grid; gap: calc(var(--space) * 3); max-width: 960px; overflow-y: auto; height: 100%; align-content: start; }
-h1 { font-size: 22px; }
-.start-rx { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
+h1 { font-size: calc(22px * var(--font-scale)); }
+.start-rx { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: calc(14px * var(--font-scale)); }
 </style>

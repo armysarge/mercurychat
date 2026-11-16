@@ -83,7 +83,7 @@ const subtitle = computed(() => {
   display: flex; flex-wrap: wrap; gap: var(--space); align-items: center; justify-content: space-between;
   padding: calc(var(--space) * 1.5) calc(var(--space) * 2); border-bottom: 1px solid var(--border);
 }
-.peer-header h1 { font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
+.peer-header h1 { font-size: calc(20px * var(--font-scale)); font-weight: 600; overflow-wrap: anywhere; }
 .actions { justify-content: flex-end; flex-wrap: wrap; }
 .toggle-session { display: none; }
 .progress { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space); margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
@@ -101,15 +101,15 @@ const subtitle = computed(() => {
   .toggle-session { display: inline-block; }
   .session-pane {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 92vw); z-index: 30;
-    transform: translateX(100%); visibility: hidden; box-shadow: -8px 0 24px rgb(0 0 0 / 0.35);
+    transform: translateX(100%); visibility: hidden; box-shadow: -8px 0 24px var(--shadow);
     transition: transform 120ms ease-out, visibility 120ms;
   }
   .session-pane.open { transform: none; visibility: visible; }
-  .scrim { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); z-index: 20; }
+  .scrim { display: block; position: fixed; inset: 0; background: var(--scrim); z-index: 20; }
 }
 @media (max-width: 1099px) {
   .peer-header { padding: var(--space) calc(var(--space) * 1.5); }
-  .peer-header h1 { font-size: 17px; }
+  .peer-header h1 { font-size: calc(17px * var(--font-scale)); }
 }
 @media (max-height: 560px) {
   .peer-header .who p { display: none; }

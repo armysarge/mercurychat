@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "splash",
-  "description": "The start-up splash: it may only ask how far start-up has got and, after a failure, close the app.",
+  "description": "The start-up splash: it may only ask how far start-up has got, read the saved appearance (to paint the saved theme), and, after a failure, close the app.",
   "windows": ["splash"],
-  "permissions": ["allow-splash-status", "allow-quit-app"]
+  "permissions": ["allow-splash-status", "allow-quit-app", "allow-appearance-load"]
 }

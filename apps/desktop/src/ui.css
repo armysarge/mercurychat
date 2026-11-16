@@ -2,14 +2,14 @@
    restrained borders). Component layout lives with each component. */
 html, body, #app { height: 100%; overflow: hidden; }
 h1, h2, h3, p { margin: 0; }
-h2 { font-size: 15px; }
+h2 { font-size: calc(15px * var(--font-scale)); }
 .muted { color: var(--text-2); }
-.small { font-size: 12px; }
+.small { font-size: calc(12px * var(--font-scale)); }
 .err { color: var(--danger); }
 .ok { color: var(--success); }
 .warn { color: var(--warning); }
 .label {
-  text-transform: uppercase; letter-spacing: 1.2px; font-size: 10px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: 1.2px; font-size: calc(10px * var(--font-scale)); font-weight: 700; color: var(--text-2);
 }
 .card {
   background: var(--surface); border: 1px solid var(--border);
@@ -18,30 +18,30 @@ h2 { font-size: 15px; }
 .stack { display: grid; gap: var(--space); }
 .row { display: flex; flex-wrap: wrap; gap: var(--space); align-items: center; }
 .grow { flex: 1; }
-label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); font-size: 12px; }
+label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 input, textarea, select {
-  background: var(--raised); color: var(--text); border: 1px solid var(--border);
+  background: var(--raised); color: var(--text); border: 1px solid var(--border-strong);
   border-radius: 8px; padding: 6px 8px; font: inherit;
 }
 input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 button {
-  background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: 9px;
+  background: var(--raised); color: var(--text); border: 1px solid var(--border-strong); border-radius: 9px;
   padding: 6px 12px; font: inherit; cursor: pointer;
 }
 button:hover:not(:disabled) { border-color: var(--accent); }
 button:disabled { opacity: 0.55; cursor: default; }
-button.primary { background: var(--accent); color: var(--canvas); border-color: var(--accent); font-weight: 600; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.quiet { background: transparent; color: var(--text-2); }
 /* Abort is destructive and must not look like Disconnect (docs/04 §5). */
 button.danger { background: transparent; color: var(--danger); border-color: var(--danger); font-weight: 600; }
 .pill {
   display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor;
-  color: var(--text-2); font-family: var(--font-mono); font-size: 12px; white-space: nowrap;
+  color: var(--text-2); font-family: var(--font-mono); font-size: calc(12px * var(--font-scale)); white-space: nowrap;
 }
 .pill.ready, .pill.listening, .pill.connected { color: var(--success); }
 .pill.attaching, .pill.calling, .pill.negotiating, .pill.draining, .pill.recovering { color: var(--warning); }
 .pill.faulted { color: var(--danger); }
-.field-error { color: var(--danger); font-size: 12px; }
+.field-error { color: var(--danger); font-size: calc(12px * var(--font-scale)); }
 
 /* Thin scrollbars in the theme's colours, everywhere (WebView2 and WebKitGTK
    both take the -webkit- pseudo-elements; no arrow buttons). */

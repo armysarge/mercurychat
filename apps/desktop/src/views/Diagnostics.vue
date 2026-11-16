@@ -70,11 +70,11 @@ async function runProbe() {
 
 <style scoped>
 .diag { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); overflow-y: auto; height: 100%; align-content: start; max-width: 960px; }
-h1 { font-size: 20px; }
+h1 { font-size: calc(20px * var(--font-scale)); }
 dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: var(--space) 0 0; }
 dt { color: var(--text-2); }
 dd { margin: 0; }
-.path { word-break: break-all; font-size: 12px; }
+.path { word-break: break-all; font-size: calc(12px * var(--font-scale)); }
 .result { font-weight: 600; }
-.log { background: var(--raised); border-radius: 8px; padding: var(--space); max-height: 220px; overflow: auto; font-size: 12px; margin: 0; }
+.log { background: var(--raised); border-radius: 8px; padding: var(--space); max-height: 220px; overflow: auto; font-size: calc(12px * var(--font-scale)); margin: 0; }
 </style>

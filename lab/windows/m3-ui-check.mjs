@@ -16,9 +16,11 @@
 //   8. no devtools: F12, Ctrl+Shift+I, Ctrl+R and F5 are inert, the context
 //      menu offers only cut/copy/paste/select-all on fields and selected text,
 //      and the tauri `devtools` feature is not in the dependency tree
+//   9. themes: Night Red re-colours the window at once, density and text size apply
+//      at once, and the splash and window come back in it after a restart
 // Usage: node lab/windows/m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 import { execFileSync } from "node:child_process";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { connect, kill, launch, page, pages, sleep, until } from "./cdp.mjs";
@@ -242,6 +244,65 @@ try {
   const diff = ["x", "y", "w", "h"].map((k, i) => Math.abs(back2[k] - want[i]));
   if (Math.max(...diff) > 2) throw new Error(`window came back at ${JSON.stringify(back2)}, wanted ${want}`);
   results.push(`PASS window: moved and resized to ${want.join(",")}, back at ${back2.x},${back2.y},${back2.w},${back2.h} after restart`);
+
+  // ---- 11. themes: Night Red changes the window, persists, and the splash uses it themeAfter a restart
+  const rgb = (hex) => { const h = hex.replace("#", ""); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };
+  const night = { canvas: "#060000", surface: "#110000", bubbleOut: "#3a0808", badgeCq: "#ff6a5c", accent: "#ff5a4d" };
+  const cssVar = (n) => `getComputedStyle(document.documentElement).getPropertyValue('--${n}').trim()`;
+  const bg = (sel) => `getComputedStyle(document.querySelector(${JSON.stringify(sel)})).backgroundColor`;
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, "!!document.querySelector('[data-theme-id=\"night-red\"]')", "the theme picker");
+  const picks = await s.eval("[...document.querySelectorAll('[data-theme-id]')].map(b => b.dataset.themeId).join(',')");
+  for (const id of ["system", "midnight", "daylight", "night-red", "high-contrast-dark", "high-contrast-light", "ocean", "slate", "amber-terminal"]) {
+    if (!picks.split(",").includes(id)) throw new Error(`the picker lacks ${id}: ${picks}`);
+  }
+  const themeBefore = await s.eval(`({ side: ${bg("aside.sidebar")}, rail: ${bg(".rail")}, out: ${cssVar("bubble-out")}, cq: ${cssVar("badge-cq")} })`);
+  await s.eval("document.querySelector('[data-theme-id=\"night-red\"]').click()");
+  await until(s, `${cssVar("canvas")} === ${JSON.stringify(night.canvas)}`, "Night Red applied without a restart");
+  const themeAfter = await s.eval(`({ side: ${bg("aside.sidebar")}, rail: ${bg(".rail")}, body: ${bg("body")}, out: ${cssVar("bubble-out")}, cq: ${cssVar("badge-cq")}, text: getComputedStyle(document.body).color, checked: document.querySelector('[data-theme-id="night-red"]').getAttribute('aria-checked') })`);
+  if (themeAfter.side === themeBefore.side || themeAfter.rail === themeBefore.rail || themeAfter.out === themeBefore.out || themeAfter.cq === themeBefore.cq) throw new Error(`the sidebar, bubbles or badges did not change: ${JSON.stringify({ themeBefore, themeAfter })}`);
+  if (themeAfter.rail !== rgb(night.surface) || themeAfter.body !== rgb(night.canvas) || themeAfter.out !== night.bubbleOut || themeAfter.cq !== night.badgeCq || themeAfter.checked !== "true") throw new Error(`Night Red values: ${JSON.stringify(themeAfter)}`);
+  const [tr, tg, tb] = themeAfter.text.match(/\d+/g).map(Number);
+  if (tb > 0x84 || tg > 0x95 || tr < 0xc0) throw new Error(`Night Red text is not red-on-black: ${themeAfter.text}`);
+  // Density and text size apply at once.
+  await s.eval(`(() => { const r = document.querySelector('input[type=range]'); r.value = '120'; r.dispatchEvent(new Event('input')); })()`);
+  await s.eval(`(() => { const d = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => o.value === 'compact')); d.value = 'compact'; d.dispatchEvent(new Event('change')); })()`);
+  await until(s, `document.documentElement.dataset.density === 'compact' && ${cssVar("font-scale")} === '1.2'`, "compact density and 120% text");
+  const px = await s.eval("getComputedStyle(document.body).fontSize");
+  if (px !== "16.8px") throw new Error(`120% text should be 16.8px, is ${px}`);
+  // Status is still said with an icon and a word (not hue alone): Transcript's table.
+  const transcriptSrc = readFileSync(join(repo, "apps", "desktop", "src", "components", "Transcript.vue"), "utf8");
+  for (const [state, icon] of [["delivered", "✓"], ["uncertain", "?"], ["failed", "✕"]]) {
+    if (!new RegExp(`${state}: \{ icon: "${icon}"`).test(transcriptSrc)) throw new Error(`the ${state} status lost its icon`);
+  }
+  await sleep(900); // the save is debounced
+  const saved = JSON.parse(readFileSync(join(dataDir, "appearance.json"), "utf8"));
+  if (saved.theme !== "night-red" || saved.tokens.canvas !== night.canvas || saved.density !== "compact" || saved.fontScale !== 120) throw new Error(`appearance.json: ${JSON.stringify(saved).slice(0, 200)}`);
+  s.close();
+  kill(first);
+  await sleep(1500);
+  process.env.MC_SPLASH_MIN_MS = "6000";
+  first = launch(exe, dataDir, port);
+  delete process.env.MC_SPLASH_MIN_MS;
+  children.push(first);
+  let sp2 = null;
+  const seen2 = Date.now();
+  while (!sp2 && Date.now() - seen2 < 20000) {
+    sp2 = (await pages(port)).find(isSplash) ?? null;
+    if (!sp2) await sleep(25);
+  }
+  if (!sp2) throw new Error("no splash themeAfter the restart");
+  const sc2 = await connect(sp2.webSocketDebuggerUrl);
+  await until(sc2, `getComputedStyle(document.body).backgroundColor === ${JSON.stringify(rgb(night.canvas))}`, "the splash in the saved theme", 4000);
+  const splashBar = await sc2.eval("getComputedStyle(document.querySelector('.bar i')).backgroundColor");
+  if (splashBar !== rgb(night.accent)) throw new Error(`splash accent ${splashBar}`);
+  sc2.close();
+  s = await page(port, (t) => !!t.trim() && !/Opening|Starting/.test(t), "the main window themeAfter the theme restart");
+  await until(s, ready, "the workspace themeAfter the theme restart");
+  const kept = await s.eval(`({ canvas: ${cssVar("canvas")}, density: document.documentElement.dataset.density, scale: ${cssVar("font-scale")} })`);
+  if (kept.canvas !== night.canvas || kept.density !== "compact" || kept.scale !== "1.2") throw new Error(`themeAfter restart: ${JSON.stringify(kept)}`);
+  results.push(`PASS themes: picker lists System and all presets with swatches; Night Red re-colours the sidebar (${themeBefore.side} -> ${themeAfter.side}), bubble and badge tokens at once, text is red (${themeAfter.text}); compact density and 120% text (${px}) apply instantly; status icons stay; appearance.json holds them; the splash and the window come back in Night Red after a restart`);
+  s.close();
 
   // ---- 9. a start-up failure stays on the splash, with its message and a Close button
   // The first still holds this data folder. Same DevTools port: WebView2 shares one browser process

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-appearance-save"
+description = "Enables the appearance_save command without any pre-configured scope."
+commands.allow = ["appearance_save"]
+
+[[permission]]
+identifier = "deny-appearance-save"
+description = "Denies the appearance_save command without any pre-configured scope."
+commands.deny = ["appearance_save"]

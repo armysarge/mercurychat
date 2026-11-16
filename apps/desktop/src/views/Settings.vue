@@ -6,6 +6,7 @@ import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { StationProfile } from "../bindings/StationProfile";
 import ProfileForms from "../components/ProfileForms.vue";
+import ThemePicker from "../components/ThemePicker.vue";
 import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../i18n/locale";
 import { mirror, snapshot } from "../store";
 
@@ -70,6 +71,7 @@ async function chooseLanguage(value: string) {
       <p class="muted small">{{ t("appearance.hint") }}</p>
       <p v-if="languageError" class="err" role="alert">{{ languageError }}</p>
     </section>
+    <ThemePicker />
     <section class="card stack" aria-labelledby="h-profiles">
       <h2 id="h-profiles">{{ t("settings.stationProfiles") }}</h2>
       <ul v-if="snapshot?.profiles.length" class="profiles">
@@ -104,7 +106,7 @@ async function chooseLanguage(value: string) {
 
 <style scoped>
 .settings { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); overflow-y: auto; height: 100%; align-content: start; }
-h1 { font-size: 20px; }
+h1 { font-size: calc(20px * var(--font-scale)); }
 .profiles { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .profiles li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); padding: 6px 8px; border-radius: 8px; background: var(--raised); }
 .profiles li.active { outline: 1px solid var(--success); }

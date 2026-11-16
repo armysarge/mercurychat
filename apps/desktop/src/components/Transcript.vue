@@ -104,11 +104,11 @@ watch(
 .who { color: var(--text-2); margin-bottom: 4px; }
 .body {
   display: inline-block; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere;
-  background: var(--raised); padding: 10px 14px; border-radius: 3px 13px 13px 13px; line-height: 1.6;
+  background: var(--bubble-in); padding: 10px 14px; border-radius: 3px 13px 13px 13px; line-height: 1.6;
 }
-.msg.out .body { background: color-mix(in srgb, var(--accent) 16%, var(--raised)); border-radius: 13px 3px 13px 13px; }
-.status { font-size: 12px; margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
-.retry { padding: 2px 10px; font-size: 12px; }
+.msg.out .body { background: var(--bubble-out); border-radius: 13px 3px 13px 13px; }
+.status { font-size: calc(12px * var(--font-scale)); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
+.retry { padding: 2px 10px; font-size: calc(12px * var(--font-scale)); }
 .why { margin-top: 4px; text-align: left; max-width: 46ch; margin-left: auto; }
 .why summary { cursor: pointer; }
 </style>

@@ -211,6 +211,89 @@
     "draft": "(brouillon)",
     "saveFailed": "Impossible d'enregistrer la langue"
   },
+  "theme": {
+    "title": "Thème",
+    "pickerAria": "Thème",
+    "system": "Système",
+    "systemHint": "Suit le mode clair ou sombre de votre ordinateur.",
+    "saveFailed": "Impossible d'enregistrer le thème",
+    "name": {
+      "midnight": "Minuit",
+      "daylight": "Lumière du jour",
+      "night-red": "Rouge nocturne",
+      "high-contrast-dark": "Contraste élevé (sombre)",
+      "high-contrast-light": "Contraste élevé (clair)",
+      "ocean": "Océan",
+      "slate": "Ardoise",
+      "amber-terminal": "Terminal ambre"
+    },
+    "density": {
+      "label": "Densité",
+      "normal": "Normale",
+      "compact": "Compacte"
+    },
+    "fontScale": {
+      "label": "Taille du texte",
+      "value": "{percent} %",
+      "reset": "Réinitialiser"
+    },
+    "custom": {
+      "create": "Personnaliser ce thème",
+      "edit": "Modifier votre thème",
+      "delete": "Supprimer",
+      "deleteConfirm": "Supprimer {name}",
+      "editing": "Personnalisation (à partir de {base})",
+      "name": "Nom du thème",
+      "more": "Plus de couleurs",
+      "save": "Enregistrer le thème",
+      "tooMany": "Vous avez atteint le nombre maximal de thèmes personnalisés. Supprimez-en un d'abord."
+    },
+    "token": {
+      "canvas": "Arrière-plan",
+      "surface": "Panneaux",
+      "raised": "Panneaux surélevés",
+      "text": "Texte",
+      "text-2": "Texte secondaire",
+      "accent": "Accent",
+      "accent-text": "Texte sur l'accent",
+      "success": "Succès",
+      "warning": "Avertissement",
+      "danger": "Erreur",
+      "border": "Lignes de séparation",
+      "border-strong": "Bordures des contrôles",
+      "focus": "Anneau de focus",
+      "bubble-in": "Message reçu",
+      "bubble-out": "Message envoyé",
+      "badge-beacon": "Pastille balise",
+      "badge-cq": "Pastille CQ",
+      "badge-session": "Pastille session",
+      "waterfall-low": "Cascade, discrète",
+      "waterfall-high": "Cascade, forte",
+      "freq-display": "Afficheur de fréquence"
+    },
+    "contrast": {
+      "ok": "Respecte le contraste WCAG AA : le texte se lit facilement.",
+      "warn": "{count} paires de couleurs sont trop pâles pour une lecture confortable (sous WCAG AA).",
+      "autoFix": "Corriger automatiquement",
+      "fixed": "{count} couleurs ajustées pour que le thème soit conforme.",
+      "cannotFix": "Correction incomplète. Essayez aussi de changer les couleurs de fond."
+    },
+    "file": {
+      "title": "Partager un fichier de thème",
+      "hint": "Exporter copie le thème sélectionné sous forme d'un petit fichier texte à garder ou à partager. Pour importer, collez-le ici ou choisissez un fichier.",
+      "export": "Exporter",
+      "import": "Importer",
+      "choose": "Choisir un fichier…",
+      "exported": "Exporté dans la zone ci-dessus.",
+      "exportedCopied": "Exporté dans la zone ci-dessus et copié.",
+      "imported": "« {name} » importé.",
+      "tooLarge": "Ce fichier est trop volumineux pour être un thème.",
+      "notJson": "Ce fichier de thème est illisible.",
+      "notTheme": "Ce fichier n'est pas un thème MercuryChat.",
+      "version": "Ce fichier de thème vient d'une version que l'application ne comprend pas.",
+      "badColour": "La couleur de « {token} » n'est pas valide."
+    }
+  },
   "diag": {
     "title": "Diagnostic",
     "loading": "Chargement…",

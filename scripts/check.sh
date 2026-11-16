@@ -16,6 +16,11 @@ cargo test --workspace --features mc-core/sim
 # core without it too, so the cfg(not(feature = "sim")) path keeps compiling.
 cargo clippy -p mc-core --all-targets -- -D warnings
 node apps/desktop/scripts/check-i18n.mjs
+# Themes: contrast (WCAG AA/AAA), no colour literals outside the theme files, apply.ts unit tests.
+node apps/desktop/scripts/check-contrast.mjs
+node apps/desktop/scripts/check-colours.mjs --self-test
+node apps/desktop/scripts/check-colours.mjs
+node --test apps/desktop/scripts/apply.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

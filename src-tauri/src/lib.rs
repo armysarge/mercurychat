@@ -3,6 +3,7 @@
 //! through `app_call` to the core's service actor; its events arrive on
 //! `mc://event`.
 
+mod appearance;
 mod probe;
 mod startup;
 mod window_state;
@@ -91,6 +92,20 @@ fn app_info(shell: tauri::State<'_, Shell>) -> AppInfo {
         startup_ms: since_start_ms(),
         startup_error,
     }
+}
+
+/// The saved appearance (theme, density, font scale) as JSON, or null for defaults.
+/// The splash reads it too, before the core has opened the station data.
+#[tauri::command]
+fn appearance_load(app: tauri::AppHandle) -> Option<String> {
+    appearance::load(&data_root(&app).ok()?)
+}
+
+/// Save the appearance: validated and size-capped, written atomically.
+#[tauri::command]
+fn appearance_save(app: tauri::AppHandle, json: String) -> Result<(), String> {
+    let root = data_root(&app).map_err(|e| e.to_string())?;
+    appearance::save(&root, &json)
 }
 
 /// Every UI action (docs/02 §2): one typed command, one typed reply.
@@ -313,6 +328,8 @@ pub fn run() {
             report_ipc,
             ping,
             modem_probe,
+            appearance_load,
+            appearance_save,
             windows::splash_status,
             windows::quit_app
         ])

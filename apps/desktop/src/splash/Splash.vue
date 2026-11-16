@@ -53,7 +53,7 @@ const stuck = computed(() => status.value.stage === "failed" || status.value.sta
   border: 1px solid var(--border); text-align: center;
 }
 .mark { display: block; }
-.name { font-size: 16px; font-weight: 650; }
+.name { font-size: calc(16px * var(--font-scale)); font-weight: 650; }
 .status { min-height: 1.3em; }
 .bar { width: 200px; height: 4px; border-radius: 999px; background: var(--raised); overflow: hidden; }
 .bar i { display: block; height: 100%; width: 40%; border-radius: 999px; background: var(--accent); animation: slide 1.2s ease-in-out infinite; }

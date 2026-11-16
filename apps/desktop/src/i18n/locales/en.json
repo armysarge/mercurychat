@@ -210,6 +210,89 @@
     "draft": "(draft)",
     "saveFailed": "Could not save the language"
   },
+  "theme": {
+    "title": "Theme",
+    "pickerAria": "Theme",
+    "system": "System",
+    "systemHint": "Follows your computer's light or dark setting.",
+    "saveFailed": "Could not save the theme",
+    "name": {
+      "midnight": "Midnight",
+      "daylight": "Daylight",
+      "night-red": "Night Red",
+      "high-contrast-dark": "High Contrast (dark)",
+      "high-contrast-light": "High Contrast (light)",
+      "ocean": "Ocean",
+      "slate": "Slate",
+      "amber-terminal": "Amber Terminal"
+    },
+    "density": {
+      "label": "Density",
+      "normal": "Normal",
+      "compact": "Compact"
+    },
+    "fontScale": {
+      "label": "Text size",
+      "value": "{percent}%",
+      "reset": "Reset"
+    },
+    "custom": {
+      "create": "Customise this theme",
+      "edit": "Edit your theme",
+      "delete": "Delete",
+      "deleteConfirm": "Delete {name}",
+      "editing": "Customising (started from {base})",
+      "name": "Theme name",
+      "more": "More colours",
+      "save": "Save theme",
+      "tooMany": "You have the most custom themes allowed. Delete one first."
+    },
+    "token": {
+      "canvas": "Background",
+      "surface": "Panels",
+      "raised": "Raised panels",
+      "text": "Text",
+      "text-2": "Secondary text",
+      "accent": "Accent",
+      "accent-text": "Text on accent",
+      "success": "Success",
+      "warning": "Warning",
+      "danger": "Error",
+      "border": "Divider lines",
+      "border-strong": "Control borders",
+      "focus": "Focus ring",
+      "bubble-in": "Received message",
+      "bubble-out": "Sent message",
+      "badge-beacon": "Beacon badge",
+      "badge-cq": "CQ badge",
+      "badge-session": "Session badge",
+      "waterfall-low": "Waterfall, quiet",
+      "waterfall-high": "Waterfall, strong",
+      "freq-display": "Frequency read-out"
+    },
+    "contrast": {
+      "ok": "Passes WCAG AA contrast: text is easy to read.",
+      "warn": "{count} colour pairs are too faint to read comfortably (below WCAG AA).",
+      "autoFix": "Auto-fix",
+      "fixed": "Adjusted {count} colours so the theme passes.",
+      "cannotFix": "Could not fully fix this. Try changing the background colours too."
+    },
+    "file": {
+      "title": "Share a theme file",
+      "hint": "Export copies your selected theme as a small text file you can keep or share. To import, paste it here or choose a file.",
+      "export": "Export",
+      "import": "Import",
+      "choose": "Choose file…",
+      "exported": "Exported to the box above.",
+      "exportedCopied": "Exported to the box above and copied.",
+      "imported": "Imported “{name}”.",
+      "tooLarge": "That file is too large to be a theme.",
+      "notJson": "That is not a readable theme file.",
+      "notTheme": "That file is not a MercuryChat theme.",
+      "version": "That theme file is from a version this app does not understand.",
+      "badColour": "The colour for “{token}” is not valid."
+    }
+  },
   "diag": {
     "title": "Diagnostics",
     "loading": "Loading…",

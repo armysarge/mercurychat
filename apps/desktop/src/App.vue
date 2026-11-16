@@ -237,7 +237,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .switch { flex-direction: row; display: inline-flex; align-items: center; cursor: pointer; position: relative; }
 .switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
 .track {
-  width: 34px; height: 20px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border);
+  width: 34px; height: 20px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border-strong);
   position: relative; transition: background 120ms;
 }
 .track::after {
@@ -246,7 +246,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 }
 .switch input:checked + .track { background: color-mix(in srgb, var(--warning) 35%, var(--raised)); border-color: var(--warning); }
 .switch input:checked + .track::after { transform: translateX(14px); background: var(--warning); }
-.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
 .switch input:disabled + .track { opacity: 0.5; }
 .toggle-sidebar { display: none; }
 .scrim { display: none; }
@@ -264,7 +264,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .body.solo { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
 .rail { display: flex; flex-direction: column; gap: 6px; padding: var(--space) 6px; border-right: 1px solid var(--border); background: var(--surface); }
 .rail button {
-  display: grid; justify-items: center; gap: 2px; padding: 8px 2px; font-size: 11px;
+  display: grid; justify-items: center; gap: 2px; padding: 8px 2px; font-size: calc(11px * var(--font-scale));
   border-color: transparent; background: transparent; color: var(--text-2);
   overflow-wrap: anywhere; hyphens: auto; text-align: center;
 }
@@ -284,11 +284,11 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 @media (max-width: 960px) {
   .body, .body.solo { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
   .toggle-sidebar { display: inline-block; }
-  .scrim { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); z-index: 20; }
+  .scrim { display: block; position: fixed; inset: 0; background: var(--scrim); z-index: 20; }
 }
 @media (max-width: 900px) {
   .body, .body.solo { grid-template-columns: minmax(64px, 84px) minmax(0, 1fr); }
-  .rail button { font-size: 9px; }
+  .rail button { font-size: calc(9px * var(--font-scale)); }
   .alpha, .utc { display: none; }
 }
 </style>

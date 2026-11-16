@@ -14,6 +14,8 @@ fn main() {
         "modem_probe",
         "splash_status",
         "quit_app",
+        "appearance_load",
+        "appearance_save",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest)).expect("tauri-build failed");
 }

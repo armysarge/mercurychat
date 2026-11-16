@@ -211,6 +211,89 @@
     "draft": "(borrador)",
     "saveFailed": "No se pudo guardar el idioma"
   },
+  "theme": {
+    "title": "Tema",
+    "pickerAria": "Tema",
+    "system": "Sistema",
+    "systemHint": "Sigue el modo claro u oscuro de tu equipo.",
+    "saveFailed": "No se pudo guardar el tema",
+    "name": {
+      "midnight": "Medianoche",
+      "daylight": "Luz de día",
+      "night-red": "Rojo nocturno",
+      "high-contrast-dark": "Alto contraste (oscuro)",
+      "high-contrast-light": "Alto contraste (claro)",
+      "ocean": "Océano",
+      "slate": "Pizarra",
+      "amber-terminal": "Terminal ámbar"
+    },
+    "density": {
+      "label": "Densidad",
+      "normal": "Normal",
+      "compact": "Compacta"
+    },
+    "fontScale": {
+      "label": "Tamaño del texto",
+      "value": "{percent}%",
+      "reset": "Restablecer"
+    },
+    "custom": {
+      "create": "Personalizar este tema",
+      "edit": "Editar tu tema",
+      "delete": "Eliminar",
+      "deleteConfirm": "Eliminar {name}",
+      "editing": "Personalizando (basado en {base})",
+      "name": "Nombre del tema",
+      "more": "Más colores",
+      "save": "Guardar tema",
+      "tooMany": "Ya tienes el máximo de temas personalizados. Elimina uno primero."
+    },
+    "token": {
+      "canvas": "Fondo",
+      "surface": "Paneles",
+      "raised": "Paneles elevados",
+      "text": "Texto",
+      "text-2": "Texto secundario",
+      "accent": "Acento",
+      "accent-text": "Texto sobre el acento",
+      "success": "Correcto",
+      "warning": "Aviso",
+      "danger": "Error",
+      "border": "Líneas divisorias",
+      "border-strong": "Bordes de controles",
+      "focus": "Anillo de foco",
+      "bubble-in": "Mensaje recibido",
+      "bubble-out": "Mensaje enviado",
+      "badge-beacon": "Insignia de baliza",
+      "badge-cq": "Insignia CQ",
+      "badge-session": "Insignia de sesión",
+      "waterfall-low": "Cascada, suave",
+      "waterfall-high": "Cascada, intensa",
+      "freq-display": "Indicador de frecuencia"
+    },
+    "contrast": {
+      "ok": "Cumple el contraste WCAG AA: el texto se lee con facilidad.",
+      "warn": "{count} pares de colores son demasiado tenues para leerse cómodamente (por debajo de WCAG AA).",
+      "autoFix": "Corregir automáticamente",
+      "fixed": "Se ajustaron {count} colores para que el tema cumpla.",
+      "cannotFix": "No se pudo corregir del todo. Prueba a cambiar también los colores de fondo."
+    },
+    "file": {
+      "title": "Compartir un archivo de tema",
+      "hint": "Exportar copia el tema seleccionado como un pequeño archivo de texto que puedes guardar o compartir. Para importar, pégalo aquí o elige un archivo.",
+      "export": "Exportar",
+      "import": "Importar",
+      "choose": "Elegir archivo…",
+      "exported": "Exportado en el cuadro de arriba.",
+      "exportedCopied": "Exportado en el cuadro de arriba y copiado.",
+      "imported": "Se importó «{name}».",
+      "tooLarge": "Ese archivo es demasiado grande para ser un tema.",
+      "notJson": "Ese archivo de tema no se puede leer.",
+      "notTheme": "Ese archivo no es un tema de MercuryChat.",
+      "version": "Ese archivo de tema es de una versión que esta aplicación no entiende.",
+      "badColour": "El color de «{token}» no es válido."
+    }
+  },
   "diag": {
     "title": "Diagnóstico",
     "loading": "Cargando…",

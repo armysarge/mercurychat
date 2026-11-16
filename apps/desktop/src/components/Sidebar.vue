@@ -56,13 +56,13 @@ function opened() {
   padding: 6px 14px; font-weight: 600;
 }
 .tabs button[role="tab"].on { color: var(--accent); border-bottom-color: var(--accent); }
-.close { display: none; padding: 2px 10px; font-size: 18px; line-height: 1; }
+.close { display: none; padding: 2px 10px; font-size: calc(18px * var(--font-scale)); line-height: 1; }
 .pane { flex: 1; min-height: 0; overflow: hidden; }
 .empty { padding: calc(var(--space) * 2); }
 @media (max-width: 960px) {
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 92vw); z-index: 30; border-right: 1px solid var(--border);
-    transform: translateX(-100%); visibility: hidden; box-shadow: 8px 0 24px rgb(0 0 0 / 0.35);
+    transform: translateX(-100%); visibility: hidden; box-shadow: 8px 0 24px var(--shadow);
     transition: transform 120ms ease-out, visibility 120ms;
   }
   .sidebar.open { transform: none; visibility: visible; }

@@ -37,6 +37,6 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 .conversations { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; }
 .history { display: flex; flex-direction: column; min-height: 0; }
 .head { padding: calc(var(--space) * 1.5) calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
-.head h1 { font-size: 18px; }
+.head h1 { font-size: calc(18px * var(--font-scale)); }
 .fill { flex: 1; }
 </style>

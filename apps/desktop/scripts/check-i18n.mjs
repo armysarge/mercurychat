@@ -20,6 +20,7 @@ import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as localeMod from "../src/i18n/locale.ts";
 const { LOCALES, resolveLocale } = localeMod;
+import { PRESETS, TOKEN_KEYS } from "../src/themes/presets.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = join(root, "src");
@@ -211,6 +212,9 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
   const namespaces = new Set(Object.keys(flat.en).map((k) => k.split(".")[0]));
   /** Values the dynamic keys `${prefix}${x}` can take, from the app's own lists. */
   const dynamic = {
+    "theme.name.": () => PRESETS.map((p) => p.id),
+    "theme.token.": () => TOKEN_KEYS.filter((k) => k !== "scrim" && k !== "shadow"),
+    "theme.file.": () => ["tooLarge", "notJson", "notTheme", "version"],
     "modem.": () => [...readFileSync(join(src, "bindings", "ModemState.ts"), "utf8").matchAll(/"type": "(\w+)"/g)].map((m) => m[1]),
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");

@@ -51,7 +51,7 @@ onUnmounted(() => unlisten?.());
   display: grid; place-items: center;
 }
 .winctl button:hover { background: var(--raised); color: var(--text); }
-.winctl button.close:hover { background: #c42b1c; color: #fff; }
+.winctl button.close:hover { background: var(--danger); color: var(--canvas); }
 .winctl button:focus-visible { outline-offset: -2px; }
 svg { width: 10px; height: 10px; fill: none; stroke: currentColor; stroke-width: 1; shape-rendering: crispEdges; }
 .close svg { shape-rendering: geometricPrecision; }
