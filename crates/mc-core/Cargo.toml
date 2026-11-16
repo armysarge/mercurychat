@@ -8,6 +8,10 @@ license.workspace = true
 [features]
 # The in-process simulator modem (fake Mercury pair) for UI work without RF.
 sim = ["mercury-adapter/fake"]
+# Arbitrary-payload test hooks (AppHandle::send_beacon_payload). Never enable this
+# from a shipped crate: only the self dev-dependency below turns it on, and
+# scripts/check.sh fails if src-tauri or tools name it.
+test-hooks = []
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
@@ -28,6 +32,7 @@ hex = "0.4"
 rand = "0.9"
 
 [dev-dependencies]
+mc-core = { path = ".", features = ["test-hooks"] }
 futures = "0.3"
 filetime = "0.2"
 mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }

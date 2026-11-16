@@ -54,7 +54,7 @@ type Reply<T> = oneshot::Sender<Result<T, AppError>>;
 enum Request {
     Command(AppCommand, Reply<CommandOk>),
     Since(u64, Reply<Since>),
-    #[cfg(any(test, feature = "sim"))]
+    #[cfg(any(test, feature = "test-hooks"))]
     Beacon(Vec<u8>, Reply<CommandOk>),
 }
 
@@ -84,8 +84,9 @@ impl AppHandle {
 
     /// Send one wrapped payload as a beacon, through the same gate and
     /// outcome tracking as the periodic beacons. Not a UI command: the UI
-    /// never sends arbitrary payloads, so release builds do not carry this.
-    #[cfg(any(test, feature = "sim"))]
+    /// never sends arbitrary payloads. Compiled only for tests (the `test-hooks`
+    /// feature, which no shipped crate may enable; scripts/check.sh enforces it).
+    #[cfg(any(test, feature = "test-hooks"))]
     #[doc(hidden)]
     pub async fn send_beacon_payload(&self, payload: Vec<u8>) -> Result<CommandOk, AppError> {
         let (reply, rx) = oneshot::channel();
@@ -157,7 +158,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                         Request::Since(seq, reply) => {
                             let _ = reply.send(Ok(app.log.since(seq)));
                         }
-                        #[cfg(any(test, feature = "sim"))]
+                        #[cfg(any(test, feature = "test-hooks"))]
                         Request::Beacon(payload, reply) => {
                             let sent = app.send_broadcast(BroadcastKind::Beacon, payload);
                             let _ = reply.send(sent.map(|_| CommandOk::Done));
@@ -534,9 +535,7 @@ impl App {
             Ok(payload) => payload,
             Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
         };
-        self.send_broadcast(BroadcastKind::Beacon, payload)?;
-        self.beacon.submitted();
-        Ok(())
+        self.send_broadcast(BroadcastKind::Beacon, payload)
     }
 
     /// The scheduler's deadline passed. Whatever happens, the next beacon is
@@ -562,6 +561,10 @@ impl App {
     /// Publish broadcast outcomes, each with its activity line.
     fn publish_broadcasts(&mut self, outcomes: Vec<(BroadcastKind, BroadcastOutcome)>) {
         for (kind, outcome) in outcomes {
+            // Only a beacon the modem accepted counts as sent (last_utc, next seq).
+            if kind == BroadcastKind::Beacon && outcome == BroadcastOutcome::Submitted {
+                self.beacon.submitted();
+            }
             let line = self.discovery.note("broadcast", activity_text(kind, &outcome));
             self.emit(AppEvent::Broadcast { kind, outcome });
             self.emit(line);

@@ -556,3 +556,81 @@ mod service {
         assert!(beacon(&h).await.include_grid);
     }
 }
+
+#[cfg(feature = "sim")]
+mod refused {
+    use super::*;
+    use mc_core::app::{
+        spawn_app, AppCommand, AppEvent, AppOptions, BroadcastKind, BroadcastOutcome, CommandOk, ModemState,
+    };
+    use mc_core::profile::{ModemTarget, StationProfile};
+    use mc_storage::Store;
+    use mercury_adapter::fake::FakeNet;
+
+    async fn settle() {
+        for _ in 0..40 {
+            tokio::task::yield_now().await;
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+
+    /// A beacon the modem task refuses (no broadcast port) is not "last sent",
+    /// and does not use up a sequence number.
+    #[tokio::test(flavor = "current_thread")]
+    async fn refused_beacon_does_not_advance_last_utc() {
+        let net = FakeNet::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let mut p = StationProfile::new_existing("ZS6ABC");
+        p.modem = ModemTarget::Existing {
+            host: "127.0.0.1".into(),
+            control_port: net.a_base,
+            data_port: net.a_base + 1,
+            broadcast_port: None,
+            telemetry_url: None,
+        };
+        let h = spawn_app(
+            Store::open_in_memory().unwrap(),
+            AppOptions {
+                sim_root: Some(dir.path().to_path_buf()),
+                stations_root: Some(dir.path().join("stations")),
+                ..AppOptions::default()
+            },
+        );
+        let id = match h.call(AppCommand::SaveProfile { profile: p }).await.unwrap() {
+            CommandOk::Profile(p) => p.id,
+            other => panic!("{other:?}"),
+        };
+        let mut rx = h.subscribe();
+        h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+        loop {
+            if let AppEvent::ModemState { state: ModemState::Ready, .. } = rx.recv().await.unwrap().event {
+                break;
+            }
+        }
+        tokio::time::pause();
+        h.call(AppCommand::SetBeacon { on: true }).await.unwrap();
+        h.call(AppCommand::SendBeaconNow).await.unwrap(); // the actor's gate cannot see the port
+        settle().await;
+        for _ in 0..25 {
+            tokio::time::advance(Duration::from_secs(30)).await;
+            settle().await;
+        }
+        let mut refused = 0;
+        while let Ok(ev) = rx.try_recv() {
+            match ev.event {
+                AppEvent::Broadcast { kind: BroadcastKind::Beacon, outcome: BroadcastOutcome::Refused { .. } } => {
+                    refused += 1
+                }
+                AppEvent::Broadcast { kind: BroadcastKind::Beacon, outcome: BroadcastOutcome::Submitted } => {
+                    panic!("nothing was submitted")
+                }
+                _ => {}
+            }
+        }
+        assert!(refused >= 2, "the one-time and a scheduled beacon were refused: {refused}");
+        match h.call(AppCommand::Snapshot).await.unwrap() {
+            CommandOk::Snapshot(s) => assert_eq!(s.beacon.last_utc, None, "no beacon went out"),
+            other => panic!("{other:?}"),
+        }
+    }
+}

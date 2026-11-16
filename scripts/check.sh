@@ -5,6 +5,11 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 cargo fmt --all --check
+# Test hooks must never reach a shipped crate (they carry an arbitrary-payload path).
+if grep -rn "test-hooks" src-tauri/Cargo.toml tools/*/Cargo.toml; then
+  echo "test-hooks must not be enabled outside mc-core's own dev-dependencies" >&2
+  exit 1
+fi
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --features mc-core/sim
 # The workspace build turns the simulator on (src-tauri enables it); check the

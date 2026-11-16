@@ -2004,6 +2004,7 @@ dependencies = [
  "filetime",
  "futures",
  "hex",
+ "mc-core",
  "mc-storage",
  "mch-protocol",
  "mercury-adapter",
