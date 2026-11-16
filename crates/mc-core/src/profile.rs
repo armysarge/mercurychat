@@ -20,6 +20,26 @@ pub struct StationProfile {
     pub modem: ModemTarget,
     pub lab: bool,
     pub receive_only: bool,
+    /// Station information (CHT-06): optional, at most 128 characters each,
+    /// inserted into drafts by macro tags. Never sent by themselves.
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub qth: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub rig: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub power: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub antenna: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub email: Option<String>,
+    #[serde(default)]
+    #[ts(optional = nullable)]
+    pub about: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -50,6 +70,8 @@ fn err(field: &str, message: &str) -> FieldError {
 }
 
 const NAME_MAX: usize = 64;
+/// Most characters in one station-information field (CHT-06).
+const INFO_MAX: usize = 128;
 const HOST_MAX: usize = 253;
 const TELEMETRY_URL_MAX: usize = 256;
 
@@ -94,6 +116,20 @@ fn telemetry_url_error(url: &str) -> Option<&'static str> {
     }
 }
 
+/// Normalise a station-information field in place (trim; blank means none)
+/// and say why it is refused, if it is.
+fn station_info(value: &mut Option<String>) -> Option<&'static str> {
+    *value = value.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(String::from);
+    let v = value.as_deref()?;
+    if v.chars().count() > INFO_MAX {
+        Some("At most 128 characters")
+    } else if v.chars().any(char::is_control) {
+        Some("No control characters")
+    } else {
+        None
+    }
+}
+
 impl StationProfile {
     /// An existing Mercury on this PC with Mercury's default ports.
     pub fn new_existing(callsign: &str) -> StationProfile {
@@ -122,6 +158,12 @@ impl StationProfile {
             modem,
             lab: false,
             receive_only: false,
+            qth: None,
+            rig: None,
+            power: None,
+            antenna: None,
+            email: None,
+            about: None,
         }
     }
 
@@ -180,6 +222,19 @@ impl StationProfile {
             }
         }
 
+        for (field, value) in [
+            ("qth", &mut p.qth),
+            ("rig", &mut p.rig),
+            ("power", &mut p.power),
+            ("antenna", &mut p.antenna),
+            ("email", &mut p.email),
+            ("about", &mut p.about),
+        ] {
+            if let Some(why) = station_info(value) {
+                errors.push(err(field, why));
+            }
+        }
+
         if errors.is_empty() {
             Ok(p)
         } else {
@@ -213,12 +268,12 @@ pub fn to_row(p: &StationProfile) -> ProfileRow {
         telemetry_url,
         lab: p.lab,
         receive_only: p.receive_only,
-        qth: None,
-        rig: None,
-        power: None,
-        antenna: None,
-        email: None,
-        about: None,
+        qth: p.qth.clone(),
+        rig: p.rig.clone(),
+        power: p.power.clone(),
+        antenna: p.antenna.clone(),
+        email: p.email.clone(),
+        about: p.about.clone(),
     }
 }
 
@@ -242,5 +297,11 @@ pub fn from_row(r: &ProfileRow) -> Result<StationProfile, FieldError> {
         modem,
         lab: r.lab,
         receive_only: r.receive_only,
+        qth: r.qth.clone(),
+        rig: r.rig.clone(),
+        power: r.power.clone(),
+        antenna: r.antenna.clone(),
+        email: r.email.clone(),
+        about: r.about.clone(),
     })
 }

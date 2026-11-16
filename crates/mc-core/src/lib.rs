@@ -7,6 +7,7 @@ pub mod band;
 pub mod files;
 pub mod lock;
 pub mod logs;
+pub mod macros;
 pub mod profile;
 pub mod session;
 #[cfg(feature = "sim")]

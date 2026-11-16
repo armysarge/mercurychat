@@ -618,7 +618,12 @@ impl Store {
 
     /// True if a profile was removed.
     pub fn delete_profile(&mut self, id: &str) -> Result<bool> {
-        Ok(self.conn.execute("DELETE FROM station_profiles WHERE id = ?1", [id])? > 0)
+        // The profile's macros go with it, in one transaction.
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM macros WHERE profile_id = ?1", [id])?;
+        let removed = tx.execute("DELETE FROM station_profiles WHERE id = ?1", [id])? > 0;
+        tx.commit()?;
+        Ok(removed)
     }
 
     pub fn set_setting(&mut self, key: &str, value: &str) -> Result<()> {

@@ -8,6 +8,7 @@ use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
 use super::logbook::{Qso, QsoEdit};
 use super::telemetry::TelemetryView;
+use crate::macros::MacroDef;
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -151,6 +152,28 @@ pub enum AppCommand {
     SetFinaliseOnDisconnect {
         on: bool,
     },
+    /// The active profile's macros (the first call seeds three defaults, once).
+    Macros,
+    /// Add (empty id) or edit a macro of the active profile.
+    SaveMacro {
+        macro_: Box<MacroDef>,
+    },
+    DeleteMacro {
+        id: String,
+    },
+    /// Expand a macro into text for the draft. Nothing is sent. `allow_email`
+    /// is the operator's explicit "insert email" action.
+    ExpandMacro {
+        id: String,
+        peer: Option<String>,
+        allow_email: bool,
+    },
+    /// Messages (either direction) whose text or callsign contains `query`,
+    /// newest first. `limit` is clamped to 1 to 100.
+    SearchHistory {
+        query: String,
+        limit: u32,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -166,6 +189,9 @@ pub enum CommandOk {
     Activity { entries: Vec<ActivityEntry> },
     Qsos { qsos: Vec<Qso> },
     Qso(Qso),
+    Macros { macros: Vec<MacroDef> },
+    Macro(MacroDef),
+    Expanded { text: String, missing: Vec<String> },
     Done,
 }
 

@@ -14,9 +14,10 @@ use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, 
 use super::logbook::{self, Qso, Start, FINALISE_SETTING};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use super::telemetry::{Telemetry, Tuning};
+use crate::macros::{self, MacroDef};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use crate::station::Observation;
-use mc_storage::{OutState, QsoEdit as RowEdit, QsoRow, StorageError, Store};
+use mc_storage::{MacroRow, OutState, QsoEdit as RowEdit, QsoRow, StorageError, Store};
 use mch_protocol::ObjectId;
 use mercury_adapter::telemetry::Spectrum;
 use mercury_adapter::Callsign;
@@ -25,6 +26,12 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 const ACTIVE_PROFILE: &str = "activeProfileId";
+/// Longest history search text, in characters.
+const SEARCH_MAX: usize = 128;
+
+fn macros_seeded_key(profile: &str) -> String {
+    format!("macros.seeded:{profile}")
+}
 
 #[derive(Debug, Clone)]
 pub struct AppOptions {
@@ -56,7 +63,7 @@ impl Default for AppOptions {
 type Reply<T> = oneshot::Sender<Result<T, AppError>>;
 
 enum Request {
-    Command(AppCommand, Reply<CommandOk>),
+    Command(Box<AppCommand>, Reply<CommandOk>),
     Since(u64, Reply<Since>),
     #[cfg(any(test, feature = "test-hooks"))]
     Beacon(Vec<u8>, Reply<CommandOk>),
@@ -76,7 +83,7 @@ fn stopped() -> AppError {
 impl AppHandle {
     pub async fn call(&self, cmd: AppCommand) -> Result<CommandOk, AppError> {
         let (reply, rx) = oneshot::channel();
-        self.send(Request::Command(cmd, reply))?;
+        self.send(Request::Command(Box::new(cmd), reply))?;
         rx.await.map_err(|_| stopped())?
     }
 
@@ -166,7 +173,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     let Some(req) = req else { break };
                     match req {
                         Request::Command(cmd, reply) => {
-                            let _ = reply.send(app.handle(cmd));
+                            let _ = reply.send(app.handle(*cmd));
                             // A modem change is answered at once, then started.
                             if let Some(target) = app.pending.take() {
                                 app.switch_modem(target);
@@ -299,6 +306,9 @@ impl App {
                 }
                 self.emit(AppEvent::ProfilesChanged);
                 BeaconPrefs::forget(&mut self.store, &id);
+                if let Err(e) = self.store.delete_setting(&macros_seeded_key(&id)) {
+                    tracing::warn!("could not remove a macro marker: {e}");
+                }
                 if self.store.setting(ACTIVE_PROFILE).map_err(storage)?.as_deref() == Some(id.as_str()) {
                     self.store.delete_setting(ACTIVE_PROFILE).map_err(storage)?;
                     self.log.bump_generation();
@@ -499,6 +509,77 @@ impl App {
                 self.store.set_setting(FINALISE_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
                 Ok(CommandOk::Done)
             }
+            AppCommand::Macros => self.macros_list().map(|macros| CommandOk::Macros { macros }),
+            AppCommand::SaveMacro { macro_ } => {
+                let def = macros::validate(&macro_).map_err(|errors| AppError::Validation { errors })?;
+                let profile = self.macro_profile()?;
+                let existing = self.store.macros(&profile).map_err(storage)?;
+                let (id, sort) = if def.id.is_empty() {
+                    if existing.len() >= macros::MAX_MACROS {
+                        let n = macros::MAX_MACROS;
+                        return Err(AppError::Validation {
+                            errors: chat::field("name", format!("At most {n} macros; delete one first")),
+                        });
+                    }
+                    (uuid::Uuid::new_v4().to_string(), existing.iter().map(|m| m.sort).max().map_or(0, |s| s + 1))
+                } else {
+                    // Only this profile's own macro may be edited.
+                    let Some(old) = existing.iter().find(|m| m.id == def.id) else {
+                        return Err(AppError::NotFound { id: def.id });
+                    };
+                    (old.id.clone(), old.sort)
+                };
+                self.mark_macros_seeded(&profile)?;
+                let row = MacroRow {
+                    id: id.clone(),
+                    profile_id: profile,
+                    name: def.name.clone(),
+                    body: def.body.clone(),
+                    sort,
+                };
+                self.store.save_macro(&row).map_err(storage)?;
+                Ok(CommandOk::Macro(MacroDef { id, name: def.name, body: def.body }))
+            }
+            AppCommand::DeleteMacro { id } => {
+                let profile = self.macro_profile()?;
+                if !self.store.macros(&profile).map_err(storage)?.iter().any(|m| m.id == id) {
+                    return Err(AppError::NotFound { id });
+                }
+                self.store.delete_macro(&id).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::ExpandMacro { id, peer, allow_email } => {
+                let p = self.active_profile().ok_or_else(|| conflict("no station is selected".into()))?;
+                let call = peer.as_deref().map(parse_peer).transpose()?;
+                let rows = self.store.macros(&p.id).map_err(storage)?;
+                let Some(row) = rows.into_iter().find(|m| m.id == id) else { return Err(AppError::NotFound { id }) };
+                let ctx = macros::MacroContext {
+                    call,
+                    mycall: p.callsign.clone(),
+                    name: p.name.clone(),
+                    qth: p.qth.clone(),
+                    loc: p.grid.clone(),
+                    rig: p.rig.clone(),
+                    pwr: p.power.clone(),
+                    ant: p.antenna.clone(),
+                    about: p.about.clone(),
+                    email: p.email.clone(),
+                    utc: chrono::Utc::now().format("%H:%M").to_string(),
+                    allow_email,
+                };
+                let out = macros::expand(&row.body, &ctx).map_err(|errors| AppError::Validation { errors })?;
+                Ok(CommandOk::Expanded { text: out.text, missing: out.missing })
+            }
+            AppCommand::SearchHistory { query, limit } => {
+                let q = query.trim();
+                if q.is_empty() || q.chars().count() > SEARCH_MAX {
+                    return Err(AppError::Validation {
+                        errors: chat::field("query", format!("Enter 1 to {SEARCH_MAX} characters to search for")),
+                    });
+                }
+                let rows = self.chat_store()?.search_messages(q, limit.clamp(1, 100)).map_err(storage)?;
+                Ok(CommandOk::History { messages: rows.iter().map(ChatMessage::from).collect() })
+            }
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -648,6 +729,39 @@ impl App {
         } else {
             Err(conflict("the modem is not accepting commands".into()))
         }
+    }
+
+    /// The profile macros belong to: the active one.
+    fn macro_profile(&self) -> Result<String, AppError> {
+        self.active_profile().map(|p| p.id).ok_or_else(|| conflict("no station is selected".into()))
+    }
+
+    fn mark_macros_seeded(&mut self, profile: &str) -> Result<(), AppError> {
+        self.store.set_setting(&macros_seeded_key(profile), "true").map_err(storage)
+    }
+
+    /// The active profile's macros; the defaults go in once per profile (a
+    /// marker is kept, so deleting them all does not bring them back).
+    fn macros_list(&mut self) -> Result<Vec<MacroDef>, AppError> {
+        let profile = self.macro_profile()?;
+        let mut rows = self.store.macros(&profile).map_err(storage)?;
+        if self.store.setting(&macros_seeded_key(&profile)).map_err(storage)?.is_none() {
+            if rows.is_empty() {
+                for (i, (name, body)) in macros::DEFAULTS.iter().enumerate() {
+                    let row = MacroRow {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        profile_id: profile.clone(),
+                        name: (*name).into(),
+                        body: (*body).into(),
+                        sort: i as i64,
+                    };
+                    self.store.save_macro(&row).map_err(storage)?;
+                }
+                rows = self.store.macros(&profile).map_err(storage)?;
+            }
+            self.mark_macros_seeded(&profile)?;
+        }
+        Ok(rows.into_iter().map(|m| MacroDef { id: m.id, name: m.name, body: m.body }).collect())
     }
 
     fn chat_store(&mut self) -> Result<&mut Store, AppError> {

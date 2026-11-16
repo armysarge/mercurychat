@@ -4,7 +4,8 @@ import type { AppSnapshot } from "./AppSnapshot";
 import type { ChatMessage } from "./ChatMessage";
 import type { Conversation } from "./Conversation";
 import type { HeardStation } from "./HeardStation";
+import type { MacroDef } from "./MacroDef";
 import type { Qso } from "./Qso";
 import type { StationProfile } from "./StationProfile";
 
-export type CommandOk = { "type": "snapshot" } & AppSnapshot | { "type": "profile" } & StationProfile | { "type": "message" } & ChatMessage | { "type": "conversations", conversations: Array<Conversation>, } | { "type": "history", messages: Array<ChatMessage>, } | { "type": "heard", stations: Array<HeardStation>, } | { "type": "activity", entries: Array<ActivityEntry>, } | { "type": "qsos", qsos: Array<Qso>, } | { "type": "qso" } & Qso | { "type": "done" };
+export type CommandOk = { "type": "snapshot" } & AppSnapshot | { "type": "profile" } & StationProfile | { "type": "message" } & ChatMessage | { "type": "conversations", conversations: Array<Conversation>, } | { "type": "history", messages: Array<ChatMessage>, } | { "type": "heard", stations: Array<HeardStation>, } | { "type": "activity", entries: Array<ActivityEntry>, } | { "type": "qsos", qsos: Array<Qso>, } | { "type": "qso" } & Qso | { "type": "macros", macros: Array<MacroDef>, } | { "type": "macro" } & MacroDef | { "type": "expanded", text: string, missing: Array<string>, } | { "type": "done" };

@@ -12,6 +12,7 @@ mod modem;
 mod service;
 mod telemetry;
 
+pub use crate::macros::{expand, Expanded, MacroContext, MacroDef};
 pub use beacon::{
     BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus, ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN,
     MAX_INTERVAL_MIN, MIN_INTERVAL_MIN,
@@ -48,5 +49,6 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     TelemetryView::export_all(&cfg)?;
     Qso::export_all(&cfg)?;
     QsoEdit::export_all(&cfg)?;
+    MacroDef::export_all(&cfg)?;
     Since::export_all(&cfg)
 }

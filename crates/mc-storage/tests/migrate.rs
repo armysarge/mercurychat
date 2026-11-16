@@ -115,3 +115,73 @@ fn newer_database_is_refused() {
     Connection::open(&path).unwrap().pragma_update(None, "user_version", 99).unwrap();
     assert!(matches!(Store::open(&path), Err(StorageError::TooNew(99))));
 }
+
+fn profile_row(id: &str) -> mc_storage::ProfileRow {
+    mc_storage::ProfileRow {
+        id: id.into(),
+        callsign: "ZS6ABC".into(),
+        name: None,
+        grid: None,
+        modem_kind: "simulator".into(),
+        host: None,
+        control_port: None,
+        data_port: None,
+        broadcast_port: None,
+        telemetry_url: None,
+        lab: false,
+        receive_only: false,
+        qth: None,
+        rig: None,
+        power: None,
+        antenna: None,
+        email: None,
+        about: None,
+    }
+}
+
+#[test]
+fn v3_profile_survives_migration_4_with_station_info_absent() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("app.db");
+    {
+        let conn = Connection::open(&path).unwrap();
+        for m in &MIGRATIONS[..3] {
+            conn.execute_batch(m.sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 3).unwrap();
+        conn.execute(
+            "INSERT INTO station_profiles (id, callsign, modem_kind, lab, created_utc, updated_utc)
+             VALUES ('p3', 'ZS6ABC', 'simulator', 0, '2025-01-01T00:00:00Z', '2025-01-01T00:00:00Z')",
+            [],
+        )
+        .unwrap();
+    }
+    let s = Store::open(&path).unwrap();
+    let rows = s.profiles().unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].callsign, "ZS6ABC");
+    assert_eq!(
+        (&rows[0].qth, &rows[0].rig, &rows[0].power, &rows[0].antenna, &rows[0].email, &rows[0].about),
+        (&None, &None, &None, &None, &None, &None)
+    );
+}
+
+#[test]
+fn deleting_a_profile_deletes_its_macros() {
+    let mut s = Store::open_in_memory().unwrap();
+    s.save_profile(&profile_row("p1")).unwrap();
+    s.save_profile(&profile_row("p2")).unwrap();
+    for (id, profile) in [("m1", "p1"), ("m2", "p1"), ("m3", "p2")] {
+        s.save_macro(&mc_storage::MacroRow {
+            id: id.into(),
+            profile_id: profile.into(),
+            name: id.into(),
+            body: "b".into(),
+            sort: 0,
+        })
+        .unwrap();
+    }
+    assert!(s.delete_profile("p1").unwrap());
+    assert!(s.macros("p1").unwrap().is_empty(), "the deleted profile's macros went with it");
+    assert_eq!(s.macros("p2").unwrap().len(), 1, "another profile's macros stay");
+}

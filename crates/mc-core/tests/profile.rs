@@ -242,3 +242,22 @@ fn a_new_profile_from_the_ui_gets_an_id() {
     assert!(!p.id.trim().is_empty());
     assert_ne!(p.id, StationProfile::new_simulator("ZS6ABC").validate().unwrap().id);
 }
+
+#[test]
+fn station_info_round_trips_through_the_row() {
+    let mut p = StationProfile::new_simulator("ZS6ABC");
+    p.qth = Some("Pretoria".into());
+    p.rig = Some("IC-7300".into());
+    p.power = Some("50 W".into());
+    p.antenna = Some("EFHW".into());
+    p.email = Some("me@example.org".into());
+    p.about = Some("Digital modes".into());
+    let mut store = Store::open_in_memory().unwrap();
+    store.save_profile(&to_row(&p)).unwrap();
+    let back = from_row(&store.profiles().unwrap()[0]).unwrap();
+    assert_eq!(back, p);
+    // Saving again with the fields cleared clears them (no stale values).
+    p.rig = None;
+    store.save_profile(&to_row(&p)).unwrap();
+    assert_eq!(from_row(&store.profiles().unwrap()[0]).unwrap().rig, None);
+}
