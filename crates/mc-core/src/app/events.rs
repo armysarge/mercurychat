@@ -3,6 +3,7 @@
 //! to. A bounded ring keeps the recent ones; a client asking for events older
 //! than the ring holds is told to take a snapshot, never handed a gap.
 
+use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
 use serde::Serialize;
@@ -81,6 +82,12 @@ pub enum AppEvent {
     /// A line was added to the activity log.
     Activity {
         entry: ActivityEntry,
+    },
+    /// What became of a CQ or beacon: submitted, transmitted, not confirmed
+    /// or refused. Never delivered (DSC-02).
+    Broadcast {
+        kind: BroadcastKind,
+        outcome: BroadcastOutcome,
     },
 }
 

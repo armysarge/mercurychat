@@ -3,6 +3,9 @@
 //! refused at once rather than making the UI wait. Every state change is
 //! persisted first, then published as an event.
 
+use super::broadcast::{
+    activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, Tracker,
+};
 use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::discovery::{self, Discovery};
@@ -49,6 +52,7 @@ type Reply<T> = oneshot::Sender<Result<T, AppError>>;
 enum Request {
     Command(AppCommand, Reply<CommandOk>),
     Since(u64, Reply<Since>),
+    Beacon(Vec<u8>, Reply<CommandOk>),
 }
 
 #[derive(Clone)]
@@ -72,6 +76,16 @@ impl AppHandle {
     pub async fn events_since(&self, seq: u64) -> Result<Since, AppError> {
         let (reply, rx) = oneshot::channel();
         self.send(Request::Since(seq, reply))?;
+        rx.await.map_err(|_| stopped())?
+    }
+
+    /// Send one wrapped payload as a beacon, through the same gate and
+    /// outcome tracking as the periodic beacons. Not a UI command: the UI
+    /// never sends arbitrary payloads. For tests and the beacon scheduler.
+    #[doc(hidden)]
+    pub async fn send_beacon_payload(&self, payload: Vec<u8>) -> Result<CommandOk, AppError> {
+        let (reply, rx) = oneshot::channel();
+        self.send(Request::Beacon(payload, reply))?;
         rx.await.map_err(|_| stopped())?
     }
 
@@ -112,6 +126,8 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         task: None,
         pending: None,
         discovery: Discovery::default(),
+        listen_mode: ListenMode::default(),
+        broadcasts: Tracker::default(),
     };
     tokio::spawn(async move {
         // The selection survives a restart, so its modem is attached again (attach
@@ -120,6 +136,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             app.switch_modem(Some(p));
         }
         loop {
+            let due = app.broadcasts.deadline();
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
@@ -134,9 +151,17 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                         Request::Since(seq, reply) => {
                             let _ = reply.send(Ok(app.log.since(seq)));
                         }
+                        Request::Beacon(payload, reply) => {
+                            let sent = app.send_broadcast(BroadcastKind::Beacon, payload);
+                            let _ = reply.send(sent.map(|_| CommandOk::Done));
+                        }
                     }
                 }
                 Some(report) = report_rx.recv() => app.on_report(report),
+                _ = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => {
+                    let out = app.broadcasts.expired(tokio::time::Instant::now());
+                    app.publish_broadcasts(out);
+                }
             }
         }
     });
@@ -164,6 +189,10 @@ struct App {
     pending: Option<Option<StationProfile>>,
     /// The activity log and broadcast counters; heard rows go to `chat`.
     discovery: Discovery,
+    /// The modem's listen mode, for the beacon capacity gate.
+    listen_mode: ListenMode,
+    /// The one CQ or beacon awaiting its outcome.
+    broadcasts: Tracker,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -386,6 +415,7 @@ impl App {
                 Ok(CommandOk::Done)
             }
             AppCommand::Activity => Ok(CommandOk::Activity { entries: self.discovery.entries() }),
+            AppCommand::SendCq => self.send_broadcast(BroadcastKind::Cq, Vec::new()).map(|_| CommandOk::Done),
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -416,6 +446,42 @@ impl App {
             self.modem,
             ModemState::Calling | ModemState::Negotiating | ModemState::Connected | ModemState::Draining
         )
+    }
+
+    /// Send a CQ (payload unused) or a beacon, if the gate allows it now
+    /// (DSC-02). A refusal is answered, published and logged, never queued.
+    fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
+        let len = (kind == BroadcastKind::Beacon).then_some(payload.len());
+        let calling = self.modem == ModemState::Calling;
+        if let Err(g) = broadcast_gate(self.modem, calling, len, self.listen_mode.current()) {
+            return Err(self.refuse_broadcast(kind, g.message()));
+        }
+        if self.broadcasts.busy() {
+            return Err(self.refuse_broadcast(kind, "not sent: a broadcast is still being sent".into()));
+        }
+        let cmd = match kind {
+            BroadcastKind::Cq => ModemCmd::Cq,
+            BroadcastKind::Beacon => ModemCmd::Broadcast(payload),
+        };
+        if !self.task.as_ref().is_some_and(|t| t.send(cmd)) {
+            return Err(self.refuse_broadcast(kind, GateRefusal::Detached.message()));
+        }
+        self.broadcasts.start(kind, tokio::time::Instant::now());
+        Ok(())
+    }
+
+    fn refuse_broadcast(&mut self, kind: BroadcastKind, reason: String) -> AppError {
+        self.publish_broadcasts(vec![(kind, BroadcastOutcome::Refused { reason: reason.clone() })]);
+        conflict(reason)
+    }
+
+    /// Publish broadcast outcomes, each with its activity line.
+    fn publish_broadcasts(&mut self, outcomes: Vec<(BroadcastKind, BroadcastOutcome)>) {
+        for (kind, outcome) in outcomes {
+            let line = self.discovery.note("broadcast", activity_text(kind, &outcome));
+            self.emit(AppEvent::Broadcast { kind, outcome });
+            self.emit(line);
+        }
     }
 
     fn state_word(&self) -> String {
@@ -495,6 +561,8 @@ impl App {
         let line = self.discovery.state(state, detail.as_deref());
         self.emit(AppEvent::ModemState { state, detail });
         self.emit(line);
+        let out = self.broadcasts.state(state);
+        self.publish_broadcasts(out);
     }
 
     /// Stop whatever modem task runs, then start the selected one. Never
@@ -503,6 +571,9 @@ impl App {
         // The old task is told to stop; the new one waits for it to let go
         // (ModemOptions::slot).
         self.task = None;
+        let abandoned = self.broadcasts.abandon();
+        self.publish_broadcasts(abandoned);
+        self.listen_mode = ListenMode::default();
         self.set_session(None);
         self.chat = None;
         self.discovery.modem_changed();
@@ -539,6 +610,8 @@ impl App {
             ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
             ReportKind::Message(message) => self.emit(AppEvent::MessageChanged { message }),
             ReportKind::Observation(o) => {
+                let out = self.broadcasts.observe(&o);
+                self.publish_broadcasts(out);
                 let events = self.discovery.observation(self.chat.as_mut(), o);
                 self.emit_all(events);
             }
@@ -549,6 +622,22 @@ impl App {
             ReportKind::Broadcast(why) => {
                 let line = self.discovery.note("broadcast", why);
                 self.emit(line);
+            }
+            ReportKind::ListenMode(mode) => {
+                self.listen_mode.set_attach(mode);
+                if mode.is_none() {
+                    let why = "the modem did not accept listen mode DATAC3: beacons are not sent; CQ still works";
+                    let line = self.discovery.note("broadcast", why);
+                    self.emit(line);
+                }
+            }
+            ReportKind::BroadcastSubmitted(kind) => {
+                let out = self.broadcasts.submitted(kind);
+                self.publish_broadcasts(out);
+            }
+            ReportKind::BroadcastRefused { kind, reason } => {
+                let out = self.broadcasts.refused(kind, reason);
+                self.publish_broadcasts(out);
             }
         }
     }

@@ -8,6 +8,7 @@
 //! its endpoint lock (MOD-02). An occupied endpoint is reported once, with the
 //! lock's own text, and the task ends: no takeover loop.
 
+use super::broadcast::{broadcast_gate, BroadcastKind, GateRefusal};
 use super::chat::ChatMessage;
 use super::events::{ModemState, SessionDirection, SessionInfo};
 use crate::profile::{ModemTarget, StationProfile};
@@ -52,6 +53,10 @@ pub enum ModemCmd {
         peer: String,
         id: ObjectId,
     },
+    /// Call CQ once. Carried out only by an idle modem; refused elsewhere.
+    Cq,
+    /// Send one wrapped payload on the broadcast port. Idle only, as `Cq`.
+    Broadcast(Vec<u8>),
     Shutdown,
 }
 
@@ -82,6 +87,15 @@ pub enum ReportKind {
     Frame(KissFrame),
     /// The broadcast port was unavailable, closed or reopened, in plain words.
     Broadcast(String),
+    /// The listen mode found at attach or re-attach (`None`: unknown).
+    ListenMode(Option<u8>),
+    /// The modem took a CQ or beacon the actor asked for.
+    BroadcastSubmitted(BroadcastKind),
+    /// The modem did not send it; `reason` is for the operator.
+    BroadcastRefused {
+        kind: BroadcastKind,
+        reason: String,
+    },
 }
 
 /// The actor's end of one modem task. Dropping it stops the task.
@@ -134,16 +148,33 @@ enum Cut {
 }
 
 /// Resolves when a long wait (recovery, ending a link) must give way: on
-/// Shutdown or a dropped handle, and on Abort when `abortable`. Anything else
-/// is ignored: the actor only allows it once the modem is idle again.
-async fn cut_short(cmds: &mut mpsc::Receiver<ModemCmd>, abortable: bool) -> Cut {
+/// Shutdown or a dropped handle, and on Abort when `abortable`. A broadcast
+/// is refused (`why`); anything else is ignored: the actor only allows it
+/// once the modem is idle again.
+async fn cut_short(cmds: &mut mpsc::Receiver<ModemCmd>, abortable: bool, r: &Reporter, why: GateRefusal) -> Cut {
     loop {
         match cmds.recv().await {
             Some(ModemCmd::Shutdown) | None => return Cut::Stop,
             Some(ModemCmd::Abort) if abortable => return Cut::Abort,
-            Some(other) => tracing::debug!(?other, "ignored while the modem is busy"),
+            Some(other) => {
+                if !refuse_broadcast(r, &other, why).await {
+                    tracing::debug!(?other, "ignored while the modem is busy")
+                }
+            }
         }
     }
+}
+
+/// A CQ or beacon that reached the modem anywhere but serve's idle branch:
+/// refused with `why`, never queued (03 §6). False for any other command.
+async fn refuse_broadcast(r: &Reporter, cmd: &ModemCmd, why: GateRefusal) -> bool {
+    let kind = match cmd {
+        ModemCmd::Cq => BroadcastKind::Cq,
+        ModemCmd::Broadcast(_) => BroadcastKind::Beacon,
+        _ => return false,
+    };
+    r.send(ReportKind::BroadcastRefused { kind, reason: why.message() }).await;
+    true
 }
 
 #[derive(Clone)]
@@ -230,8 +261,7 @@ impl Broadcast {
         Broadcast { target, port: None, frames: None, r: r.clone() }
     }
 
-    /// The open port, for the beacon gate (Task 5) to send through.
-    #[allow(dead_code)]
+    /// The open port, for an idle modem to send a beacon through.
     fn port(&self) -> Option<&BroadcastPort> {
         self.port.as_ref().filter(|p| !p.is_closed())
     }
@@ -272,12 +302,14 @@ impl Broadcast {
 }
 
 /// Resolves when the actor stops this task (Shutdown, or the handle dropped).
-/// Anything else that arrives before the modem is up is ignored.
-async fn stopped(cmds: &mut mpsc::Receiver<ModemCmd>) {
+/// A broadcast that arrives before the modem is up is refused; anything else
+/// is ignored.
+async fn stopped(cmds: &mut mpsc::Receiver<ModemCmd>, r: &Reporter) {
     while let Some(cmd) = cmds.recv().await {
         if matches!(cmd, ModemCmd::Shutdown) {
             return;
         }
+        refuse_broadcast(r, &cmd, GateRefusal::NotIdle(ModemState::Attaching)).await;
     }
 }
 
@@ -316,7 +348,7 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                         return r.fault(format!("the previous modem connection did not close within {s} s")).await;
                     }
                 },
-                _ = stopped(&mut cmds) => return,
+                _ = stopped(&mut cmds, &r) => return,
             }
         }
     };
@@ -369,13 +401,14 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 res = attach => if let Err(e) = res {
                     return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await;
                 },
-                _ = stopped(&mut cmds) => return,
+                _ = stopped(&mut cmds, &r) => return,
             }
             let mut broadcast = Broadcast::new(broadcast_port.map(|p| (host.clone(), p)), &r);
             tokio::select! {
                 _ = broadcast.open(false) => {}
-                _ = stopped(&mut cmds) => return,
+                _ = stopped(&mut cmds, &r) => return,
             }
+            r.send(ReportKind::ListenMode(station.listen_mode())).await;
             r.state(ModemState::Ready, unarmed).await;
             let mut station = station;
             serve(&mut station, cmds, &r, profile.listen_preferred, &mut broadcast).await;
@@ -413,13 +446,14 @@ async fn simulator(
             Ok(sim) => sim,
             Err(e) => return r.fault(format!("simulator: {e}")).await,
         },
-        _ = stopped(&mut cmds) => return,
+        _ = stopped(&mut cmds, &r) => return,
     };
     let listen_preferred = unarmed.is_some();
     let detail = match unarmed {
         Some(u) => format!("simulator; {u}"),
         None => "simulator".into(),
     };
+    r.send(ReportKind::ListenMode(sim.station.listen_mode())).await;
     r.state(ModemState::Ready, Some(detail)).await;
     let mut sim = sim;
     forwarders.observe(&mut sim.station, &r);
@@ -444,6 +478,11 @@ const UNARMED: &str = "listening is off until you turn it on";
 
 /// How long a call may ring before it is given up (docs/04 section 3).
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Why a broadcast is refused while a link is being taken down, or while
+/// the modem recovers.
+const ENDING_LINK: GateRefusal = GateRefusal::NotIdle(ModemState::Draining);
+const RECOVERING: GateRefusal = GateRefusal::NotIdle(ModemState::Recovering);
 
 /// What the operator is told when Mercury reports an invalid peer callsign.
 const BAD_PEER: &str = "peer callsign rejected";
@@ -485,12 +524,17 @@ enum After {
 
 /// Resolves when a call being placed should stop: CancelCall or Abort
 /// (Cancelled), or Shutdown and a dropped handle (Stopped).
-async fn call_interrupted(cmds: &mut mpsc::Receiver<ModemCmd>) -> Calling {
+/// A broadcast meanwhile is refused: calling counts from CONNECT (03 §6).
+async fn call_interrupted(cmds: &mut mpsc::Receiver<ModemCmd>, r: &Reporter) -> Calling {
     loop {
         match cmds.recv().await {
             Some(ModemCmd::CancelCall | ModemCmd::Abort) => return Calling::Cancelled,
             Some(ModemCmd::Shutdown) | None => return Calling::Stopped,
-            Some(other) => tracing::debug!(?other, "ignored while calling"),
+            Some(other) => {
+                if !refuse_broadcast(r, &other, GateRefusal::Calling).await {
+                    tracing::debug!(?other, "ignored while calling")
+                }
+            }
         }
     }
 }
@@ -530,7 +574,7 @@ async fn serve(
                 // The actor has already reported Calling.
                 let res = tokio::select! {
                     res = st.call(&peer, CALL_TIMEOUT) => Calling::Answered(res),
-                    c = call_interrupted(&mut cmds) => c,
+                    c = call_interrupted(&mut cmds, r) => c,
                 };
                 match res {
                     Calling::Stopped => {
@@ -540,7 +584,7 @@ async fn serve(
                     Calling::Cancelled => {
                         let res = tokio::select! {
                             res = st.cancel_call() => Some(res),
-                            _ = cut_short(&mut cmds, false) => None,
+                            _ = cut_short(&mut cmds, false, r, GateRefusal::Calling) => None,
                         };
                         match res {
                             Some(Ok(())) => After::Idle(None),
@@ -553,7 +597,7 @@ async fn serve(
                     Calling::Answered(Err(StationError::BadPeer(p))) => {
                         tokio::select! {
                             a = refuse_link(st, r, &p) => a,
-                            _ = cut_short(&mut cmds, false) => After::Stop,
+                            _ = cut_short(&mut cmds, false, r, ENDING_LINK) => After::Stop,
                         }
                     }
                     Calling::Answered(Err(e)) => {
@@ -569,6 +613,41 @@ async fn serve(
                     }
                 }
             }
+            Idle::Cmd(Some(ModemCmd::Cq)) => match st.cq().await {
+                Ok(()) => {
+                    r.send(ReportKind::BroadcastSubmitted(BroadcastKind::Cq)).await;
+                    continue;
+                }
+                Err(e @ (StationError::ControlLost | StationError::Detached)) => {
+                    tracing::warn!("modem control lost sending CQ: {e}");
+                    let reason = GateRefusal::Detached.message();
+                    r.send(ReportKind::BroadcastRefused { kind: BroadcastKind::Cq, reason }).await;
+                    After::Recover
+                }
+                Err(e) => {
+                    let reason = format!("not sent: the modem refused CQ ({e})");
+                    r.send(ReportKind::BroadcastRefused { kind: BroadcastKind::Cq, reason }).await;
+                    continue;
+                }
+            },
+            Idle::Cmd(Some(ModemCmd::Broadcast(payload))) => {
+                // The actor has gated it; checked again against what this
+                // modem itself knows.
+                let gate = broadcast_gate(idle(listening), false, Some(payload.len()), st.listen_mode());
+                let sent = match (gate, broadcast.port()) {
+                    (Err(g), _) => Err(g.message()),
+                    (Ok(()), None) => Err(GateRefusal::NoBroadcastPort.message()),
+                    (Ok(()), Some(port)) => {
+                        port.send(&payload).await.map_err(|e| format!("not sent: the broadcast port failed ({e})"))
+                    }
+                };
+                let kind = BroadcastKind::Beacon;
+                match sent {
+                    Ok(()) => r.send(ReportKind::BroadcastSubmitted(kind)).await,
+                    Err(reason) => r.send(ReportKind::BroadcastRefused { kind, reason }).await,
+                }
+                continue;
+            }
             Idle::Cmd(Some(other)) => {
                 tracing::debug!(?other, "no call or session for this command");
                 continue;
@@ -578,7 +657,7 @@ async fn serve(
             Idle::Incoming(Err(StationError::BadPeer(p))) => {
                 tokio::select! {
                     a = refuse_link(st, r, &p) => a,
-                    _ = cut_short(&mut cmds, false) => After::Stop,
+                    _ = cut_short(&mut cmds, false, r, ENDING_LINK) => After::Stop,
                 }
             }
             Idle::Incoming(Err(StationError::NotOurSession { src, dest, .. })) => {
@@ -601,7 +680,7 @@ async fn serve(
                 // Recovery can take a minute; a stop must not wait for it.
                 let res = tokio::select! {
                     res = st.recover(5) => res,
-                    _ = cut_short(&mut cmds, false) => return,
+                    _ = cut_short(&mut cmds, false, r, RECOVERING) => return,
                 };
                 if let Err(e) = res {
                     return r.fault(format!("could not recover the modem: {e}")).await;
@@ -609,8 +688,9 @@ async fn serve(
                 // A Mercury that restarted closed the broadcast port too.
                 tokio::select! {
                     _ = broadcast.open(true) => {}
-                    _ = cut_short(&mut cmds, false) => return,
+                    _ = cut_short(&mut cmds, false, r, RECOVERING) => return,
                 }
+                r.send(ReportKind::ListenMode(st.listen_mode())).await;
                 r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await;
             }
         }
@@ -830,7 +910,18 @@ async fn link(
                         stop = true;
                         break SessionEnd::CommandsClosed;
                     }
-                    Some(other) => tracing::debug!(?other, "ignored during a session"),
+                    Some(other) => {
+                        let state = if ending || aborted {
+                            ModemState::Draining
+                        } else if link.negotiated {
+                            ModemState::Connected
+                        } else {
+                            ModemState::Negotiating
+                        };
+                        if !refuse_broadcast(r, &other, GateRefusal::NotIdle(state)).await {
+                            tracing::debug!(?other, "ignored during a session")
+                        }
+                    }
                 },
             }
         }
@@ -877,7 +968,7 @@ async fn link(
                 let ended = st.end_link_after(&end, Duration::from_secs(60));
                 tokio::select! {
                     res = ended => Ok(res),
-                    c = cut_short(cmds, true) => Err(c),
+                    c = cut_short(cmds, true, r, ENDING_LINK) => Err(c),
                 }
             };
             match cut {

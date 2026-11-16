@@ -1,6 +1,7 @@
 //! The application layer the UI talks to: typed commands in, one event stream
 //! out (docs/02 §2–§3).
 
+mod broadcast;
 mod chat;
 mod contract;
 mod discovery;
@@ -8,6 +9,7 @@ mod events;
 mod modem;
 mod service;
 
+pub use broadcast::{broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, TRANSMIT_WINDOW};
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
@@ -27,5 +29,7 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     HeardStation::export_all(&cfg)?;
     ActivityEntry::export_all(&cfg)?;
     DiscoveryStats::export_all(&cfg)?;
+    BroadcastKind::export_all(&cfg)?;
+    BroadcastOutcome::export_all(&cfg)?;
     Since::export_all(&cfg)
 }

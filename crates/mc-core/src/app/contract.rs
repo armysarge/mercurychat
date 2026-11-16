@@ -95,6 +95,9 @@ pub enum AppCommand {
     },
     /// The activity log, oldest first (the last 500 lines).
     Activity,
+    /// Call CQ once (Mercury's CQFRAME), only while the modem is idle
+    /// (DSC-02). A refused CQ is never queued for later.
+    SendCq,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
