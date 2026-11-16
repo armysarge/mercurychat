@@ -130,3 +130,10 @@ export function autoFix(theme: Pick<Theme, "aaa" | "tokens">): FixResult {
   }
   return { tokens, changed: [...changed], passes: checkTheme({ aaa: theme.aaa, tokens }).length === 0 };
 }
+
+/** Share (0-1) of a colour's relative luminance that comes from its green and blue channels. */
+export function greenBlueShare(hex: string): number {
+  const { r, g, b } = hexToRgb(hex);
+  const total = relativeLuminance(hex);
+  return total === 0 ? 0 : (0.7152 * lin(g) + 0.0722 * lin(b)) / total;
+}

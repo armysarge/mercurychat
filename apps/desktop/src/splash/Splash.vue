@@ -5,6 +5,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import AppLogo from "../components/AppLogo.vue";
 
 type Status = { stage: "opening" } | { stage: "modem" } | { stage: "timedOut" } | { stage: "failed"; message: string };
 
@@ -30,7 +31,7 @@ const stuck = computed(() => status.value.stage === "failed" || status.value.sta
 
 <template>
   <main class="splash">
-    <img v-if="!stuck" class="mark" src="/mercurychat.svg" width="56" height="56" alt="" />
+    <AppLogo v-if="!stuck" class="mark" :size="56" />
     <b v-if="!stuck" class="name">MercuryChat</b>
     <template v-if="stuck">
       <section class="failure" role="alert">

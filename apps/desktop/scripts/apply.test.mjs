@@ -134,3 +134,19 @@ test("saved appearance: bad parts fall back one by one, and the serialised form 
   assert.equal(root.attrs.get("data-density"), "compact");
   assert.equal(root.props.get("--font-scale"), "1.2");
 });
+
+test("names: C1 controls are stripped and the 40-character cut is by code point, so Rust accepts the saved name", async () => {
+  const { cleanName, serialiseSaved } = await import("../src/themes/apply.ts");
+  assert.equal(cleanName("a\u0085b\u009fc"), "a b c");
+  const cut = cleanName("x".repeat(39) + "😀😀");
+  assert.equal(Array.from(cut).length, 40);
+  assert.ok(cut.endsWith("😀"), "the emoji is whole, not a lone surrogate");
+  assert.doesNotThrow(() => encodeURIComponent(cut), "no lone surrogate");
+  const r = parseThemeImport(doc({ name: "y".repeat(39) + "😀😀\u0085" }), base);
+  assert.ok(r.ok);
+  assert.ok(!/\p{Cc}/u.test(r.theme.name) && Array.from(r.theme.name).length <= 40);
+  assert.doesNotThrow(() => encodeURIComponent(r.theme.name));
+  // Saved names are cleaned again on the way out.
+  const out = JSON.parse(serialiseSaved({ theme: "system", custom: [{ id: "c-1", name: "z".repeat(39) + "😀😀\u0085", base: "midnight", scheme: "dark", tokens: midnight.tokens }], density: "normal", fontScale: 100 }, true));
+  assert.ok(!/\p{Cc}/u.test(out.custom[0].name) && Array.from(out.custom[0].name).length <= 40);
+});

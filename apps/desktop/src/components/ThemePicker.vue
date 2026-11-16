@@ -6,7 +6,7 @@ import { computed, onBeforeUnmount, reactive, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { cleanName, exportTheme, parseThemeImport, type ImportFailure } from "../themes/apply.ts";
 import { autoFix, checkTheme } from "../themes/contrast.ts";
-import { PRESETS, SYSTEM_ID, TOKEN_KEYS, daylight, midnight, type Scheme, type TokenKey, type Tokens } from "../themes/presets.ts";
+import { LOGO_KEYS, PRESETS, SYSTEM_ID, TOKEN_KEYS, daylight, midnight, type Scheme, type TokenKey, type Tokens } from "../themes/presets.ts";
 import {
   activeTheme, appearance, baseFor, deleteCustom, previewTheme, saveCustom, setDensity, setFontScale, setTheme, undoPreview,
 } from "../themes/state.ts";
@@ -25,7 +25,7 @@ const dots = (tk: Tokens) => ({ "--p-canvas": tk.canvas, "--p-surface": tk.surfa
 // ---- editor
 
 /** The colours listed in the editor ("more colours"); the accent has its own row. */
-const EDITABLE: TokenKey[] = TOKEN_KEYS.filter((k) => k !== "scrim" && k !== "shadow" && k !== "accent");
+const EDITABLE: TokenKey[] = TOKEN_KEYS.filter((k) => k !== "scrim" && k !== "shadow" && k !== "accent" && !LOGO_KEYS.includes(k));
 const editor = reactive({
   open: false,
   editingId: null as string | null,
@@ -158,7 +158,7 @@ async function chooseFile(e: Event) {
       </button>
     </div>
     <p v-if="appearance.theme === 'system'" class="muted small">{{ t("theme.systemHint") }}</p>
-    <p v-if="appearance.saveError" class="err" role="alert">{{ t("theme.saveFailed") }}: {{ appearance.saveError }}</p>
+    <p v-if="appearance.saveError" class="err" role="alert">{{ t("theme.saveFailed") }}</p>
 
     <div class="row">
       <label>

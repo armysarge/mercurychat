@@ -67,9 +67,9 @@ export type ImportFailure = { ok: false; reason: "tooLarge" | "notJson" | "notTh
 export type ImportResult = { ok: true; theme: Omit<CustomTheme, "id"> } | ImportFailure;
 
 export function cleanName(value: unknown): string {
-  // eslint-disable-next-line no-control-regex
-  const s = typeof value === "string" ? value.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim() : "";
-  return s.slice(0, MAX_NAME).trim();
+  // Every control character (Unicode Cc: C0 and C1) goes, as the shell refuses them; cut on code points, never mid-surrogate-pair.
+  const s = typeof value === "string" ? value.replace(/\p{Cc}/gu, " ").replace(/\s+/g, " ").trim() : "";
+  return Array.from(s).slice(0, MAX_NAME).join("").trim();
 }
 
 /** The file written by Export: versioned, with the full token set. */
@@ -173,7 +173,7 @@ export function serialiseSaved(saved: Saved, prefersDark: boolean): string {
     tokens: active.tokens,
     density: saved.density,
     fontScale: clampFontScale(saved.fontScale),
-    custom: saved.custom.map(({ id, name, base, scheme, tokens }) => ({ id, name, base, scheme, tokens })),
+    custom: saved.custom.map(({ id, name, base, scheme, tokens }) => ({ id, name: cleanName(name) || id, base, scheme, tokens })),
   });
 }
 

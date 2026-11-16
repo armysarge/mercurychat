@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { autoFix, checkTheme, contrastRatio } from "../src/themes/contrast.ts";
+import { autoFix, checkTheme, contrastRatio, greenBlueShare, hexToRgb } from "../src/themes/contrast.ts";
 import { PRESETS, TOKEN_KEYS, daylight, midnight, nightRed } from "../src/themes/presets.ts";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -18,6 +18,9 @@ const SURF = ["canvas", "surface", "raised", "bubble-in", "bubble-out"];
 for (const p of PRESETS) {
   for (const k of TOKEN_KEYS) if (!/^#[0-9a-f]{3,8}$/i.test(p.tokens[k] ?? "")) bad(`${p.id}: token ${k} is missing or not a hex colour`);
   const fails = checkTheme(p);
+  // The logo is decorative; its tile edge must still show against the surface it sits on.
+  const edge = contrastRatio(p.tokens["logo-tile-edge"], p.tokens.surface);
+  if (edge < 2.5) bad(`${p.id}: logo tile edge on surface is ${edge.toFixed(2)}:1, needs 2.5:1`);
   for (const f of fails) bad(`${p.id}: ${f.fg} on ${f.bg} is ${f.ratio.toFixed(2)}:1, needs ${f.min}:1`);
   const low = (fgs, bgs) => Math.min(...fgs.flatMap((fg) => bgs.map((bg) => contrastRatio(p.tokens[fg], p.tokens[bg])))).toFixed(2);
   console.log(
@@ -53,12 +56,17 @@ for (const [name, theme, got] of [["midnight", midnight, dark], ["daylight", day
   for (const k of TOKEN_KEYS) if (got[k] !== theme.tokens[k]) bad(`tokens.css ${name}: --${k} is ${got[k]}, the preset says ${theme.tokens[k]}`);
 }
 
+// Night Red is red light only: no blue at all, and green plus blue give at most 15% of each
+// token's relative luminance (computed from linearised channels). Overlays (scrim, shadow) are black.
 for (const [k, v] of Object.entries(nightRed.tokens)) {
   if (k === "scrim" || k === "shadow") continue;
-  const g = parseInt(v.slice(3, 5), 16);
-  const b = parseInt(v.slice(5, 7), 16);
-  if (g > 0x95 || b > 0x84) bad(`night-red ${k} ${v} carries green or blue light (g ${g}, b ${b})`);
+  const { b } = hexToRgb(v);
+  if (b !== 0) bad(`night-red ${k} ${v} carries blue light (b ${b})`);
+  const share = greenBlueShare(v);
+  if (share > 0.15) bad(`night-red ${k} ${v}: green and blue are ${(share * 100).toFixed(1)}% of its luminance, the limit is 15%`);
 }
+// The rule must bite: a salmon fixture fails it.
+if (!(greenBlueShare("#ff9084") > 0.15) || hexToRgb("#ff7568").b === 0) bad("the night-red light rule does not reject salmon");
 
 if (problems.length) {
   console.error("\ncheck-contrast FAILED:\n  " + problems.join("\n  "));

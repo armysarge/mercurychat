@@ -13,8 +13,13 @@ export const TOKEN_KEYS = [
   "badge-beacon", "badge-cq", "badge-session",
   "waterfall-low", "waterfall-high",
   "freq-display",
+  "logo-tile-from", "logo-tile-to", "logo-tile-edge", "logo-boot-from", "logo-boot-to", "logo-wing-from", "logo-wing-to", "logo-line", "logo-wing-line",
   "scrim", "shadow",
 ] as const;
+/** The logo's colours: decorative, so the theme editor does not list them (a custom theme inherits its base preset's). */
+export const LOGO_KEYS: readonly TokenKey[] = [
+  "logo-tile-from", "logo-tile-to", "logo-tile-edge", "logo-boot-from", "logo-boot-to", "logo-wing-from", "logo-wing-to", "logo-line", "logo-wing-line",
+];
 export type TokenKey = (typeof TOKEN_KEYS)[number];
 export type Tokens = Record<TokenKey, string>;
 
@@ -44,6 +49,9 @@ export const midnight: Theme = {
     "badge-beacon": "#f0b27a", "badge-cq": "#8ec5ff", "badge-session": "#c3a6ff",
     "waterfall-low": "#0e2a47", "waterfall-high": "#ffe27a",
     "freq-display": "#a8ecf6",
+    "logo-tile-from": "#20364b", "logo-tile-to": "#0b1018", "logo-tile-edge": "#496479",
+    "logo-boot-from": "#bffbf1", "logo-boot-to": "#45afd6", "logo-wing-from": "#f1fdff", "logo-wing-to": "#87cae0",
+    "logo-line": "#183e54", "logo-wing-line": "#152735",
     scrim: "#00000059", shadow: "#00000059",
   },
 };
@@ -61,24 +69,30 @@ export const daylight: Theme = {
     "badge-beacon": "#8f4a00", "badge-cq": "#1b5fa8", "badge-session": "#6b3fb0",
     "waterfall-low": "#dbe8f5", "waterfall-high": "#0b3a6b",
     "freq-display": "#0b3a47",
+    "logo-tile-from": "#20364b", "logo-tile-to": "#0b1018", "logo-tile-edge": "#496479",
+    "logo-boot-from": "#bffbf1", "logo-boot-to": "#45afd6", "logo-wing-from": "#f1fdff", "logo-wing-to": "#87cae0",
+    "logo-line": "#183e54", "logo-wing-line": "#152735",
     scrim: "#16223540", shadow: "#16223526",
   },
 };
 
-/** Red on black, for night operating: no blue or green light, so dark-adapted vision is kept. Status is told apart by icon and word, not hue. */
+/** Red on black, for night operating: no blue light and (almost) no green, so dark-adapted vision is kept (check-contrast enforces it). Text and secondary text are both near-full red; hierarchy is weight and size. Status and badges are told apart by icon and word, not hue. */
 export const nightRed: Theme = {
   id: "night-red",
   scheme: "dark",
   tokens: {
-    canvas: "#060000", surface: "#110000", raised: "#1b0202",
-    text: "#ff7568", "text-2": "#e0584c",
-    accent: "#ff5a4d", "accent-text": "#060000",
-    success: "#ff9084", warning: "#ff6a5c", danger: "#ff5546",
-    border: "#3a0a0a", "border-strong": "#a8332b", focus: "#ff5a4d",
-    "bubble-in": "#1b0202", "bubble-out": "#3a0808",
-    "badge-beacon": "#ff9084", "badge-cq": "#ff6a5c", "badge-session": "#e0584c",
-    "waterfall-low": "#1b0202", "waterfall-high": "#ff4a3a",
-    "freq-display": "#ff4a3a",
+    canvas: "#060000", surface: "#110000", raised: "#1b0000",
+    text: "#ff0000", "text-2": "#fc0000",
+    accent: "#ff2200", "accent-text": "#060000",
+    success: "#ff3c00", warning: "#ff1a00", danger: "#ff0000",
+    border: "#3a0000", "border-strong": "#c80000", focus: "#ff0000",
+    "bubble-in": "#1b0000", "bubble-out": "#300000",
+    "badge-beacon": "#ff3c00", "badge-cq": "#ff1a00", "badge-session": "#fc0000",
+    "waterfall-low": "#1b0000", "waterfall-high": "#ff0000",
+    "freq-display": "#ff0000",
+    "logo-tile-from": "#2a0000", "logo-tile-to": "#060000", "logo-tile-edge": "#c80000",
+    "logo-boot-from": "#ff2a00", "logo-boot-to": "#c80000", "logo-wing-from": "#ff3000", "logo-wing-to": "#d00000",
+    "logo-line": "#300000", "logo-wing-line": "#1b0000",
     scrim: "#000000a0", shadow: "#000000a0",
   },
 };
@@ -97,6 +111,9 @@ export const highContrastDark: Theme = {
     "badge-beacon": "#ffb870", "badge-cq": "#8cc8ff", "badge-session": "#d0b8ff",
     "waterfall-low": "#000000", "waterfall-high": "#ffff66",
     "freq-display": "#8ee8ff",
+    "logo-tile-from": "#000000", "logo-tile-to": "#000000", "logo-tile-edge": "#ffffff",
+    "logo-boot-from": "#ffffff", "logo-boot-to": "#e0e0e0", "logo-wing-from": "#ffffff", "logo-wing-to": "#cccccc",
+    "logo-line": "#000000", "logo-wing-line": "#000000",
     scrim: "#000000b3", shadow: "#000000b3",
   },
 };
@@ -115,6 +132,9 @@ export const highContrastLight: Theme = {
     "badge-beacon": "#7a3d00", "badge-cq": "#00428a", "badge-session": "#55228f",
     "waterfall-low": "#ffffff", "waterfall-high": "#000000",
     "freq-display": "#002b5c",
+    "logo-tile-from": "#ffffff", "logo-tile-to": "#f2f2f2", "logo-tile-edge": "#000000",
+    "logo-boot-from": "#000000", "logo-boot-to": "#262626", "logo-wing-from": "#4d4d4d", "logo-wing-to": "#000000",
+    "logo-line": "#ffffff", "logo-wing-line": "#ffffff",
     scrim: "#00000080", shadow: "#00000040",
   },
 };
@@ -132,6 +152,9 @@ export const ocean: Theme = {
     "badge-beacon": "#f0b27a", "badge-cq": "#8ec5ff", "badge-session": "#c3a6ff",
     "waterfall-low": "#06223a", "waterfall-high": "#7ff0e2",
     "freq-display": "#7ff0e2",
+    "logo-tile-from": "#12405f", "logo-tile-to": "#06151f", "logo-tile-edge": "#2f7ea6",
+    "logo-boot-from": "#9ff5e6", "logo-boot-to": "#2fd6c4", "logo-wing-from": "#e6fbff", "logo-wing-to": "#7fd0e8",
+    "logo-line": "#0e3a46", "logo-wing-line": "#0a2a3a",
     scrim: "#00101e80", shadow: "#00101e80",
   },
 };
@@ -149,6 +172,9 @@ export const slate: Theme = {
     "badge-beacon": "#dcb48c", "badge-cq": "#a3bfe0", "badge-session": "#bfb0e0",
     "waterfall-low": "#1a1d21", "waterfall-high": "#e6e8eb",
     "freq-display": "#dfe6f0",
+    "logo-tile-from": "#3a424d", "logo-tile-to": "#16181b", "logo-tile-edge": "#737a84",
+    "logo-boot-from": "#e6e8eb", "logo-boot-to": "#a3a9b1", "logo-wing-from": "#f5f6f8", "logo-wing-to": "#c4c9d0",
+    "logo-line": "#292d32", "logo-wing-line": "#1f2226",
     scrim: "#00000066", shadow: "#00000066",
   },
 };
@@ -167,6 +193,9 @@ export const amberTerminal: Theme = {
     "badge-beacon": "#ffd36b", "badge-cq": "#ff9d2e", "badge-session": "#cc8c00",
     "waterfall-low": "#1d1400", "waterfall-high": "#ffc933",
     "freq-display": "#ffb000",
+    "logo-tile-from": "#2b1d00", "logo-tile-to": "#0c0800", "logo-tile-edge": "#8a6200",
+    "logo-boot-from": "#ffe08a", "logo-boot-to": "#e09a00", "logo-wing-from": "#fff0c0", "logo-wing-to": "#f0b030",
+    "logo-line": "#3b2a00", "logo-wing-line": "#1d1400",
     scrim: "#00000080", shadow: "#00000080",
   },
 };

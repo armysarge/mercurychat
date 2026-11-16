@@ -16,6 +16,7 @@ import Diagnostics from "./views/Diagnostics.vue";
 import Operate from "./views/Operate.vue";
 import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
+import AppLogo from "./components/AppLogo.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import Sidebar from "./components/Sidebar.vue";
 import WindowControls from "./components/WindowControls.vue";
@@ -138,7 +139,7 @@ onUnmounted(() => {
          handle dragging on platforms without WebView2's native drag region. -->
     <header data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
-        <img class="mark" src="/mercurychat.svg" width="28" height="28" alt="" data-tauri-drag-region />
+        <AppLogo class="mark" :size="28" data-tauri-drag-region />
         <b>MercuryChat</b><span class="alpha small">{{ t("app.alpha") }}</span>
       </div>
       <button v-if="!firstUse" class="toggle-sidebar quiet" :aria-expanded="app.drawer === 'peers'" @click="app.drawer = app.drawer === 'peers' ? null : 'peers'">{{ t("sidebar.toggle") }}</button>

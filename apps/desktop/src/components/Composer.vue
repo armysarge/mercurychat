@@ -73,7 +73,7 @@ async function submit() {
 .row { flex-wrap: wrap; }
 .composer-box {
   margin: 0 calc(var(--space) * 2) calc(var(--space) * 2); padding: var(--space) calc(var(--space) * 1.5);
-  border: 1px solid var(--border); border-radius: 13px; background: var(--surface); display: grid; gap: 6px;
+  border: 1px solid var(--border-strong); border-radius: 13px; background: var(--surface); display: grid; gap: 6px;
 }
 .composer { width: 100%; border: 0; background: transparent; resize: none; padding: 4px; line-height: 1.4; overflow-y: hidden; }
 @media (max-height: 560px) {

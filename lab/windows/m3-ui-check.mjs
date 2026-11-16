@@ -92,7 +92,7 @@ try {
   const dom = await sc.eval(`({
     w: outerWidth, h: outerHeight, shown: document.visibilityState, dpr: devicePixelRatio,
     cx: screenX + outerWidth / 2 - (screen.availLeft ?? 0), cy: screenY + outerHeight / 2 - (screen.availTop ?? 0), aw: screen.availWidth, ah: screen.availHeight,
-    logo: !!document.querySelector('img[src$="mercurychat.svg"]'),
+    logo: !!document.querySelector('svg.logo[aria-hidden="true"]'),
     status: document.querySelector('.status')?.textContent.trim() ?? '',
     bar: document.querySelector('[role=progressbar]') ? getComputedStyle(document.querySelector('.bar i')).animationName : 'none',
   })`);
@@ -247,9 +247,12 @@ try {
 
   // ---- 11. themes: Night Red changes the window, persists, and the splash uses it themeAfter a restart
   const rgb = (hex) => { const h = hex.replace("#", ""); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };
-  const night = { canvas: "#060000", surface: "#110000", bubbleOut: "#3a0808", badgeCq: "#ff6a5c", accent: "#ff5a4d" };
+  const night = { canvas: "#060000", surface: "#110000", bubbleOut: "#300000", badgeCq: "#ff1a00", accent: "#ff2200" };
   const cssVar = (n) => `getComputedStyle(document.documentElement).getPropertyValue('--${n}').trim()`;
   const bg = (sel) => `getComputedStyle(document.querySelector(${JSON.stringify(sel)})).backgroundColor`;
+  // The composer's frame is a control edge: it uses the 3:1 control border, not the decorative divider.
+  const frame = await s.eval(`({ edge: getComputedStyle(document.querySelector('.composer-box')).borderTopColor, strong: ${cssVar("border-strong")} })`);
+  if (frame.edge !== rgb(frame.strong)) throw new Error(`composer frame ${frame.edge} is not --border-strong ${frame.strong}`);
   await s.eval(`${rail("Settings")}.click()`);
   await until(s, "!!document.querySelector('[data-theme-id=\"night-red\"]')", "the theme picker");
   const picks = await s.eval("[...document.querySelectorAll('[data-theme-id]')].map(b => b.dataset.themeId).join(',')");
@@ -263,7 +266,18 @@ try {
   if (themeAfter.side === themeBefore.side || themeAfter.rail === themeBefore.rail || themeAfter.out === themeBefore.out || themeAfter.cq === themeBefore.cq) throw new Error(`the sidebar, bubbles or badges did not change: ${JSON.stringify({ themeBefore, themeAfter })}`);
   if (themeAfter.rail !== rgb(night.surface) || themeAfter.body !== rgb(night.canvas) || themeAfter.out !== night.bubbleOut || themeAfter.cq !== night.badgeCq || themeAfter.checked !== "true") throw new Error(`Night Red values: ${JSON.stringify(themeAfter)}`);
   const [tr, tg, tb] = themeAfter.text.match(/\d+/g).map(Number);
-  if (tb > 0x84 || tg > 0x95 || tr < 0xc0) throw new Error(`Night Red text is not red-on-black: ${themeAfter.text}`);
+  if (tb !== 0 || tg > 0x20 || tr < 0xf0) throw new Error(`Night Red text is not red-on-black: ${themeAfter.text}`);
+  // The logo is themed too: under Night Red its gradient stops and edge carry no blue light.
+  const logoColours = await s.eval(`(() => {
+    const logo = document.querySelector('header svg.logo');
+    if (!logo) return null;
+    const rgbOf = (c) => c.match(/\\d+/g).map(Number);
+    return {
+      boot: [...logo.querySelectorAll('.boot-from, .boot-to')].map((e) => rgbOf(getComputedStyle(e).stopColor)),
+      edge: rgbOf(getComputedStyle(logo.querySelector('rect')).stroke),
+    };
+  })()`);
+  if (!logoColours || logoColours.boot.length !== 2 || [...logoColours.boot, logoColours.edge].some(([r, g, b]) => b !== 0 || g > 0x30 || r < 0xc0)) throw new Error(`header logo under Night Red: ${JSON.stringify(logoColours)}`);
   // Density and text size apply at once.
   await s.eval(`(() => { const r = document.querySelector('input[type=range]'); r.value = '120'; r.dispatchEvent(new Event('input')); })()`);
   await s.eval(`(() => { const d = [...document.querySelectorAll('select')].find(x => [...x.options].some(o => o.value === 'compact')); d.value = 'compact'; d.dispatchEvent(new Event('change')); })()`);
@@ -301,7 +315,7 @@ try {
   await until(s, ready, "the workspace themeAfter the theme restart");
   const kept = await s.eval(`({ canvas: ${cssVar("canvas")}, density: document.documentElement.dataset.density, scale: ${cssVar("font-scale")} })`);
   if (kept.canvas !== night.canvas || kept.density !== "compact" || kept.scale !== "1.2") throw new Error(`themeAfter restart: ${JSON.stringify(kept)}`);
-  results.push(`PASS themes: picker lists System and all presets with swatches; Night Red re-colours the sidebar (${themeBefore.side} -> ${themeAfter.side}), bubble and badge tokens at once, text is red (${themeAfter.text}); compact density and 120% text (${px}) apply instantly; status icons stay; appearance.json holds them; the splash and the window come back in Night Red after a restart`);
+  results.push(`PASS themes: picker lists System and all presets with swatches; Night Red re-colours the sidebar (${themeBefore.side} -> ${themeAfter.side}), bubble and badge tokens at once, text is red (${themeAfter.text}); compact density and 120% text (${px}) apply instantly; header logo is red-only (boot stops ${JSON.stringify(logoColours.boot)}); status icons stay; appearance.json holds them; the splash and the window come back in Night Red after a restart`);
   s.close();
 
   // ---- 9. a start-up failure stays on the splash, with its message and a Close button
