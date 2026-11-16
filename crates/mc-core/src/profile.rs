@@ -171,6 +171,12 @@ pub fn to_row(p: &StationProfile) -> ProfileRow {
         telemetry_url,
         lab: p.lab,
         listen_preferred: p.listen_preferred,
+        qth: None,
+        rig: None,
+        power: None,
+        antenna: None,
+        email: None,
+        about: None,
     }
 }
 
