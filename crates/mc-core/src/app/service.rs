@@ -546,7 +546,7 @@ impl App {
                 let events = self.discovery.frame(self.chat.as_mut(), f);
                 self.emit_all(events);
             }
-            ReportKind::BroadcastDown(why) => {
+            ReportKind::Broadcast(why) => {
                 let line = self.discovery.note("broadcast", why);
                 self.emit(line);
             }

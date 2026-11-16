@@ -147,7 +147,8 @@ async fn sync_broadcast(rx: &mut Receiver<EventEnvelope>, port: &BroadcastPort, 
         port.send(&beacon(call)).await.unwrap();
         let got = tokio::time::timeout(
             Duration::from_secs(1),
-            wait_for(rx, 1, |e| match e {
+            // The outer timeout ends each try; this deadline is only a backstop.
+            wait_for(rx, 5, |e| match e {
                 AppEvent::Heard { station } if station.callsign == call => Some(station.clone()),
                 _ => None,
             }),
@@ -429,4 +430,24 @@ async fn occupied_broadcast_port_is_logged_not_faulted() {
     assert_eq!(snapshot(&h).await.modem, ModemState::Ready);
     net.send_control(0, &format!("CQFRAME {PEER} 500"));
     heard_event(&mut rx, PEER, 10).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn broadcast_port_reopens_after_recovery() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    let port = peer_broadcast(&net).await;
+    sync_broadcast(&mut rx, &port, "ZS6ONE").await;
+    // Mercury drops our sockets (as on a restart): the modem recovers.
+    net.kill_client(0);
+    until_state(&mut rx, ModemState::Recovering).await;
+    wait_for(&mut rx, 60, |e| matches!(e, AppEvent::ModemState { state: ModemState::Ready, .. }).then_some(())).await;
+    // Beacons are heard again without selecting the profile again.
+    let st = sync_broadcast(&mut rx, &port, "ZS6TWO").await;
+    assert_eq!(st.source, Some(HeardSource::Beacon));
+    let log = activity(&h).await;
+    let lines: Vec<&str> = log.iter().filter(|e| e.kind == "broadcast").map(|e| e.text.as_str()).collect();
+    assert!(lines.iter().any(|t| t.contains("reopened")), "{lines:?}");
+    assert!(lines.iter().all(|t| !t.contains("another client")), "no guessed causes: {lines:?}");
 }

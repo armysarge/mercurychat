@@ -80,8 +80,8 @@ pub enum ReportKind {
     Observation(Observation),
     /// A frame from the broadcast port.
     Frame(KissFrame),
-    /// The broadcast port could not be opened, or closed: why, in plain words.
-    BroadcastDown(String),
+    /// The broadcast port was unavailable, closed or reopened, in plain words.
+    Broadcast(String),
 }
 
 /// The actor's end of one modem task. Dropping it stops the task.
@@ -179,9 +179,9 @@ impl Reporter {
     }
 }
 
-/// The discovery forwarders of one modem task: the station's observations and
-/// the broadcast port's frames go to the actor as reports, so the serve and
-/// link loops never handle them. Aborted when the task ends.
+/// The observation forwarder of one modem task: the station's observations
+/// go to the actor as reports, so the serve and link loops never handle them.
+/// Aborted when the task ends.
 #[derive(Default)]
 struct Forwarders(Vec<tokio::task::JoinHandle<()>>);
 
@@ -205,27 +205,69 @@ impl Forwarders {
             }
         }));
     }
+}
 
-    /// Open the broadcast port. It is optional: when it is unavailable or
-    /// closes (Mercury takes one client), the actor is told, never faulted.
-    async fn broadcast(&mut self, host: &str, port: u16, r: &Reporter) -> Option<BroadcastPort> {
-        let (bp, mut rx) = match BroadcastPort::connect(host, port, Duration::from_secs(3)).await {
+/// The broadcast plane of one modem task, re-openable: opened after attach
+/// and again after every recovery, because a restarted Mercury closes it. Its
+/// frames go to the actor as reports from a forwarder of its own. Optional:
+/// when it is unavailable or closes, the actor is told, never faulted.
+struct Broadcast {
+    /// Host and port, or `None` when the profile has no broadcast port.
+    target: Option<(String, u16)>,
+    port: Option<BroadcastPort>,
+    frames: Option<tokio::task::JoinHandle<()>>,
+    r: Reporter,
+}
+
+impl Drop for Broadcast {
+    fn drop(&mut self) {
+        self.close();
+    }
+}
+
+impl Broadcast {
+    fn new(target: Option<(String, u16)>, r: &Reporter) -> Broadcast {
+        Broadcast { target, port: None, frames: None, r: r.clone() }
+    }
+
+    /// The open port, for the beacon gate (Task 5) to send through.
+    #[allow(dead_code)]
+    fn port(&self) -> Option<&BroadcastPort> {
+        self.port.as_ref().filter(|p| !p.is_closed())
+    }
+
+    fn close(&mut self) {
+        if let Some(t) = self.frames.take() {
+            t.abort();
+        }
+        self.port = None;
+    }
+
+    /// (Re)open the port, dropping any previous connection first. `again`
+    /// says so in the activity log.
+    async fn open(&mut self, again: bool) {
+        let Some((host, port)) = self.target.clone() else { return };
+        self.close();
+        let (bp, mut rx) = match BroadcastPort::connect(&host, port, Duration::from_secs(3)).await {
             Ok(opened) => opened,
             Err(e) => {
                 let why = format!("broadcast port {port} unavailable ({e}): beacons are neither heard nor sent");
-                r.send(ReportKind::BroadcastDown(why)).await;
-                return None;
+                self.r.send(ReportKind::Broadcast(why)).await;
+                return;
             }
         };
-        let r = r.clone();
-        self.0.push(tokio::spawn(async move {
+        let r = self.r.clone();
+        self.frames = Some(tokio::spawn(async move {
             while let Some(f) = rx.recv().await {
                 r.send(ReportKind::Frame(f)).await;
             }
-            let why = format!("broadcast port {port} closed (another client may hold it): beacons are not heard");
-            r.send(ReportKind::BroadcastDown(why)).await;
+            let why = format!("broadcast port {port} closed: beacons are not heard until it is reopened");
+            r.send(ReportKind::Broadcast(why)).await;
         }));
-        Some(bp)
+        self.port = Some(bp);
+        if again {
+            self.r.send(ReportKind::Broadcast(format!("broadcast port {port} reopened"))).await;
+        }
     }
 }
 
@@ -329,17 +371,14 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 },
                 _ = stopped(&mut cmds) => return,
             }
-            // Held for the task's life; the beacon gate sends through it.
-            let _broadcast = match broadcast_port {
-                Some(port) => tokio::select! {
-                    b = forwarders.broadcast(&host, port, &r) => b,
-                    _ = stopped(&mut cmds) => return,
-                },
-                None => None,
-            };
+            let mut broadcast = Broadcast::new(broadcast_port.map(|p| (host.clone(), p)), &r);
+            tokio::select! {
+                _ = broadcast.open(false) => {}
+                _ = stopped(&mut cmds) => return,
+            }
             r.state(ModemState::Ready, unarmed).await;
             let mut station = station;
-            serve(&mut station, cmds, &r, profile.listen_preferred).await;
+            serve(&mut station, cmds, &r, profile.listen_preferred, &mut broadcast).await;
         }
         ModemTarget::Simulator => simulator(&station_dir, call, unarmed, cmds, r, &mut forwarders).await,
     }
@@ -384,7 +423,8 @@ async fn simulator(
     r.state(ModemState::Ready, Some(detail)).await;
     let mut sim = sim;
     forwarders.observe(&mut sim.station, &r);
-    serve(&mut sim.station, cmds, &r, listen_preferred).await;
+    let mut broadcast = Broadcast::new(None, &r);
+    serve(&mut sim.station, cmds, &r, listen_preferred, &mut broadcast).await;
 }
 
 #[cfg(not(feature = "sim"))]
@@ -458,7 +498,13 @@ async fn call_interrupted(cmds: &mut mpsc::Receiver<ModemCmd>) -> Calling {
 /// The attached modem: holds the station (and so its locks) and carries out
 /// the actor's commands until stopped. Idle, it also watches for incoming
 /// links and for the loss of the control connection.
-async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporter, listen_preferred: bool) {
+async fn serve(
+    st: &mut Station,
+    mut cmds: mpsc::Receiver<ModemCmd>,
+    r: &Reporter,
+    listen_preferred: bool,
+    broadcast: &mut Broadcast,
+) {
     let mut listening = false;
     let mut preferred = listen_preferred;
     let idle = |listening: bool| if listening { ModemState::Listening } else { ModemState::Ready };
@@ -557,10 +603,15 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
                     res = st.recover(5) => res,
                     _ = cut_short(&mut cmds, false) => return,
                 };
-                match res {
-                    Ok(()) => r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await,
-                    Err(e) => return r.fault(format!("could not recover the modem: {e}")).await,
+                if let Err(e) = res {
+                    return r.fault(format!("could not recover the modem: {e}")).await;
                 }
+                // A Mercury that restarted closed the broadcast port too.
+                tokio::select! {
+                    _ = broadcast.open(true) => {}
+                    _ = cut_short(&mut cmds, false) => return,
+                }
+                r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await;
             }
         }
     }
