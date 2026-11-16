@@ -3,6 +3,7 @@
 //! database directly (docs/02 §2, §7).
 
 use super::chat::{ChatMessage, Conversation};
+use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
@@ -26,6 +27,8 @@ pub struct AppSnapshot {
     pub listen_preferred: bool,
     /// The MCH/1 session in progress, once negotiated.
     pub session: Option<SessionInfo>,
+    /// Broadcast traffic that was not a station, since the app started.
+    pub discovery: DiscoveryStats,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -83,6 +86,15 @@ pub enum AppCommand {
         before_seq: Option<i64>,
         limit: u32,
     },
+    /// The heard list: stations heard in the last 30 days, then favourites.
+    Heard,
+    /// Mark or unmark a callsign as a favourite; it stays listed while marked.
+    SetFavourite {
+        callsign: String,
+        on: bool,
+    },
+    /// The activity log, oldest first (the last 500 lines).
+    Activity,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -94,6 +106,8 @@ pub enum CommandOk {
     Message(ChatMessage),
     Conversations { conversations: Vec<Conversation> },
     History { messages: Vec<ChatMessage> },
+    Heard { stations: Vec<HeardStation> },
+    Activity { entries: Vec<ActivityEntry> },
     Done,
 }
 

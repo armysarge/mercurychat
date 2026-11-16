@@ -4,6 +4,7 @@
 //! than the ring holds is told to take a snapshot, never handed a gap.
 
 use super::chat::ChatMessage;
+use super::discovery::{ActivityEntry, HeardStation};
 use serde::Serialize;
 use std::collections::VecDeque;
 use ts_rs::TS;
@@ -72,6 +73,14 @@ pub enum AppEvent {
     Fault {
         code: String,
         message: String,
+    },
+    /// A station was heard, or its favourite mark changed (DSC-01).
+    Heard {
+        station: HeardStation,
+    },
+    /// A line was added to the activity log.
+    Activity {
+        entry: ActivityEntry,
     },
 }
 

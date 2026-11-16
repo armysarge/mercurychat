@@ -8,8 +8,15 @@ use mc_storage::Store;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
+/// The next event other than an activity line (those are covered in
+/// tests/discovery.rs; these tests pin the state and profile sequence).
 async fn next(rx: &mut Receiver<EventEnvelope>) -> EventEnvelope {
-    tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("event within 5 s").unwrap()
+    loop {
+        let env = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("event within 5 s").unwrap();
+        if !matches!(env.event, AppEvent::Activity { .. }) {
+            return env;
+        }
+    }
 }
 
 async fn sim_app(root: &std::path::Path) -> (AppHandle, String) {

@@ -5,6 +5,7 @@
 
 use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
+use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
@@ -110,6 +111,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         reports,
         task: None,
         pending: None,
+        discovery: Discovery::default(),
     };
     tokio::spawn(async move {
         // The selection survives a restart, so its modem is attached again (attach
@@ -160,6 +162,8 @@ struct App {
     task: Option<ModemHandle>,
     /// The modem the last selection asked for, started after replying.
     pending: Option<Option<StationProfile>>,
+    /// The activity log and broadcast counters; heard rows go to `chat`.
+    discovery: Discovery,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -180,6 +184,12 @@ impl App {
     fn emit(&mut self, event: AppEvent) {
         let env = self.log.push(event);
         let _ = self.events.send(env); // no subscriber is fine
+    }
+
+    fn emit_all(&mut self, events: Vec<AppEvent>) {
+        for e in events {
+            self.emit(e);
+        }
     }
 
     fn handle(&mut self, cmd: AppCommand) -> Result<CommandOk, AppError> {
@@ -362,6 +372,20 @@ impl App {
                     .map_err(storage)?;
                 Ok(CommandOk::History { messages: rows.iter().map(ChatMessage::from).collect() })
             }
+            AppCommand::Heard => {
+                let stations = discovery::heard_list(self.chat_store()?).map_err(storage)?;
+                Ok(CommandOk::Heard { stations })
+            }
+            AppCommand::SetFavourite { callsign, on } => {
+                let call = Callsign::parse(&callsign)
+                    .map_err(|e| AppError::Validation { errors: chat::field("callsign", e.to_string()) })?;
+                let store = self.chat_store()?;
+                store.set_favourite(call.as_str(), on).map_err(storage)?;
+                let station = discovery::heard_station(store, call.as_str()).map_err(storage)?;
+                self.emit(AppEvent::Heard { station });
+                Ok(CommandOk::Done)
+            }
+            AppCommand::Activity => Ok(CommandOk::Activity { entries: self.discovery.entries() }),
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -442,7 +466,11 @@ impl App {
             .map_err(|e| e.to_string())
             .and_then(|_| Store::open(&dir.join("station.db")).map_err(|e| e.to_string()));
         match opened {
-            Ok(s) => self.chat = Some(s),
+            Ok(mut s) => {
+                let purged = self.discovery.purge(&mut s);
+                self.emit_all(purged);
+                self.chat = Some(s);
+            }
             Err(e) => tracing::warn!("station store unavailable: {e}"),
         }
     }
@@ -464,7 +492,9 @@ impl App {
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {
         self.modem = state;
         self.modem_detail = detail.clone();
+        let line = self.discovery.state(state, detail.as_deref());
         self.emit(AppEvent::ModemState { state, detail });
+        self.emit(line);
     }
 
     /// Stop whatever modem task runs, then start the selected one. Never
@@ -475,6 +505,7 @@ impl App {
         self.task = None;
         self.set_session(None);
         self.chat = None;
+        self.discovery.modem_changed();
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
@@ -498,9 +529,27 @@ impl App {
         }
         match report.kind {
             ReportKind::State { state, detail } => self.set_modem(state, detail),
-            ReportKind::Session(session) => self.set_session(session),
+            ReportKind::Session(session) => {
+                if let Some(s) = session.as_ref().filter(|s| self.session.as_ref() != Some(*s)) {
+                    let heard = self.discovery.session(self.chat.as_mut(), &s.peer);
+                    self.emit_all(heard);
+                }
+                self.set_session(session)
+            }
             ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
             ReportKind::Message(message) => self.emit(AppEvent::MessageChanged { message }),
+            ReportKind::Observation(o) => {
+                let events = self.discovery.observation(self.chat.as_mut(), o);
+                self.emit_all(events);
+            }
+            ReportKind::Frame(f) => {
+                let events = self.discovery.frame(self.chat.as_mut(), f);
+                self.emit_all(events);
+            }
+            ReportKind::BroadcastDown(why) => {
+                let line = self.discovery.note("broadcast", why);
+                self.emit(line);
+            }
         }
     }
 
@@ -526,6 +575,7 @@ impl App {
             listen_preferred,
             session: self.session.clone(),
             active_profile_id: active,
+            discovery: self.discovery.stats(),
         })
     }
 }

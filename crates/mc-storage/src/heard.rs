@@ -113,6 +113,13 @@ impl Store {
         Ok(self.conn.execute("DELETE FROM heard_observations WHERE observed_utc < ?1", params![cutoff_utc])?)
     }
 
+    /// Every callsign marked favourite, heard or not, in callsign order.
+    pub fn favourites(&self) -> Result<Vec<String>> {
+        let mut st = self.conn.prepare("SELECT callsign FROM contacts WHERE favourite != 0 ORDER BY callsign")?;
+        let rows = st.query_map([], |r| r.get(0))?;
+        Ok(rows.collect::<rusqlite::Result<_>>()?)
+    }
+
     pub fn set_favourite(&mut self, callsign: &str, on: bool) -> Result<()> {
         self.conn.execute(
             "INSERT INTO contacts (callsign, favourite, updated_utc) VALUES (?1, ?2, ?3)

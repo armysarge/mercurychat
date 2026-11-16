@@ -12,9 +12,11 @@ use super::chat::ChatMessage;
 use super::events::{ModemState, SessionDirection, SessionInfo};
 use crate::profile::{ModemTarget, StationProfile};
 use crate::session::{SessionCommand, SessionEnd, SessionEvent};
-use crate::station::{ConnectInfo, Station, StationConfig, StationError, StationRequest};
+use crate::station::{ConnectInfo, Observation, Station, StationConfig, StationError, StationRequest};
 use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
+use mercury_adapter::broadcast::BroadcastPort;
+use mercury_adapter::kiss::KissFrame;
 use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -74,6 +76,12 @@ pub enum ReportKind {
     },
     /// A message changed state or arrived.
     Message(ChatMessage),
+    /// Something the modem reported about the channel (CQ, MONITOR, PTT, ...).
+    Observation(Observation),
+    /// A frame from the broadcast port.
+    Frame(KissFrame),
+    /// The broadcast port could not be opened, or closed: why, in plain words.
+    BroadcastDown(String),
 }
 
 /// The actor's end of one modem task. Dropping it stops the task.
@@ -138,6 +146,7 @@ async fn cut_short(cmds: &mut mpsc::Receiver<ModemCmd>, abortable: bool) -> Cut 
     }
 }
 
+#[derive(Clone)]
 struct Reporter {
     generation: u64,
     tx: mpsc::Sender<ModemReport>,
@@ -167,6 +176,56 @@ impl Reporter {
 
     async fn call_failed(&self, peer: &str, reason: String) {
         self.send(ReportKind::CallFailed { peer: peer.to_string(), reason }).await;
+    }
+}
+
+/// The discovery forwarders of one modem task: the station's observations and
+/// the broadcast port's frames go to the actor as reports, so the serve and
+/// link loops never handle them. Aborted when the task ends.
+#[derive(Default)]
+struct Forwarders(Vec<tokio::task::JoinHandle<()>>);
+
+impl Drop for Forwarders {
+    fn drop(&mut self) {
+        for t in &self.0 {
+            t.abort();
+        }
+    }
+}
+
+impl Forwarders {
+    fn observe(&mut self, st: &mut Station, r: &Reporter) {
+        // The station never waits on this channel: a full one drops and counts.
+        let (tx, mut rx) = mpsc::channel(256);
+        st.set_observer(tx);
+        let r = r.clone();
+        self.0.push(tokio::spawn(async move {
+            while let Some(o) = rx.recv().await {
+                r.send(ReportKind::Observation(o)).await;
+            }
+        }));
+    }
+
+    /// Open the broadcast port. It is optional: when it is unavailable or
+    /// closes (Mercury takes one client), the actor is told, never faulted.
+    async fn broadcast(&mut self, host: &str, port: u16, r: &Reporter) -> Option<BroadcastPort> {
+        let (bp, mut rx) = match BroadcastPort::connect(host, port, Duration::from_secs(3)).await {
+            Ok(opened) => opened,
+            Err(e) => {
+                let why = format!("broadcast port {port} unavailable ({e}): beacons are neither heard nor sent");
+                r.send(ReportKind::BroadcastDown(why)).await;
+                return None;
+            }
+        };
+        let r = r.clone();
+        self.0.push(tokio::spawn(async move {
+            while let Some(f) = rx.recv().await {
+                r.send(ReportKind::Frame(f)).await;
+            }
+            let why = format!("broadcast port {port} closed (another client may hold it): beacons are not heard");
+            r.send(ReportKind::BroadcastDown(why)).await;
+        }));
+        Some(bp)
     }
 }
 
@@ -229,8 +288,9 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
         Ok(c) => c,
         Err(e) => return r.fault(format!("callsign: {e}")).await,
     };
+    let mut forwarders = Forwarders::default();
     match profile.modem.clone() {
-        ModemTarget::Existing { host, control_port, data_port, .. } => {
+        ModemTarget::Existing { host, control_port, data_port, broadcast_port, .. } => {
             let _lock = match &opts.locks_dir {
                 Some(dir) => match crate::lock::lock_endpoint(dir, &host, control_port) {
                     Ok(l) => Some(l),
@@ -246,6 +306,7 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 Ok(s) => s,
                 Err(e) => return r.fault(format!("station data: {e}")).await,
             };
+            forwarders.observe(&mut station, &r);
             // Mercury may still see the predecessor's sockets for a moment
             // after they close: after a hand-over, "occupied" is retried briefly.
             let patience = if handed_over { HANDOVER_ATTACH } else { Duration::ZERO };
@@ -263,16 +324,24 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 }
             };
             tokio::select! {
-                res = attach => match res {
-                    Ok(()) => r.state(ModemState::Ready, unarmed).await,
-                    Err(e) => return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await,
+                res = attach => if let Err(e) = res {
+                    return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await;
                 },
                 _ = stopped(&mut cmds) => return,
             }
+            // Held for the task's life; the beacon gate sends through it.
+            let _broadcast = match broadcast_port {
+                Some(port) => tokio::select! {
+                    b = forwarders.broadcast(&host, port, &r) => b,
+                    _ = stopped(&mut cmds) => return,
+                },
+                None => None,
+            };
+            r.state(ModemState::Ready, unarmed).await;
             let mut station = station;
             serve(&mut station, cmds, &r, profile.listen_preferred).await;
         }
-        ModemTarget::Simulator => simulator(&station_dir, call, unarmed, cmds, r).await,
+        ModemTarget::Simulator => simulator(&station_dir, call, unarmed, cmds, r, &mut forwarders).await,
     }
 }
 
@@ -283,6 +352,7 @@ async fn simulator(
     unarmed: Option<String>,
     mut cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
+    forwarders: &mut Forwarders,
 ) {
     r.state(ModemState::Attaching, None).await;
     let peer_dir = station_dir.join("sim-peer");
@@ -313,6 +383,7 @@ async fn simulator(
     };
     r.state(ModemState::Ready, Some(detail)).await;
     let mut sim = sim;
+    forwarders.observe(&mut sim.station, &r);
     serve(&mut sim.station, cmds, &r, listen_preferred).await;
 }
 
@@ -323,6 +394,7 @@ async fn simulator(
     _unarmed: Option<String>,
     _cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
+    _forwarders: &mut Forwarders,
 ) {
     r.fault("the simulator is not part of this build".into()).await;
 }

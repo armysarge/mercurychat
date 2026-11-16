@@ -17,12 +17,12 @@ async fn snapshot(h: &mc_core::app::AppHandle) -> mc_core::app::AppSnapshot {
     }
 }
 
-/// The next event that is not a modem state change (selection drives the
-/// modem, whose events are covered in tests/sim.rs).
+/// The next event that is not a modem state change or its activity line
+/// (selection drives the modem, whose events are covered in tests/sim.rs).
 async fn next_app_event(rx: &mut tokio::sync::broadcast::Receiver<mc_core::app::EventEnvelope>) -> AppEvent {
     loop {
         let ev = rx.recv().await.unwrap().event;
-        if !matches!(ev, AppEvent::ModemState { .. }) {
+        if !matches!(ev, AppEvent::ModemState { .. } | AppEvent::Activity { .. }) {
             return ev;
         }
     }

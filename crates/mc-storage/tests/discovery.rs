@@ -122,10 +122,13 @@ fn favourite_survives_heard_purge() {
     assert!(s.heard_summary().unwrap()[0].favourite);
     s.purge_heard_before("2026-02-01T00:00:00.000Z").unwrap();
     assert!(s.heard_summary().unwrap().is_empty());
+    // Still a favourite with nothing heard: listed through `favourites`.
+    assert_eq!(s.favourites().unwrap(), ["ZS6ABC"]);
     s.record_heard(&heard("ZS6ABC", "2026-03-01T00:00:00.000Z", "cq")).unwrap();
     assert!(s.heard_summary().unwrap()[0].favourite);
     s.set_favourite("ZS6ABC", false).unwrap();
     assert!(!s.heard_summary().unwrap()[0].favourite);
+    assert!(s.favourites().unwrap().is_empty());
 }
 
 #[test]

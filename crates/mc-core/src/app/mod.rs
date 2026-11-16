@@ -3,12 +3,14 @@
 
 mod chat;
 mod contract;
+mod discovery;
 mod events;
 mod modem;
 mod service;
 
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
+pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
 pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind};
 pub use service::{spawn_app, AppHandle, AppOptions};
@@ -22,5 +24,8 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     CommandOk::export_all(&cfg)?;
     AppError::export_all(&cfg)?;
     EventEnvelope::export_all(&cfg)?;
+    HeardStation::export_all(&cfg)?;
+    ActivityEntry::export_all(&cfg)?;
+    DiscoveryStats::export_all(&cfg)?;
     Since::export_all(&cfg)
 }
