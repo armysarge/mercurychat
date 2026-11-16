@@ -7,7 +7,9 @@
 //     (placeholder, title, aria-label, alt) or string literal in an
 //     interpolation, outside t(). <script> and <style> are not scanned.
 //  4. Every errors.* key the Rust contract can emit exists in en.json.
-//  5. The keys Operate.vue uses resolve to French strings that differ from
+//  5. Plural rules follow CLDR per locale (0 is singular in fr and pt-BR), and every
+//     key used anywhere in src/ (t(), keypath, key-shaped literals, dynamic prefixes) is in en.json.
+//  6. The keys Operate.vue uses resolve to French strings that differ from
 //     English (the language switch visibly changes the Operate labels), and
 //     the system-language mapping behaves.
 //
@@ -16,7 +18,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
-import { LOCALES, resolveLocale } from "../src/i18n/locale.ts";
+import * as localeMod from "../src/i18n/locale.ts";
+const { LOCALES, resolveLocale } = localeMod;
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const src = join(root, "src");
@@ -175,6 +178,86 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
   const keys = [...new Set([...rs.matchAll(/"(errors\.[A-Za-z0-9.]+)"/g)].map((m) => m[1]))];
   if (keys.length === 0) bad("contract.rs: no errors.* keys found");
   for (const k of keys) if (!(k in flat.en)) bad(`en.json: missing ${k}, which contract.rs emits`);
+}
+
+// ------------------------------------------------------------ plural rules
+
+{
+  const rules = localeMod.pluralRules;
+  const index = readFileSync(join(src, "i18n", "index.ts"), "utf8");
+  if (!rules) bad("locale.ts: no pluralRules (vue-i18n's default picks the plural at 0, wrong for fr and pt-BR)");
+  else if (!/createI18n\(\{[\s\S]*\bpluralRules\b[\s\S]*\}\)/.test(index)) bad("i18n/index.ts: createI18n does not set pluralRules");
+  else {
+    const { createI18n } = await import("vue-i18n");
+    // "one | other" messages: what each locale shows for 0, 1 and 2 (CLDR).
+    const want = { en: ["0 messages", "1 message", "2 messages"], es: ["0 mensajes", "1 mensaje", "2 mensajes"], fr: ["0 message", "1 message", "2 messages"], "pt-BR": ["0 mensagem", "1 mensagem", "2 mensagens"] };
+    for (const l of LOCALES) {
+      // The same options index.ts passes, with the real messages.
+      const i18n = createI18n({ legacy: false, locale: l, fallbackLocale: "en", pluralRules: rules, messages: { [l]: files[l] } });
+      const got = [0, 1, 2].map((n) => i18n.global.t("conversations.messageCount", n));
+      if (JSON.stringify(got) !== JSON.stringify(want[l])) bad(`plural rule for ${l}: messageCount(0,1,2) = ${JSON.stringify(got)}, want ${JSON.stringify(want[l])}`);
+    }
+  }
+}
+
+// ------------------------------------------------- every key used exists
+
+{
+  /** Source files whose keys are checked: all .vue and .ts, except generated bindings. */
+  const walkAll = (dir) =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? (e.name === "bindings" ? [] : walkAll(join(dir, e.name))) : /\.(vue|ts)$/.test(e.name) ? [join(dir, e.name)] : [],
+    );
+  const namespaces = new Set(Object.keys(flat.en).map((k) => k.split(".")[0]));
+  /** Values the dynamic keys `${prefix}${x}` can take, from the app's own lists. */
+  const dynamic = {
+    "modem.": () => [...readFileSync(join(src, "bindings", "ModemState.ts"), "utf8").matchAll(/"type": "(\w+)"/g)].map((m) => m[1]),
+    "transcript.status.": () => {
+      const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
+      const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";
+      const fromTable = [...block.matchAll(/^\s*(\w+):/gm)].map((m) => m[1]);
+      return [...new Set(["queued", "submitting", "awaiting_receipt", "delivered", "failed", "uncertain", "received", ...fromTable])];
+    },
+  };
+
+  /** Problems in one source text: literal keys missing from en.json, unknown dynamic prefixes. */
+  function keyProblems(name, text) {
+    const out = [];
+    const need = (key, how) => {
+      if (!(key in flat.en)) out.push(`${name}: ${how} ${key} is not in en.json`);
+    };
+    for (const m of text.matchAll(/(?<![\w.$])\$?te?\(\s*(['"`])([\w.]+)\1/g)) need(m[2], "t()");
+    for (const m of text.matchAll(/\bkeypath\s*=\s*"([\w.]+)"/g)) need(m[1], "keypath");
+    // A string literal shaped like a key of a known area is a key (label: "nav.operate").
+    // (Not an attribute value such as :role="banner.role", which is code.)
+    for (const m of text.matchAll(/(?<!=)(['"])([a-z]\w*(?:\.\w+)+)\1/g)) if (namespaces.has(m[2].split(".")[0])) need(m[2], "key literal");
+    for (const m of text.matchAll(/`([\w.]+\.)\$\{[^}]*\}`/g)) {
+      const values = dynamic[m[1]];
+      if (!values) out.push(`${name}: dynamic key \`${m[1]}\${...}\` has no list of values in check-i18n.mjs`);
+      else for (const v of values()) need(m[1] + v, "dynamic key");
+    }
+    return out;
+  }
+
+  const before = problems.length;
+  // Self-test: a crafted source with each kind of mistake must be caught, and a good one must not.
+  const crafted = [
+    `t('heard.emtpy')`,
+    `<i18n-t keypath="nav.nope">`,
+    `{ label: "nav.operat" }`,
+    "t(`mystery.${x}`)",
+    `const k = "modem.nonexistent"`,
+  ].join("\n");
+  const caught = keyProblems("selftest", crafted);
+  if (caught.length !== 5) bad(`key scanner self-test: expected 5 findings, got ${caught.length}: ${caught.join(" | ")}`);
+  const good = keyProblems("selftest", `t("nav.operate") te('errors.busy') {label: "nav.settings"} t(\`modem.\${s}\`) "./i18n" "a.b.c" 'x.y'`);
+  if (good.length) bad(`key scanner self-test: false positives: ${good.join(" | ")}`);
+  problems.length = before;
+
+  for (const f of walkAll(src)) {
+    if (f.endsWith("locale.ts")) continue;
+    for (const p of keyProblems(relative(root, f).replaceAll("\\", "/"), readFileSync(f, "utf8"))) bad(p);
+  }
 }
 
 // ------------------------------------------------- Operate.vue in French

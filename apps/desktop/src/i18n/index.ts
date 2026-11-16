@@ -7,12 +7,13 @@ import en from "./locales/en.json";
 import es from "./locales/es.json";
 import fr from "./locales/fr.json";
 import ptBR from "./locales/pt-BR.json";
-import { FALLBACK_LOCALE, resolveLocale, type Locale } from "./locale";
+import { FALLBACK_LOCALE, pluralRules, resolveLocale, type Locale } from "./locale";
 
 export const i18n = createI18n({
   legacy: false,
   locale: FALLBACK_LOCALE,
   fallbackLocale: FALLBACK_LOCALE,
+  pluralRules,
   messages: { en, es, "pt-BR": ptBR, fr },
 });
 
