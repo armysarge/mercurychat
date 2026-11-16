@@ -12,6 +12,8 @@ fn main() {
         "report_ipc",
         "ping",
         "modem_probe",
+        "splash_status",
+        "quit_app",
     ]);
     tauri_build::try_build(tauri_build::Attributes::new().app_manifest(manifest)).expect("tauri-build failed");
 }

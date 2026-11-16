@@ -10,17 +10,7 @@
     "beforeBuildCommand": "npm --prefix apps/desktop run build"
   },
   "app": {
-    "windows": [
-      {
-        "title": "MercuryChat",
-        "width": 1180,
-        "height": 760,
-        "minWidth": 800,
-        "minHeight": 480,
-        "decorations": false,
-        "shadow": false
-      }
-    ],
+    "windows": [],
     "security": {
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }

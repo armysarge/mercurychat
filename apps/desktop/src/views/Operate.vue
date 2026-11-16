@@ -1,12 +1,11 @@
 <script setup lang="ts">
-// The main workspace (docs/04 §2, M2 parts): conversations | conversation |
-// session. At 1100–1439 px the session pane is a drawer; at ≤1099 px the
-// conversations pane is one too. The peer, the mode and Disconnect / Abort
-// stay in the conversation header so they are always reachable (docs/04 §7).
+// The main workspace (docs/04 §2, M2 parts): the conversation and the session
+// pane (the conversation list is the app's sidebar, App.vue). At ≤1439 px the
+// session pane is a drawer. The peer, the mode and Disconnect / Abort stay in
+// the conversation header so they are always reachable (docs/04 §7).
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import Composer from "../components/Composer.vue";
-import ConversationList from "../components/ConversationList.vue";
 import SessionPanel from "../components/SessionPanel.vue";
 import Transcript from "../components/Transcript.vue";
 import {
@@ -14,7 +13,7 @@ import {
 } from "../store";
 
 const { t } = useI18n();
-const toggle = (d: "peers" | "session") => (app.drawer = app.drawer === d ? null : d);
+const toggleSession = () => (app.drawer = app.drawer === "session" ? null : "session");
 
 const STEPS = ["calling", "negotiating", "connected"] as const;
 const progress = computed(() =>
@@ -40,10 +39,6 @@ const subtitle = computed(() => {
 
 <template>
   <div class="operate">
-    <aside :class="['conv-pane', { open: app.drawer === 'peers' }]" :aria-label="t('operate.conversationsAria')">
-      <ConversationList @opened="app.drawer = null" />
-    </aside>
-
     <section class="chat-pane" :aria-label="t('operate.conversationAria')">
       <div class="peer-header">
         <div class="who">
@@ -51,12 +46,11 @@ const subtitle = computed(() => {
           <p class="muted small">{{ chat.open ? subtitle : t("operate.typeCallsign") }}</p>
         </div>
         <div class="actions row">
-          <button class="toggle-peers quiet" :aria-expanded="app.drawer === 'peers'" @click="toggle('peers')">{{ t("operate.peers") }}</button>
           <button v-if="modemState === 'calling'" class="quiet" @click="cancelCall">{{ t("operate.cancel") }}</button>
           <button v-else class="primary" :disabled="!canCall || !chat.open" @click="placeCall">{{ t("operate.call") }}</button>
           <button class="disconnect" :disabled="!inSession" @click="disconnect">{{ t("operate.disconnect") }}</button>
           <button class="abort danger" :disabled="!canAbort" @click="abort">{{ t("operate.abort") }}</button>
-          <button class="toggle-session quiet" :aria-expanded="app.drawer === 'session'" @click="toggle('session')">{{ t("operate.session") }}</button>
+          <button class="toggle-session quiet" :aria-expanded="app.drawer === 'session'" @click="toggleSession">{{ t("operate.session") }}</button>
         </div>
       </div>
       <ol v-if="progress" class="progress small" :aria-label="t('operate.progressAria')">
@@ -77,13 +71,12 @@ const subtitle = computed(() => {
     <aside :class="['session-pane', { open: app.drawer === 'session' }]" :aria-label="t('operate.sessionAria')">
       <SessionPanel />
     </aside>
-    <div v-if="app.drawer" class="scrim" @click="app.drawer = null"></div>
+    <div v-if="app.drawer === 'session'" class="scrim" @click="app.drawer = null"></div>
   </div>
 </template>
 
 <style scoped>
-.operate { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; height: 100%; min-height: 0; }
-.conv-pane { border-right: 1px solid var(--border); min-height: 0; background: var(--canvas); }
+.operate { display: grid; grid-template-columns: minmax(0, 1fr) 300px; height: 100%; min-height: 0; }
 .session-pane { border-left: 1px solid var(--border); min-height: 0; background: var(--canvas); }
 .chat-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: linear-gradient(180deg, var(--surface), var(--canvas) 45%); }
 .peer-header {
@@ -92,7 +85,7 @@ const subtitle = computed(() => {
 }
 .peer-header h1 { font-size: 20px; font-weight: 600; overflow-wrap: anywhere; }
 .actions { justify-content: flex-end; flex-wrap: wrap; }
-.toggle-peers, .toggle-session { display: none; }
+.toggle-session { display: none; }
 .progress { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space); margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
 .progress li { color: var(--text-2); }
 .progress li + li::before { content: "→ "; color: var(--text-2); }
@@ -104,7 +97,7 @@ const subtitle = computed(() => {
 .scrim { display: none; }
 
 @media (max-width: 1439px) {
-  .operate { grid-template-columns: 260px minmax(0, 1fr); }
+  .operate { grid-template-columns: minmax(0, 1fr); }
   .toggle-session { display: inline-block; }
   .session-pane {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 92vw); z-index: 30;
@@ -115,14 +108,6 @@ const subtitle = computed(() => {
   .scrim { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); z-index: 20; }
 }
 @media (max-width: 1099px) {
-  .operate { grid-template-columns: minmax(0, 1fr); }
-  .toggle-peers { display: inline-block; }
-  .conv-pane {
-    position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 92vw); z-index: 30;
-    transform: translateX(-100%); visibility: hidden; box-shadow: 8px 0 24px rgb(0 0 0 / 0.35);
-    transition: transform 120ms ease-out, visibility 120ms;
-  }
-  .conv-pane.open { transform: none; visibility: visible; }
   .peer-header { padding: var(--space) calc(var(--space) * 1.5); }
   .peer-header h1 { font-size: 17px; }
 }

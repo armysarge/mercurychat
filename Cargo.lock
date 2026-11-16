@@ -2151,6 +2151,7 @@ dependencies = [
  "mch-protocol",
  "mercury-adapter",
  "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
  "tempfile",

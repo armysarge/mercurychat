@@ -39,7 +39,9 @@
     "aborting": "Interrumpiendo",
     "finishing": "Terminando el envío pendiente",
     "recovering": "Recuperando",
-    "fault": "Fallo del módem"
+    "fault": "Fallo del módem",
+    "receiveOnlyTitle": "Solo recepción: esta estación escucha pero nunca responde llamadas transmitiendo. Desactívalo para responder llamadas.",
+    "answeringTitle": "Esta estación responde las llamadas entrantes automáticamente, lo que implica transmitir. Activa Solo recepción para escuchar nada más."
   },
   "where": {
     "simulator": "Simulador · sin radio",
@@ -55,7 +57,8 @@
     "callFailed": "La llamada falló: {reason}",
     "dismiss": "Descartar",
     "otherSession": "Sesión con {peer} ({direction}).",
-    "open": "Abrir"
+    "open": "Abrir",
+    "receiveOnlyFailed": "No se pudo cambiar Solo recepción: {reason}"
   },
   "direction": {
     "outgoing": "Llamamos nosotros",
@@ -137,7 +140,6 @@
   },
   "session": {
     "incomingCalls": "Llamadas entrantes",
-    "receiveOnly": "Solo recepción",
     "receiveOnlyNote": "Solo recepción: no se responde a las llamadas entrantes.",
     "answeredAuto": "Las llamadas entrantes se responden automáticamente",
     "notAnswering": "Ahora no se responden llamadas.",
@@ -166,7 +168,10 @@
   },
   "welcome": {
     "title": "Configura tu estación",
-    "intro": "Elige cómo se conecta MercuryChat a un módem. Más adelante puedes añadir más estaciones en Ajustes."
+    "intro": "Elige cómo se conecta MercuryChat a un módem. Más adelante puedes añadir más estaciones en Ajustes.",
+    "answersAuto": "Cuando el módem esté conectado, esta estación responde las llamadas entrantes automáticamente, y responder significa transmitir.",
+    "startReceiveOnly": "Empezar en Solo recepción",
+    "startReceiveOnlyNote": "Solo recepción escucha sin responder nunca. Puedes cambiarlo cuando quieras desde el encabezado."
   },
   "profile": {
     "simulatorTitle": "Simulador",
@@ -236,5 +241,26 @@
     "storage": "La base de datos local informó de un problema: {message}",
     "internal": "Algo falló dentro de la aplicación: {message}",
     "conflict": "Ahora no se puede hacer: {message}"
+  },
+  "splash": {
+    "opening": "Abriendo los datos de la estación…",
+    "modem": "Iniciando el módem…",
+    "close": "Cerrar",
+    "progressAria": "Iniciando MercuryChat"
+  },
+  "menu": {
+    "cut": "Cortar",
+    "copy": "Copiar",
+    "paste": "Pegar",
+    "selectAll": "Seleccionar todo",
+    "label": "Editar"
+  },
+  "sidebar": {
+    "label": "Chats y estaciones escuchadas",
+    "chats": "Chats",
+    "heard": "Escuchadas",
+    "heardEmpty": "Aún no se ha escuchado ninguna estación. Las que escuches en el aire aparecerán aquí.",
+    "toggle": "Chats",
+    "close": "Cerrar"
   }
 }

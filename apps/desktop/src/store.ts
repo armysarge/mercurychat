@@ -5,7 +5,7 @@ import { computed, reactive, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
-import { applyLanguage, t } from "./i18n";
+import { applyLanguage, rememberLanguage, t } from "./i18n";
 
 export const MAX_BYTES = 4096; // CHT-01
 export const PAGE = 50; // messages per history page
@@ -17,6 +17,8 @@ export const app = reactive({
   view: null as View | null,
   page: "operate" as ViewName,
   drawer: null as Drawer,
+  /** The sidebar tab: the conversation list or the heard stations. */
+  sideTab: "chats" as "chats" | "heard",
 });
 
 export const chat = reactive({
@@ -44,7 +46,10 @@ export const session = computed(() => snapshot.value?.session ?? null);
 watch(
   () => snapshot.value?.uiLanguage,
   (language) => {
-    if (language) applyLanguage(language);
+    if (language) {
+      applyLanguage(language);
+      rememberLanguage(language);
+    }
   },
   { immediate: true },
 );

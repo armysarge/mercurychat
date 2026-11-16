@@ -34,3 +34,23 @@ export function applyLanguage(setting: string): Locale {
   if (typeof document !== "undefined") document.documentElement.lang = locale;
   return locale;
 }
+
+const LANGUAGE_KEY = "mc.language";
+
+/** Remember the chosen language setting for the splash, which opens before the core can say. */
+export function rememberLanguage(setting: string) {
+  try {
+    localStorage.setItem(LANGUAGE_KEY, setting);
+  } catch {
+    // Storage may be unavailable: the splash then follows the system language.
+  }
+}
+
+/** The language setting last remembered, or `system`. */
+export function storedLanguage(): string {
+  try {
+    return localStorage.getItem(LANGUAGE_KEY) ?? "system";
+  } catch {
+    return "system";
+  }
+}

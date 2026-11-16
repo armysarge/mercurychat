@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "splash",
+  "description": "The start-up splash: it may only ask how far start-up has got and, after a failure, close the app.",
+  "windows": ["splash"],
+  "permissions": ["allow-splash-status", "allow-quit-app"]
+}

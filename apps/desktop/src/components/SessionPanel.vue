@@ -1,15 +1,12 @@
 <script setup lang="ts">
-import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-// The right pane: Receive only switch (D18; listening is the default), the session, the open peer's
-// queue, and the link. No telemetry exists yet, so none is shown: a missing
-// metric is never drawn as a value.
-import { activeProfile, chat, modemLabel, modemState, queuedBytes, session, setReceiveOnly, snapshot } from "../store";
+// The right pane: whether incoming calls are answered (the Receive only switch
+// is in the window header, D18), the session, the open peer's queue, and the
+// link. No telemetry exists yet, so none is shown: a missing metric is never
+// drawn as a value.
+import { activeProfile, chat, modemLabel, queuedBytes, session, snapshot } from "../store";
 
-// Receive only is a safety switch: it can change in any state with a station
-// (mid-session, calling, recovering); the modem acts on it at the earliest moment.
 const { t } = useI18n();
-const canSwitch = computed(() => modemState.value !== "unavailable");
 const since = (utc: string) => utc.slice(11, 16) + " UTC";
 function where() {
   const p = activeProfile.value;
@@ -22,16 +19,6 @@ function where() {
   <div class="panel">
     <section class="card stack" aria-labelledby="h-listen">
       <span id="h-listen" class="label">{{ t("session.incomingCalls") }}</span>
-      <label class="switch">
-        <input
-          class="listen"
-          type="checkbox"
-          :checked="snapshot?.receiveOnly ?? false"
-          :disabled="!canSwitch"
-          @change="setReceiveOnly(($event.target as HTMLInputElement).checked)"
-        />
-        {{ t("session.receiveOnly") }}
-      </label>
       <p v-if="snapshot?.receiveOnly" class="muted small">{{ t("session.receiveOnlyNote") }}</p>
       <p v-else-if="snapshot?.listening" class="ok small">{{ t("session.answeredAuto") }}</p>
       <p v-else class="muted small">{{ t("session.notAnswering") }}</p>
@@ -64,6 +51,5 @@ function where() {
 
 <style scoped>
 .panel { display: grid; gap: calc(var(--space) * 1.5); align-content: start; padding: calc(var(--space) * 2); overflow-y: auto; height: 100%; }
-.switch { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: 14px; }
 .stat { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 6px; font-size: 13px; }
 </style>

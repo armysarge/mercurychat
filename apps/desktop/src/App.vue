@@ -4,7 +4,7 @@
 // action is a typed command (api.ts); state comes back as events (store.ts).
 import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
-import { describeError } from "./api";
+import { call, describeError } from "./api";
 import { info, measureIpc } from "./diag";
 import { t } from "./i18n";
 import {
@@ -16,6 +16,8 @@ import Diagnostics from "./views/Diagnostics.vue";
 import Operate from "./views/Operate.vue";
 import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
+import ContextMenu from "./components/ContextMenu.vue";
+import Sidebar from "./components/Sidebar.vue";
 import WindowControls from "./components/WindowControls.vue";
 
 const startupError = ref("");
@@ -23,7 +25,7 @@ const now = ref(new Date());
 let clock: ReturnType<typeof setInterval> | undefined;
 
 const RAIL: { page: ViewName; label: string; icon: string }[] = [
-  { page: "operate", label: "nav.operate", icon: "M12 12.5V21m-4 0h8M8.5 6.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7M5 3a10 10 0 0 0 0 14m14 0a10 10 0 0 0 0-14M12 9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" },
+  { page: "operate", label: "nav.operate", icon: "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4" },
   { page: "conversations", label: "nav.conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
   { page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
   { page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
@@ -55,6 +57,25 @@ const banner = computed(() => {
       return null;
   }
 });
+/** The station's mode, as the core reports it (D18): never ahead of the core. */
+const receiveOnly = computed(() => snapshot.value?.receiveOnly ?? false);
+const showLinkMode = computed(() => !["ready", "listening"].includes(modemState.value));
+const rxError = ref("");
+
+/** Ask the core to switch; the switch itself only follows the snapshot, so a refused command leaves it as it was. */
+async function toggleReceiveOnly(e: Event) {
+  const box = e.target as HTMLInputElement;
+  const wanted = box.checked;
+  box.checked = receiveOnly.value;
+  rxError.value = "";
+  try {
+    await call({ type: "setReceiveOnly", on: wanted });
+  } catch (err) {
+    rxError.value = describeError(err);
+  } finally {
+    box.checked = receiveOnly.value;
+  }
+}
 const otherSession = computed(() => (session.value && session.value.peer !== chat.open ? session.value : null));
 
 function go(page: ViewName) {
@@ -118,11 +139,19 @@ onUnmounted(() => {
         <img class="mark" src="/mercurychat.svg" width="28" height="28" alt="" data-tauri-drag-region />
         <b>MercuryChat</b><span class="alpha small">{{ t("app.alpha") }}</span>
       </div>
+      <button v-if="!firstUse" class="toggle-sidebar quiet" :aria-expanded="app.drawer === 'peers'" @click="app.drawer = app.drawer === 'peers' ? null : 'peers'">{{ t("sidebar.toggle") }}</button>
       <div v-if="activeProfile" class="station" data-tauri-drag-region>
         <b class="mono">{{ activeProfile.callsign }}</b>
         <span class="muted small">{{ where }}</span>
       </div>
-      <span class="mode" role="status" aria-live="polite" data-tauri-drag-region>{{ modeWord }}</span>
+      <span v-if="activeProfile" class="station-mode" role="status" aria-live="polite">
+        <span :class="['mode-word', { rx: receiveOnly }]">{{ receiveOnly ? t("mode.receiveOnly") : t("mode.answering") }}</span>
+        <label class="switch" :title="receiveOnly ? t('mode.receiveOnlyTitle') : t('mode.answeringTitle')">
+          <input type="checkbox" role="switch" :checked="receiveOnly" :disabled="modemState === 'unavailable'" :aria-label="t('mode.receiveOnly')" @change="toggleReceiveOnly" />
+          <span class="track" aria-hidden="true"></span>
+        </label>
+      </span>
+      <span v-if="showLinkMode || !activeProfile" class="mode" role="status" aria-live="polite" data-tauri-drag-region>{{ modeWord }}</span>
       <span class="grow" data-tauri-drag-region></span>
       <span class="state" data-tauri-drag-region>
         <span :class="['pill', modemState]">{{ modemLabel }}</span>
@@ -132,6 +161,10 @@ onUnmounted(() => {
       <WindowControls />
     </header>
 
+    <p v-if="rxError" class="banner err" role="alert">
+      {{ t("banner.receiveOnlyFailed", { reason: rxError }) }}
+      <button class="quiet" @click="rxError = ''">{{ t("banner.dismiss") }}</button>
+    </p>
     <p v-if="banner" :class="['banner', banner.tone]" :role="banner.role">{{ banner.text }}</p>
     <p v-if="app.view?.callFailed" class="banner err" role="alert">
       {{ t("banner.callFailed", { reason: app.view.callFailed }) }}
@@ -145,19 +178,23 @@ onUnmounted(() => {
       <button class="quiet" @click="openPeer(otherSession.peer)">{{ t("banner.open") }}</button>
     </p>
 
-    <div class="body">
+    <div :class="['body', { solo: firstUse || !snapshot }]">
       <nav class="rail" :aria-label="t('nav.label')">
         <button
           v-for="r in RAIL"
           :key="r.page"
           :class="{ selected: app.page === r.page && !firstUse }"
           :aria-current="app.page === r.page ? 'page' : undefined"
+          :title="t(r.label)"
+          :aria-label="t(r.label)"
           @click="go(r.page)"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="r.icon" /></svg>
           {{ t(r.label) }}
         </button>
       </nav>
+      <Sidebar v-if="snapshot && !firstUse" :class="{ open: app.drawer === 'peers' }" />
+      <div v-if="app.drawer === 'peers'" class="scrim" @click="app.drawer = null"></div>
       <main class="view">
         <p v-if="!snapshot" class="muted loading">{{ t("app.loading") }}</p>
         <Welcome v-else-if="firstUse" />
@@ -168,6 +205,7 @@ onUnmounted(() => {
       </main>
     </div>
   </div>
+  <ContextMenu />
 </template>
 
 <style scoped>
@@ -188,6 +226,25 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .alpha { color: var(--warning); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
 .station { display: flex; flex-direction: column; line-height: 1.2; border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
 .mode { font-weight: 600; }
+.station-mode { display: inline-flex; align-items: center; gap: var(--space); }
+.mode-word { font-weight: 600; color: var(--success); }
+.mode-word.rx { color: var(--warning); }
+.switch { flex-direction: row; display: inline-flex; align-items: center; cursor: pointer; position: relative; }
+.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+.track {
+  width: 34px; height: 20px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border);
+  position: relative; transition: background 120ms;
+}
+.track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-2); transition: transform 120ms;
+}
+.switch input:checked + .track { background: color-mix(in srgb, var(--warning) 35%, var(--raised)); border-color: var(--warning); }
+.switch input:checked + .track::after { transform: translateX(14px); background: var(--warning); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:disabled + .track { opacity: 0.5; }
+.toggle-sidebar { display: none; }
+.scrim { display: none; }
 .state { display: flex; align-items: center; gap: var(--space); }
 .detail { max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner {
@@ -198,7 +255,8 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .banner.err { border-left: 3px solid var(--danger); }
 .banner.info { border-left: 3px solid var(--accent); }
 .banner button { padding: 2px 10px; }
-.body { flex: 1; display: grid; grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); min-height: 0; }
+.body { flex: 1; display: grid; grid-template-columns: minmax(84px, 112px) 260px minmax(0, 1fr); min-height: 0; }
+.body.solo { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
 .rail { display: flex; flex-direction: column; gap: 6px; padding: var(--space) 6px; border-right: 1px solid var(--border); background: var(--surface); }
 .rail button {
   display: grid; justify-items: center; gap: 2px; padding: 8px 2px; font-size: 11px;
@@ -217,8 +275,14 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   .detail, .station .muted { display: none; }
   header { gap: var(--space); }
 }
+/* Up to 960 px the sidebar is a drawer (Sidebar.vue): the grid loses its column. */
+@media (max-width: 960px) {
+  .body, .body.solo { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
+  .toggle-sidebar { display: inline-block; }
+  .scrim { display: block; position: fixed; inset: 0; background: rgb(0 0 0 / 0.35); z-index: 20; }
+}
 @media (max-width: 900px) {
-  .body { grid-template-columns: minmax(64px, 84px) minmax(0, 1fr); }
+  .body, .body.solo { grid-template-columns: minmax(64px, 84px) minmax(0, 1fr); }
   .rail button { font-size: 9px; }
   .alpha, .utc { display: none; }
 }

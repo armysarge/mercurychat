@@ -1,6 +1,5 @@
 <script setup lang="ts">
-// Conversations with search, plus a callsign entry to open a new one.
-// Heard stations (discovery) are not part of M2 and are not shown.
+// The sidebar's Chats tab: search, a callsign entry to open a new conversation, and the list.
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { activeProfile, chat, linkPeer, openPeer } from "../store";
@@ -28,10 +27,6 @@ function openEntry() {
 
 <template>
   <div class="conv">
-    <div class="row head">
-      <h2>{{ t("conversations.title") }}</h2>
-      <span class="pill">{{ chat.conversations.length }}</span>
-    </div>
     <form class="stack" @submit.prevent="openEntry">
       <label>
         {{ t("conversations.callsign") }}
@@ -73,7 +68,6 @@ function openEntry() {
 
 <style scoped>
 .conv { display: grid; gap: calc(var(--space) * 1.5); align-content: start; padding: calc(var(--space) * 2); overflow-y: auto; min-height: 0; height: 100%; }
-.head { justify-content: space-between; }
 .search { width: 100%; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .item { width: 100%; text-align: left; display: grid; gap: 4px; padding: 8px 10px; border-color: transparent; background: transparent; }

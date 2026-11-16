@@ -1,0 +1,273 @@
+// M3a Task 9c check of the real desktop window's shell, driven over the
+// WebView2 DevTools protocol (simulator only, no RF, no audio device):
+//   1. the splash (360x180, frameless, logo, status line, progress bar) is up
+//      alone before the main window; the main window then replaces it
+//   2. first use explains automatic answering and offers "Start in Receive only";
+//      the header shows "Answering calls" / "Receive only" with a toggle that
+//      follows the core, never ahead of it
+//   3. the Operate rail icon is the antenna, with an accessible name
+//   4. the composer has no resize handle, grows with its text up to about
+//      8 lines, scrolls beyond that, and shrinks back after Send
+//   5. one sidebar, the same on Operate, Conversations, Settings and
+//      Diagnostics: same element, width, search text and selection; Heard tab
+//      stays chosen; picking a chat from Settings opens it
+//   6. at 900 px the sidebar is a drawer
+//   7. a moved and resized window comes back the same after a restart
+//   8. no devtools: F12, Ctrl+Shift+I, Ctrl+R and F5 are inert, the context
+//      menu offers only cut/copy/paste/select-all on fields and selected text,
+//      and the tauri `devtools` feature is not in the dependency tree
+// Usage: node lab/windows/m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
+import { execFileSync } from "node:child_process";
+import { existsSync, rmSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { connect, kill, launch, page, pages, sleep, until } from "./cdp.mjs";
+import { click, pill, setInput } from "./m2-dom.mjs";
+
+const [exe, dataDir, port = "9335"] = process.argv.slice(2);
+if (!exe || !dataDir) {
+  console.error("usage: node m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]");
+  process.exit(2);
+}
+const here = dirname(fileURLToPath(import.meta.url));
+const repo = join(here, "..", "..");
+const CALL = "ZS6SIM";
+const ANTENNA = "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4";
+
+/** Top-level windows of a process: [{x, y, w, h, title}], optionally after moving the largest. */
+function windows(pid, to) {
+  const args = ["-NoProfile", "-File", join(here, "winrect.ps1"), String(pid), ...(to ? to.map(String) : [])];
+  const out = execFileSync("powershell", args, { encoding: "utf8" });
+  return out
+    .split(/\r?\n/)
+    .filter(Boolean)
+    .map((l) => {
+      const [x, y, w, h, ...title] = l.split(" ");
+      return { x: +x, y: +y, w: +w, h: +h, title: title.join(" ") };
+    });
+}
+const isSplash = (t) => t.url?.includes("splash.html");
+
+/** The workspace is up: a station, the modem attached, composer on screen. */
+const ready = `(['ready','listening'].includes(${pill})) && document.querySelector('textarea.composer')`;
+const rail = (name) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(name)})`;
+const rectOf = (sel) => `(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(','); })()`;
+const onScreen = (sel) => `(() => {
+  const e = document.querySelector(${JSON.stringify(sel)}); if (!e) return false;
+  const r = e.getBoundingClientRect(), v = getComputedStyle(e).visibility;
+  return v !== 'hidden' && r.width > 0 && r.right > 0 && r.left < innerWidth;
+})()`;
+/** Fire a cancelable keydown on the document and say whether the window let it be cancelled. */
+const keyInert = (init) => `(() => { const e = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...${JSON.stringify(init)} }); document.dispatchEvent(e); return e.defaultPrevented; })()`;
+const rightClick = (sel) => `(() => {
+  const el = document.querySelector(${JSON.stringify(sel)});
+  const e = new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 40, clientY: 40 });
+  el.dispatchEvent(e);
+  return e.defaultPrevented;
+})()`;
+const menuItems = "[...document.querySelectorAll('.ctx-menu [role=menuitem]')].map(b => b.textContent.trim())";
+
+const results = [];
+const children = [];
+let s;
+try {
+  // ---- 1. splash before the main window
+  if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true });
+  process.env.MC_SPLASH_MIN_MS = "6000";
+  let first = launch(exe, dataDir, port);
+  delete process.env.MC_SPLASH_MIN_MS;
+  children.push(first);
+  let splash = null;
+  const seen = Date.now();
+  while (!splash && Date.now() - seen < 20000) {
+    splash = (await pages(port)).find(isSplash) ?? null;
+    if (!splash) await sleep(25);
+  }
+  if (!splash) throw new Error("no splash page appeared");
+  const sc = await connect(splash.webSocketDebuggerUrl);
+  await until(sc, "!!document.querySelector('.status')?.textContent.trim()", "the splash status line", 3000);
+  // Geometry and visibility are read from inside the page (starting PowerShell is slower than the splash's minimum stay).
+  const dom = await sc.eval(`({
+    w: outerWidth, h: outerHeight, shown: document.visibilityState, dpr: devicePixelRatio,
+    cx: screenX + outerWidth / 2 - (screen.availLeft ?? 0), cy: screenY + outerHeight / 2 - (screen.availTop ?? 0), aw: screen.availWidth, ah: screen.availHeight,
+    logo: !!document.querySelector('img[src$="mercurychat.svg"]'),
+    status: document.querySelector('.status')?.textContent.trim() ?? '',
+    bar: document.querySelector('[role=progressbar]') ? getComputedStyle(document.querySelector('.bar i')).animationName : 'none',
+  })`);
+  if (!dom.logo || !dom.status || dom.bar === "none") throw new Error(`splash content: ${JSON.stringify(dom)}`);
+  if (Math.abs(dom.w - 360) > 2 || Math.abs(dom.h - 180) > 2) throw new Error(`splash is ${dom.w}x${dom.h} CSS px, not 360x180`);
+  if (dom.shown !== "visible") throw new Error("the splash is not visible");
+  if (Math.abs(dom.cx - dom.aw / 2) > 12 || Math.abs(dom.cy - dom.ah / 2) > 12) throw new Error(`splash is not centred: ${JSON.stringify(dom)}`);
+  // A lab-only hold (MC_SPLASH_MIN_MS) keeps the splash up long enough to list the native windows.
+  const during = windows(first.pid);
+  if (during.length !== 1 || Math.abs(during[0].w / dom.dpr - 360) > 24) throw new Error(`windows while the splash is up: ${JSON.stringify(during)}`);
+  const quiet = await sc.eval("(() => { const m = matchMedia('(prefers-reduced-motion: reduce)'); return !!document.querySelector('style, link[rel=stylesheet]') && typeof m.matches === 'boolean'; })()");
+  sc.close();
+  s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
+  const after = await pages(port);
+  await until(s, "true", "settle");
+  let tries = 0;
+  while ((await pages(port)).some(isSplash) && tries++ < 150) await sleep(100);
+  if ((await pages(port)).some(isSplash)) throw new Error("the splash is still open after the main window loaded");
+  const main = windows(first.pid);
+  if (main.length !== 1 || main[0].w < 960 * 0.9) throw new Error(`main window after hand-over: ${JSON.stringify(main)}`);
+  results.push(`PASS splash: ${dom.w}x${dom.h} CSS px, centred, frameless, the only visible window of the app while it was up ("${dom.status}", logo, bar animated, reduced-motion rule ${quiet ? "present" : "missing"}), gone once the UI loaded (${after.length} pages seen)`);
+
+  // ---- 2. first use and the header mode
+  const welcome = await s.eval("document.querySelector('.welcome').innerText");
+  if (!/answers? (incoming )?calls automatically/i.test(welcome) || !welcome.includes("Start in Receive only")) throw new Error(`first-use text: ${welcome}`);
+  if (await s.eval("document.querySelector('.welcome input[name=startReceiveOnly]').checked")) throw new Error("Start in Receive only is on by default");
+  await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
+  await s.eval(click("Use simulator"));
+  await until(s, ready, "the workspace");
+  await until(s, "document.querySelector('.station-mode')?.innerText.includes('Answering calls')", "header says Answering calls");
+  const sw = "document.querySelector('.station-mode input')";
+  if (await s.eval(`${sw}.checked`)) throw new Error("the toggle is on while answering calls");
+  await s.eval(`${sw}.click()`);
+  await until(s, `document.querySelector('.station-mode').innerText.includes('Receive only') && ${sw}.checked`, "header says Receive only");
+  await s.eval(`${sw}.click()`);
+  await until(s, `document.querySelector('.station-mode').innerText.includes('Answering calls') && !${sw}.checked`, "back to Answering calls");
+  if (await s.eval("document.querySelector('input.listen')")) throw new Error("the old Listen switch is still in the window");
+  results.push('PASS receive only: first use explains automatic answering and offers "Start in Receive only"; header toggles Answering calls <-> Receive only from the core\'s state; no old Listen switch');
+
+  // ---- 3. the antenna icon
+  const d = await s.eval(`${rail("Operate")}.querySelector('path').getAttribute('d')`);
+  if (d !== ANTENNA) throw new Error(`Operate icon path is ${d}`);
+  if ((await s.eval(`${rail("Operate")}.title`)) !== "Operate") throw new Error("Operate has no tooltip");
+  results.push("PASS icon: Operate rail icon is the antenna path, tooltip and aria-label \"Operate\"");
+
+  // ---- 4. composer
+  await s.eval(setInput("input.peer", "sim1"));
+  await until(s, "document.querySelector('.peer-header h1')?.textContent.trim() === 'SIM1'", "SIM1 open");
+  await until(s, "!document.querySelector('textarea.composer').disabled", "composer enabled");
+  const grow = await s.eval(`(async () => {
+    const t = document.querySelector('textarea.composer'), cs = getComputedStyle(t);
+    const settle = (ms) => new Promise((r) => setTimeout(r, ms));
+    // The box fits itself after Vue has seen the input: measure once it has settled.
+    const height = async (n) => { t.value = Array.from({ length: n }, (_, i) => 'line ' + i).join('\\n'); t.dispatchEvent(new Event('input')); await settle(80); return t.offsetHeight; };
+    const line = parseFloat(cs.lineHeight) || parseFloat(cs.fontSize) * 1.2;
+    const one = await height(1), five = await height(5), thirty = await height(30);
+    return { resize: cs.resize, line, one, five, thirty, scrolls: t.scrollHeight > t.clientHeight, overflowY: getComputedStyle(t).overflowY };
+  })()`);
+  if (grow.resize !== "none") throw new Error(`composer resize is ${grow.resize}`);
+  if (!(grow.five > grow.one + grow.line * 3)) throw new Error(`composer did not grow: ${JSON.stringify(grow)}`);
+  if (!(grow.thirty > grow.five) || grow.thirty > grow.line * 8 + 40 || !grow.scrolls) throw new Error(`composer cap: ${JSON.stringify(grow)}`);
+  await s.eval("(() => { const t = document.querySelector('textarea.composer'); t.value = 'hello'; t.dispatchEvent(new Event('input')); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })); })()");
+  await until(s, "document.querySelector('textarea.composer').value === ''", "the composer cleared by Send");
+  await sleep(150);
+  const back = await s.eval("document.querySelector('textarea.composer').offsetHeight");
+  if (Math.abs(back - grow.one) > 2) throw new Error(`composer did not shrink after Send: ${back} vs ${grow.one}`);
+  results.push(`PASS composer: resize none; ${grow.one}px (1 line) -> ${grow.five}px (5) -> ${grow.thirty}px (30, capped near 8 lines, scrolls) -> ${back}px after Send`);
+
+  // ---- 5. one sidebar everywhere
+  await until(s, "document.querySelector('.item.active')", "the sent message made SIM1 a listed conversation");
+  await s.eval("document.querySelector('aside.sidebar').__m3 = 'same instance'");
+  await s.eval(setInput("input.search", "SIM"));
+  const sideRect = await s.eval(rectOf("aside.sidebar"));
+  const picked = await s.eval("document.querySelector('.item.active b').textContent");
+  const pageNames = [["Conversations", ".history"], ["Settings", ".profiles, .card"], ["Diagnostics", ".diag"], ["Operate", ".chat-pane"]];
+  for (const [name, marker] of pageNames) {
+    await s.eval(`${rail(name)}.click()`);
+    await until(s, `document.querySelector(${JSON.stringify(marker)})`, `${name} page`);
+    const state = await s.eval(`({
+      same: document.querySelector('aside.sidebar')?.__m3, rect: ${rectOf("aside.sidebar")},
+      search: document.querySelector('input.search').value, active: document.querySelector('.item.active b')?.textContent,
+      tabs: [...document.querySelectorAll('aside.sidebar [role=tab]')].map(b => b.textContent.trim()).join('|') })`);
+    if (state.same !== "same instance") throw new Error(`${name}: the sidebar was rebuilt`);
+    if (state.rect !== sideRect) throw new Error(`${name}: sidebar rect ${state.rect} != ${sideRect}`);
+    if (state.search !== "SIM" || state.active !== picked) throw new Error(`${name}: search/selection lost: ${JSON.stringify(state)}`);
+    if (state.tabs !== "Chats|Heard") throw new Error(`${name}: tabs ${state.tabs}`);
+  }
+  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, "document.querySelector('.profiles, .card')", "Settings");
+  if (!(await s.eval("document.querySelector('aside.sidebar [role=tab][aria-selected=true]').textContent.trim() === 'Heard'"))) throw new Error("the Heard tab was not kept");
+  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Chats').click()");
+  await s.eval(`${rail("Settings")}.click()`);
+  await s.eval("document.querySelector('.item').click()");
+  await until(s, "document.querySelector('.chat-pane')", "a chat picked on Settings opens it");
+  results.push(`PASS sidebar: one instance, rect ${sideRect}, search text and selection ${picked} kept across Operate, Conversations, Settings and Diagnostics; Heard tab kept; a chat picked on Settings opens it`);
+
+  // ---- 6. narrow: a drawer
+  await s.send("Emulation.setDeviceMetricsOverride", { width: 900, height: 700, deviceScaleFactor: 1, mobile: false });
+  await sleep(300);
+  if (await s.eval(onScreen("aside.sidebar"))) throw new Error("the sidebar is still docked at 900 px");
+  await s.eval("document.querySelector('button.toggle-sidebar').click()");
+  await until(s, onScreen("aside.sidebar"), "the sidebar drawer open");
+  await s.eval("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  await until(s, `!(${onScreen("aside.sidebar")})`, "the drawer closed by Escape");
+  await s.send("Emulation.clearDeviceMetricsOverride");
+  results.push("PASS narrow: at 900 px the sidebar is a drawer opened from the header and closed by Escape");
+
+  // ---- 8 (first half). inert keys and the context menu
+  for (const init of [{ key: "F12" }, { key: "I", ctrlKey: true, shiftKey: true }, { key: "r", ctrlKey: true }, { key: "F5" }]) {
+    if (!(await s.eval(keyInert(init)))) throw new Error(`${JSON.stringify(init)} is not cancelled`);
+  }
+  const plain = await s.eval(rightClick(".chat-pane h1"));
+  await sleep(100);
+  if (!plain || (await s.eval(`${menuItems}.length`)) !== 0) throw new Error("a menu opened on plain page content");
+  await s.eval("document.querySelector('textarea.composer').value = 'abc'");
+  if (!(await s.eval(rightClick("textarea.composer")))) throw new Error("the default menu was not suppressed on the composer");
+  await sleep(100);
+  const items = await s.eval(menuItems);
+  if (items.join("|") !== "Cut|Copy|Paste|Select all" && items.join("|") !== "Paste|Select all") throw new Error(`composer menu: ${items}`);
+  await s.eval("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  const tree = execFileSync("cargo", ["tree", "-p", "mercurychat", "-e", "features", "-i", "tauri", "--target", "all"], { cwd: repo, encoding: "utf8" });
+  if (/devtools/.test(tree)) throw new Error("the tauri devtools feature is enabled in the dependency tree");
+  const cargoToml = execFileSync("cargo", ["metadata", "--no-deps", "--format-version", "1"], { cwd: repo, encoding: "utf8", maxBuffer: 1 << 26 });
+  const feats = JSON.parse(cargoToml).packages.find((p) => p.name === "mercurychat").features;
+  if (Object.keys(feats).some((f) => f !== "devtools" && /devtools/.test(f)) || (feats.devtools && !feats.devtools.every((x) => x === "tauri/devtools"))) throw new Error(`odd features ${JSON.stringify(feats)}`);
+  results.push(`PASS no devtools: F12, Ctrl+Shift+I, Ctrl+R, F5 cancelled; context menu only ${JSON.stringify(items)} on a field, none on page text; tauri has no devtools feature (cargo tree), the only opt-in is the dev feature "devtools" (not default)`);
+
+  // ---- 7. position and size survive a restart
+  s.close();
+  const want = [140, 90, 1111, 777];
+  windows(first.pid, want);
+  await sleep(1500); // the save is debounced about 500 ms
+  const placed = windows(first.pid).find((w) => w.w > 500);
+  if (!placed || Math.abs(placed.x - want[0]) > 2 || Math.abs(placed.w - want[2]) > 2) throw new Error(`could not place the window: ${JSON.stringify(placed)}`);
+  kill(first);
+  await sleep(1500);
+  first = launch(exe, dataDir, port);
+  children.push(first);
+  s = await page(port, (t) => !!t.trim() && !/Opening|Starting/.test(t), "the main window after restart");
+  await until(s, ready, "the workspace after restart");
+  await sleep(500);
+  const back2 = windows(first.pid).find((w) => w.w > 500);
+  const diff = ["x", "y", "w", "h"].map((k, i) => Math.abs(back2[k] - want[i]));
+  if (Math.max(...diff) > 2) throw new Error(`window came back at ${JSON.stringify(back2)}, wanted ${want}`);
+  results.push(`PASS window: moved and resized to ${want.join(",")}, back at ${back2.x},${back2.y},${back2.w},${back2.h} after restart`);
+
+  // ---- 9. a start-up failure stays on the splash, with its message and a Close button
+  // The first still holds this data folder. Same DevTools port: WebView2 shares one browser process
+  // between instances with identical options, so this page list holds both instances' pages.
+  const second = launch(exe, dataDir, port);
+  children.push(second);
+  let failed = null;
+  const until9 = Date.now() + 20000;
+  while (!failed && Date.now() < until9) {
+    for (const t of (await pages(port)).filter(isSplash)) {
+      const c = await connect(t.webSocketDebuggerUrl);
+      const text = await c.eval("document.querySelector('.failure')?.innerText ?? ''");
+      if (text) failed = c;
+      else c.close();
+    }
+    if (!failed) await sleep(200);
+  }
+  if (!failed) throw new Error("the failed start did not show its message on the splash");
+  const failure = await failed.eval("document.querySelector('.failure').innerText");
+  if (!/cannot start/i.test(failure) || !failure.trim().split("\n").slice(1).join("").trim()) throw new Error(`failure text: ${failure}`);
+  await failed.eval(click("Close"));
+  await sleep(1500);
+  let alive = true;
+  try { process.kill(second.pid, 0); } catch { alive = false; }
+  if (alive) throw new Error("Close did not exit the failed instance");
+  results.push(`PASS start-up failure: the splash shows "${failure.replace(/\s+/g, " ").slice(0, 90)}…" with a Close button, no blank window, Close exits`);
+  s.close();
+} catch (e) {
+  results.push(`FAIL ${e.message}`);
+} finally {
+  for (const c of children) kill(c);
+}
+console.log(results.join("\n"));
+process.exit(results.some((r) => r.startsWith("FAIL")) ? 1 : 0);

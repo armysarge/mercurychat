@@ -24,7 +24,7 @@ export function kill(child) {
   } catch {}
 }
 
-async function pages(port) {
+export async function pages(port) {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/json/list`);
     return (await r.json()).filter((t) => t.type === "page");
@@ -33,7 +33,7 @@ async function pages(port) {
   }
 }
 
-function connect(wsUrl) {
+export function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
   let id = 0;
   const waiting = new Map();

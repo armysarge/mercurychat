@@ -39,7 +39,9 @@
     "aborting": "Interruption",
     "finishing": "Fin de l'envoi en attente",
     "recovering": "Reprise",
-    "fault": "Panne du modem"
+    "fault": "Panne du modem",
+    "receiveOnlyTitle": "Réception seule : cette station écoute mais ne répond jamais aux appels en émettant. Désactivez-la pour répondre aux appels.",
+    "answeringTitle": "Cette station répond automatiquement aux appels entrants, ce qui signifie émettre. Activez Réception seule pour simplement écouter."
   },
   "where": {
     "simulator": "Simulateur · sans radio",
@@ -55,7 +57,8 @@
     "callFailed": "Échec de l'appel : {reason}",
     "dismiss": "Fermer",
     "otherSession": "Session avec {peer} ({direction}).",
-    "open": "Ouvrir"
+    "open": "Ouvrir",
+    "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}"
   },
   "direction": {
     "outgoing": "Nous avons appelé",
@@ -137,7 +140,6 @@
   },
   "session": {
     "incomingCalls": "Appels entrants",
-    "receiveOnly": "Réception seule",
     "receiveOnlyNote": "Réception seule : les appels entrants ne sont pas pris.",
     "answeredAuto": "Appels entrants pris automatiquement",
     "notAnswering": "Les appels ne sont pas pris pour le moment.",
@@ -166,7 +168,10 @@
   },
   "welcome": {
     "title": "Configurez votre station",
-    "intro": "Choisissez comment MercuryChat se connecte à un modem. Vous pourrez ajouter d'autres stations plus tard dans Réglages."
+    "intro": "Choisissez comment MercuryChat se connecte à un modem. Vous pourrez ajouter d'autres stations plus tard dans Réglages.",
+    "answersAuto": "Une fois le modem connecté, cette station répond automatiquement aux appels entrants, et répondre signifie émettre.",
+    "startReceiveOnly": "Démarrer en Réception seule",
+    "startReceiveOnlyNote": "Réception seule écoute sans jamais répondre. Vous pouvez la changer à tout moment depuis l'en-tête."
   },
   "profile": {
     "simulatorTitle": "Simulateur",
@@ -236,5 +241,26 @@
     "storage": "La base de données locale a signalé un problème : {message}",
     "internal": "Un problème est survenu dans l'application : {message}",
     "conflict": "Impossible pour le moment : {message}"
+  },
+  "splash": {
+    "opening": "Ouverture des données de la station…",
+    "modem": "Démarrage du modem…",
+    "close": "Fermer",
+    "progressAria": "Démarrage de MercuryChat"
+  },
+  "menu": {
+    "cut": "Couper",
+    "copy": "Copier",
+    "paste": "Coller",
+    "selectAll": "Tout sélectionner",
+    "label": "Modifier"
+  },
+  "sidebar": {
+    "label": "Discussions et stations entendues",
+    "chats": "Discussions",
+    "heard": "Entendues",
+    "heardEmpty": "Aucune station entendue pour l'instant. Les stations entendues sur l'air apparaîtront ici.",
+    "toggle": "Discussions",
+    "close": "Fermer"
   }
 }

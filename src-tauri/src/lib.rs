@@ -5,6 +5,8 @@
 
 mod probe;
 mod startup;
+mod window_state;
+mod windows;
 
 use mc_core::app::{spawn_app, AppCommand, AppError, AppHandle as Core, AppOptions, CommandOk, EventEnvelope, Since};
 use serde::Serialize;
@@ -130,6 +132,8 @@ fn ui_ready(app: tauri::AppHandle) -> bool {
     let ms = since_start_ms();
     println!("MC_UI_READY_MS={ms}");
     let self_measure = std::env::var_os("MC_SELF_MEASURE").is_some();
+    // The first snapshot is in: the splash gives way to the main window.
+    windows::reveal_when_due(&app);
     if let Ok(v) = std::env::var("MC_EXIT_AFTER_READY_MS") {
         let delay = v.parse::<u64>().unwrap_or(0);
         std::thread::spawn(move || {
@@ -218,12 +222,8 @@ fn stopped_err() -> AppError {
 
 /// Start-up order (docs/02 §6): data-root lock, logging, log pruning, crash
 /// report, store (all in `startup::prepare`), then the service actor.
-fn start(app: &tauri::App) -> Result<Shell, Box<dyn std::error::Error>> {
-    // Lab mode (MOD-02): MC_DATA_DIR gives each instance its own data root.
-    let root = match std::env::var_os("MC_DATA_DIR") {
-        Some(d) => PathBuf::from(d),
-        None => app.path().app_data_dir()?,
-    };
+fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
+    let root = data_root(app)?;
     let p = match startup::prepare(&root) {
         Ok(p) => p,
         Err(e) => {
@@ -243,16 +243,48 @@ fn start(app: &tauri::App) -> Result<Shell, Box<dyn std::error::Error>> {
     };
     // spawn_app needs a runtime context; Tauri's runtime keeps the actor alive.
     let core = tauri::async_runtime::block_on(async move { spawn_app(store, opts) });
-    forward_events(app.handle().clone(), core.subscribe());
+    forward_events(app.clone(), core.subscribe());
     Ok(Shell::Running(Box::new(Running { core, data_root: root, db_path, locks_dir, schema, _log: log, _lock: lock })))
+}
+
+/// The data root. Lab mode (MOD-02): MC_DATA_DIR gives each instance its own.
+fn data_root(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(match std::env::var_os("MC_DATA_DIR") {
+        Some(d) => PathBuf::from(d),
+        None => app.path().app_data_dir()?,
+    })
+}
+
+/// Start the core on a thread of its own so the splash is painted meanwhile,
+/// then open the (hidden) main window; the UI's first snapshot reveals it.
+fn boot(app: tauri::AppHandle) {
+    windows::set_stage(&app, windows::Stage::Opening);
+    let shell = start(&app).unwrap_or_else(|e| Shell::Failed(e.to_string()));
+    let failure = match &shell {
+        Shell::Failed(m) => Some(m.clone()),
+        Shell::Running(_) => None,
+    };
+    app.manage(shell);
+    if let Some(message) = failure {
+        windows::set_stage(&app, windows::Stage::Failed { message });
+        return;
+    }
+    windows::set_stage(&app, windows::Stage::Modem);
+    let opened = data_root(&app)
+        .map_err(|e| e.to_string())
+        .and_then(|root| windows::create_main(&app, &root).map_err(|e| e.to_string()));
+    if let Err(message) = opened {
+        windows::set_stage(&app, windows::Stage::Failed { message });
+    }
 }
 
 pub fn run() {
     STARTED.get_or_init(Instant::now);
     tauri::Builder::default()
         .setup(|app| {
-            let shell = start(app)?;
-            app.manage(shell);
+            windows::open_splash(app.handle())?;
+            let handle = app.handle().clone();
+            std::thread::spawn(move || boot(handle));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -262,7 +294,9 @@ pub fn run() {
             ui_ready,
             report_ipc,
             ping,
-            modem_probe
+            modem_probe,
+            windows::splash_status,
+            windows::quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running MercuryChat");

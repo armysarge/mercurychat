@@ -11,6 +11,8 @@ import { snapshot } from "../store";
 
 const { t } = useI18n();
 const emit = defineEmits<{ done: [] }>();
+// A new station starts in Receive only when first-use setup says so (D18).
+const props = defineProps<{ receiveOnly?: boolean }>();
 
 const simCall = ref("");
 const ex = ref({ callsign: "", host: "127.0.0.1", controlPort: 8300, dataPort: 8301 });
@@ -43,7 +45,7 @@ function useSimulator() {
   const wanted = simCall.value.trim().toUpperCase();
   const existing = snapshot.value?.profiles.find((p) => p.modem.kind === "simulator" && p.callsign === wanted);
   const draft: StationProfile = existing ?? {
-    id: "", callsign: simCall.value, name: null, grid: null, modem: { kind: "simulator" }, lab: true, receiveOnly: false,
+    id: "", callsign: simCall.value, name: null, grid: null, modem: { kind: "simulator" }, lab: true, receiveOnly: props.receiveOnly ?? false,
   };
   return use(draft, "sim");
 }
@@ -74,7 +76,7 @@ function useExisting() {
       telemetryUrl: null,
     },
     lab: false,
-    receiveOnly: false,
+    receiveOnly: props.receiveOnly ?? false,
   };
   return use(draft, "ex");
 }

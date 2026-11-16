@@ -25,5 +25,12 @@ export default defineConfig({
     target: ["es2021", "safari15"],
     outDir: "dist",
     emptyOutDir: true,
+    // Two pages: the app and the start-up splash (a window of its own).
+    rollupOptions: {
+      input: {
+        main: fileURLToPath(new URL("./index.html", import.meta.url)),
+        splash: fileURLToPath(new URL("./splash.html", import.meta.url)),
+      },
+    },
   },
 });

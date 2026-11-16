@@ -38,7 +38,9 @@
     "aborting": "Aborting",
     "finishing": "Finishing queued traffic",
     "recovering": "Recovering",
-    "fault": "Modem fault"
+    "fault": "Modem fault",
+    "receiveOnlyTitle": "Receive only: this station listens but never answers calls by transmitting. Turn it off to answer calls.",
+    "answeringTitle": "This station answers incoming calls automatically, which means it transmits. Turn on Receive only to just listen."
   },
   "where": {
     "simulator": "Simulator · no radio",
@@ -54,7 +56,8 @@
     "callFailed": "Call failed: {reason}",
     "dismiss": "Dismiss",
     "otherSession": "Session with {peer} ({direction}).",
-    "open": "Open"
+    "open": "Open",
+    "receiveOnlyFailed": "Could not change Receive only: {reason}"
   },
   "direction": {
     "outgoing": "We called",
@@ -136,7 +139,6 @@
   },
   "session": {
     "incomingCalls": "Incoming calls",
-    "receiveOnly": "Receive only",
     "receiveOnlyNote": "Receive only: incoming calls are not answered.",
     "answeredAuto": "Incoming calls answered automatically",
     "notAnswering": "Not answering calls right now.",
@@ -165,7 +167,10 @@
   },
   "welcome": {
     "title": "Set up your station",
-    "intro": "Choose how MercuryChat reaches a modem. You can add more stations later in Settings."
+    "intro": "Choose how MercuryChat reaches a modem. You can add more stations later in Settings.",
+    "answersAuto": "Once the modem is attached, this station answers incoming calls automatically, and answering means transmitting.",
+    "startReceiveOnly": "Start in Receive only",
+    "startReceiveOnlyNote": "Receive only listens without ever answering. You can switch it any time from the header."
   },
   "profile": {
     "simulatorTitle": "Simulator",
@@ -235,5 +240,26 @@
     "storage": "The local database reported a problem: {message}",
     "internal": "Something went wrong inside the app: {message}",
     "conflict": "That cannot be done right now: {message}"
+  },
+  "splash": {
+    "opening": "Opening station data…",
+    "modem": "Starting the modem…",
+    "close": "Close",
+    "progressAria": "Starting MercuryChat"
+  },
+  "menu": {
+    "cut": "Cut",
+    "copy": "Copy",
+    "paste": "Paste",
+    "selectAll": "Select all",
+    "label": "Edit"
+  },
+  "sidebar": {
+    "label": "Chats and heard stations",
+    "chats": "Chats",
+    "heard": "Heard",
+    "heardEmpty": "No stations heard yet. Stations you hear on the air will appear here.",
+    "toggle": "Chats",
+    "close": "Close"
   }
 }
