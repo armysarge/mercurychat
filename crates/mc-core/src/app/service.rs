@@ -12,13 +12,16 @@ use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
+use super::telemetry::Telemetry;
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use crate::station::Observation;
 use mc_storage::{OutState, StorageError, Store};
 use mch_protocol::ObjectId;
+use mercury_adapter::telemetry::Spectrum;
 use mercury_adapter::Callsign;
 use std::path::PathBuf;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 const ACTIVE_PROFILE: &str = "activeProfileId";
 
@@ -62,6 +65,7 @@ enum Request {
 pub struct AppHandle {
     tx: mpsc::Sender<Request>,
     events: broadcast::Sender<EventEnvelope>,
+    spectrum: watch::Receiver<Option<Arc<Spectrum>>>,
 }
 
 fn stopped() -> AppError {
@@ -98,6 +102,13 @@ impl AppHandle {
         self.events.subscribe()
     }
 
+    /// The latest valid spectrum from Mercury's telemetry (OBS-02), or
+    /// `None` while there is none: no telemetry, or it was lost. Not on the
+    /// event stream: a viewer reads it at its own pace.
+    pub fn spectrum(&self) -> watch::Receiver<Option<Arc<Spectrum>>> {
+        self.spectrum.clone()
+    }
+
     fn send(&self, r: Request) -> Result<(), AppError> {
         self.tx.try_send(r).map_err(|e| match e {
             mpsc::error::TrySendError::Full(_) => AppError::Busy { message: "too many pending requests".into() },
@@ -126,6 +137,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             locks_dir: opts.locks_dir,
             radio_hello_timeout: opts.radio_hello_timeout,
             slot: Default::default(),
+            spectrum: Default::default(),
         },
         reports,
         task: None,
@@ -134,7 +146,9 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         listen_mode: ListenMode::default(),
         broadcasts: Tracker::default(),
         beacon: BeaconState::new(),
+        telemetry: Telemetry::default(),
     };
+    let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
         // The selection survives a restart, so its modem is attached again (attach
         // only: a stored listen preference never arms transmission, RF-02).
@@ -144,6 +158,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         loop {
             let due = app.broadcasts.deadline();
             let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
+            let telemetry_wake = app.telemetry.wake();
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
@@ -173,11 +188,14 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                 _ = tokio::time::sleep_until(beacon_wake.unwrap_or_else(tokio::time::Instant::now)), if beacon_wake.is_some() => {
                     app.beacon_due();
                 }
+                // A throttled telemetry change is due: published just below.
+                _ = tokio::time::sleep_until(telemetry_wake.unwrap_or_else(tokio::time::Instant::now)), if telemetry_wake.is_some() => {}
             }
             app.sync_beacon();
+            app.sync_telemetry();
         }
     });
-    AppHandle { tx, events }
+    AppHandle { tx, events, spectrum }
 }
 
 struct App {
@@ -207,6 +225,8 @@ struct App {
     broadcasts: Tracker,
     /// Periodic beacons: the schedule, the profile's settings, the status shown.
     beacon: BeaconState,
+    /// Link quality and Mercury's telemetry (OBS-01), and its event throttle.
+    telemetry: Telemetry,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -425,15 +445,17 @@ impl App {
                 Ok(CommandOk::History { messages: rows.iter().map(ChatMessage::from).collect() })
             }
             AppCommand::Heard => {
-                let stations = discovery::heard_list(self.chat_store()?).map_err(storage)?;
+                let store = self.chat.as_ref().ok_or_else(|| conflict("no station is selected".into()))?;
+                let stations = discovery::heard_list(store, self.discovery.offsets()).map_err(storage)?;
                 Ok(CommandOk::Heard { stations })
             }
             AppCommand::SetFavourite { callsign, on } => {
                 let call = Callsign::parse(&callsign)
                     .map_err(|e| AppError::Validation { errors: chat::field("callsign", e.to_string()) })?;
-                let store = self.chat_store()?;
+                let store = self.chat.as_mut().ok_or_else(|| conflict("no station is selected".into()))?;
                 store.set_favourite(call.as_str(), on).map_err(storage)?;
-                let station = discovery::heard_station(store, call.as_str()).map_err(storage)?;
+                let station =
+                    discovery::heard_station(store, call.as_str(), self.discovery.offsets()).map_err(storage)?;
                 self.emit(AppEvent::Heard { station });
                 Ok(CommandOk::Done)
             }
@@ -561,6 +583,14 @@ impl App {
         }
     }
 
+    /// Publish the telemetry view if it changed, at most twice a second; a
+    /// change held back goes out at the next allowed moment.
+    fn sync_telemetry(&mut self) {
+        if let Some(telemetry) = self.telemetry.take_event(tokio::time::Instant::now()) {
+            self.emit(AppEvent::Telemetry { telemetry });
+        }
+    }
+
     fn refuse_broadcast(&mut self, kind: BroadcastKind, reason: String) -> AppError {
         self.publish_broadcasts(vec![(kind, BroadcastOutcome::Refused { reason: reason.clone() })]);
         conflict(reason)
@@ -659,6 +689,9 @@ impl App {
         self.beacon.sched.on_state(state, tokio::time::Instant::now());
         let out = self.broadcasts.state(state);
         self.publish_broadcasts(out);
+        if state == ModemState::Faulted {
+            self.telemetry.modem_faulted();
+        }
     }
 
     /// Stop whatever modem task runs, then start the selected one. Never
@@ -670,6 +703,9 @@ impl App {
         let abandoned = self.broadcasts.abandon();
         self.publish_broadcasts(abandoned);
         self.listen_mode = ListenMode::default();
+        let telemetry =
+            matches!(&target, Some(p) if matches!(&p.modem, ModemTarget::Existing { telemetry_url: Some(_), .. }));
+        self.telemetry.reset(telemetry);
         // Beacons are armed for one run: a new modem or profile starts disarmed (RF-02).
         self.beacon.select(target.as_ref().map(|p| p.id.clone()), &self.store);
         self.set_session(None);
@@ -699,26 +735,48 @@ impl App {
         match report.kind {
             ReportKind::State { state, detail } => self.set_modem(state, detail),
             ReportKind::Session(session) => {
+                let now = tokio::time::Instant::now();
                 if let Some(s) = session.as_ref().filter(|s| self.session.as_ref() != Some(*s)) {
-                    let heard = self.discovery.session(self.chat.as_mut(), &s.peer);
+                    let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &self.telemetry.tuning(now));
                     self.emit_all(heard);
+                    self.telemetry.session_started(now);
+                }
+                if session.is_none() {
+                    self.telemetry.session_ended();
                 }
                 self.set_session(session)
             }
             ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
-            ReportKind::Message(message) => self.emit(AppEvent::MessageChanged { message }),
+            ReportKind::Message(message) => {
+                self.telemetry.on_message(&message);
+                self.emit(AppEvent::MessageChanged { message })
+            }
             ReportKind::Observation(o) => {
-                if let Observation::Busy(on) = &o {
-                    self.beacon.on_busy(*on, tokio::time::Instant::now());
+                let now = tokio::time::Instant::now();
+                match &o {
+                    Observation::Busy(on) => self.beacon.on_busy(*on, now),
+                    Observation::Snr(snr) => self.telemetry.on_control_snr(*snr),
+                    Observation::Buffer(n) => self.telemetry.on_buffer(*n),
+                    _ => {}
                 }
                 let out = self.broadcasts.observe(&o);
                 self.publish_broadcasts(out);
-                let events = self.discovery.observation(self.chat.as_mut(), o);
+                let events = self.discovery.observation(self.chat.as_mut(), o, &self.telemetry.tuning(now));
                 self.emit_all(events);
             }
             ReportKind::Frame(f) => {
-                let events = self.discovery.frame(self.chat.as_mut(), f);
+                let tuning = self.telemetry.tuning(tokio::time::Instant::now());
+                let events = self.discovery.frame(self.chat.as_mut(), f, &tuning);
                 self.emit_all(events);
+            }
+            ReportKind::Telemetry(msg) => {
+                let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
+                // Ruling P2: the gate prefers telemetry's live listen mode.
+                self.listen_mode.set_live(self.telemetry.live_listen_mode());
+                if let Some(text) = line {
+                    let line = self.discovery.note("telemetry", text);
+                    self.emit(line);
+                }
             }
             ReportKind::Broadcast(why) => {
                 let line = self.discovery.note("broadcast", why);
@@ -776,6 +834,7 @@ impl App {
             session: self.session.clone(),
             active_profile_id: active,
             discovery: self.discovery.stats(),
+            telemetry: Box::new(self.telemetry.view(tokio::time::Instant::now())),
         })
     }
 }

@@ -2,7 +2,7 @@
 
 /**
  * One line of the activity log. `kind` is a short lowercase word: state,
- * ptt, busy, pending, buffer, heard, malformed, unsupported, broadcast or
- * purge.
+ * ptt, busy, pending, buffer, heard, malformed, unsupported, broadcast,
+ * telemetry or purge.
  */
 export type ActivityEntry = { atUtc: string, kind: string, text: string, };

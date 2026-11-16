@@ -7,6 +7,7 @@ use super::beacon::BeaconStatus;
 use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
+use super::telemetry::TelemetryView;
 use serde::Serialize;
 use std::collections::VecDeque;
 use ts_rs::TS;
@@ -93,6 +94,11 @@ pub enum AppEvent {
     /// The beacon schedule, its suppression or the channel state changed.
     Beacon {
         status: BeaconStatus,
+    },
+    /// The telemetry view changed (OBS-01); at most 2 a second, and the
+    /// snapshot always has the latest.
+    Telemetry {
+        telemetry: TelemetryView,
     },
 }
 

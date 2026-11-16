@@ -5,13 +5,15 @@
 //! station's own UTC at receipt (no sender clock).
 
 use super::events::{AppEvent, ModemState};
+use super::telemetry::{Tuning, TELEMETRY_SOURCE};
+use crate::band::band_for;
 use crate::station::Observation;
 use mc_storage::{now_utc, HeardRow, HeardSummaryRow, StorageError, Store};
 use mch_protocol::beacon::{self, Received};
 use mercury_adapter::kiss::{KissFrame, CMD_DATA_STD};
 use mercury_adapter::Callsign;
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use ts_rs::TS;
 
 /// The activity ring keeps this many entries, newest last.
@@ -23,6 +25,8 @@ pub const MONITOR_MERGE_S: i64 = 10;
 pub const HEARD_RETENTION_DAYS: i64 = 30;
 /// The provenance of an SNR taken from a MONITOR line (DSC-04).
 pub const MONITOR_SNR: &str = "modem monitor";
+/// At most this many stations' carrier offsets are kept (in memory only).
+pub const OFFSETS_KEPT: usize = 1024;
 
 /// A measured value with its provenance (DSC-04): where it came from, when
 /// this station took it, and the source's own age where it reports one.
@@ -40,6 +44,7 @@ pub struct Reading<T> {
 // Readings are only ever built from finite values (NaN never gets this far),
 // so equality is total.
 impl Eq for Reading<f32> {}
+impl Eq for Reading<u64> {}
 
 /// How a station was last heard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -82,11 +87,21 @@ pub struct HeardStation {
     pub favourite: bool,
     pub snr: Option<Reading<f32>>,
     pub bandwidth: Option<String>,
+    /// The radio's dial frequency (Hz) when this station was last heard, if
+    /// Mercury's telemetry had one no older than 10 s then.
+    #[ts(as = "Option<Reading<f64>>")]
+    pub freq: Option<Reading<u64>>,
+    /// The amateur band of `freq` (e.g. `20m`).
+    pub band: Option<String>,
+    /// How far off nominal the last frame heard from it arrived (Hz), from
+    /// Mercury's telemetry when under 2 s old as that frame arrived. Mercury
+    /// has no slots: this is an offset, nothing more.
+    pub offset_hz: Option<Reading<f32>>,
 }
 
 /// One line of the activity log. `kind` is a short lowercase word: state,
-/// ptt, busy, pending, buffer, heard, malformed, unsupported, broadcast or
-/// purge.
+/// ptt, busy, pending, buffer, heard, malformed, unsupported, broadcast,
+/// telemetry or purge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -135,14 +150,25 @@ fn row(callsign: &str, kind: &str) -> HeardRow {
     }
 }
 
-fn station(r: HeardSummaryRow) -> HeardStation {
+fn station(r: HeardSummaryRow, offsets: &Offsets) -> HeardStation {
     let snr = r.snr_db.filter(|v| v.is_finite()).map(|value| Reading {
         value,
         source: r.snr_source.clone().unwrap_or_else(|| "unknown".into()),
         at_utc: r.last_utc.clone(),
         age_ms: None,
     });
+    let freq = r.freq_hz.and_then(|hz| u64::try_from(hz).ok()).map(|value| Reading {
+        value,
+        source: r.freq_source.clone().unwrap_or_else(|| "unknown".into()),
+        at_utc: r.last_utc.clone(),
+        age_ms: r.freq_age_ms.and_then(|a| u64::try_from(a).ok()),
+    });
+    let band = freq.as_ref().and_then(|f| band_for(f.value)).map(String::from);
+    let offset_hz = offsets.get(&r.callsign, &r.last_utc);
     HeardStation {
+        freq,
+        band,
+        offset_hz,
         source: HeardSource::from_kind(&r.kind),
         last_heard_utc: Some(r.last_utc),
         callsign: r.callsign,
@@ -167,13 +193,45 @@ fn unheard(callsign: &str, favourite: bool) -> HeardStation {
         favourite,
         snr: None,
         bandwidth: None,
+        freq: None,
+        band: None,
+        offset_hz: None,
+    }
+}
+
+/// The carrier offset of the frame each station was last heard by, kept in
+/// memory for this modem only: (that observation's time, the offset).
+#[derive(Default)]
+pub struct Offsets(HashMap<String, (String, Reading<f32>)>);
+
+impl Offsets {
+    /// The offset of `callsign`'s observation at `observed_utc`, if it had one.
+    fn get(&self, callsign: &str, observed_utc: &str) -> Option<Reading<f32>> {
+        self.0.get(callsign).filter(|(at, _)| at == observed_utc).map(|(_, r)| r.clone())
+    }
+
+    /// Record (or, with `None`, clear) the offset of `callsign`'s newest
+    /// observation. The oldest entry makes way when the map is full.
+    fn set(&mut self, callsign: &str, observed_utc: &str, offset: Option<Reading<f32>>) {
+        let Some(mut r) = offset else {
+            self.0.remove(callsign);
+            return;
+        };
+        if self.0.len() >= OFFSETS_KEPT && !self.0.contains_key(callsign) {
+            let oldest = self.0.iter().min_by(|a, b| a.1 .0.cmp(&b.1 .0)).map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                self.0.remove(&k);
+            }
+        }
+        r.at_utc = observed_utc.to_string();
+        self.0.insert(callsign.to_string(), (observed_utc.to_string(), r));
     }
 }
 
 /// The heard list: every station heard in the retention window, most
 /// recently heard first, then the favourites with nothing heard.
-pub fn heard_list(store: &Store) -> Result<Vec<HeardStation>, StorageError> {
-    let mut list: Vec<HeardStation> = store.heard_summary()?.into_iter().map(station).collect();
+pub fn heard_list(store: &Store, offsets: &Offsets) -> Result<Vec<HeardStation>, StorageError> {
+    let mut list: Vec<HeardStation> = store.heard_summary()?.into_iter().map(|r| station(r, offsets)).collect();
     for call in store.favourites()? {
         if !list.iter().any(|s| s.callsign == call) {
             list.push(unheard(&call, true));
@@ -184,25 +242,32 @@ pub fn heard_list(store: &Store) -> Result<Vec<HeardStation>, StorageError> {
 
 /// One callsign as the heard list shows it. A callsign neither heard nor a
 /// favourite comes back with `count` 0 and `favourite` false: not listed.
-pub fn heard_station(store: &Store, callsign: &str) -> Result<HeardStation, StorageError> {
+pub fn heard_station(store: &Store, callsign: &str, offsets: &Offsets) -> Result<HeardStation, StorageError> {
     if let Some(r) = store.heard_summary()?.into_iter().find(|r| r.callsign == callsign) {
-        return Ok(station(r));
+        return Ok(station(r, offsets));
     }
     let favourite = store.favourites()?.iter().any(|c| c == callsign);
     Ok(unheard(callsign, favourite))
 }
 
-/// The actor's discovery state: the activity ring, the counters and the
-/// last BUFFER value. Each method returns the events to publish.
+/// The actor's discovery state: the activity ring, the counters, the last
+/// BUFFER value and the heard stations' offsets. Each method returns the
+/// events to publish.
 pub struct Discovery {
     ring: VecDeque<ActivityEntry>,
     stats: DiscoveryStats,
     buffer: Option<u64>,
+    offsets: Offsets,
 }
 
 impl Default for Discovery {
     fn default() -> Self {
-        Discovery { ring: VecDeque::with_capacity(ACTIVITY_RING), stats: DiscoveryStats::default(), buffer: None }
+        Discovery {
+            ring: VecDeque::with_capacity(ACTIVITY_RING),
+            stats: DiscoveryStats::default(),
+            buffer: None,
+            offsets: Offsets::default(),
+        }
     }
 }
 
@@ -215,9 +280,16 @@ impl Discovery {
         self.ring.iter().cloned().collect()
     }
 
-    /// A new modem task: BUFFER is compared afresh.
+    /// The heard stations' offsets, for listing them.
+    pub fn offsets(&self) -> &Offsets {
+        &self.offsets
+    }
+
+    /// A new modem task: BUFFER is compared afresh, and offsets heard
+    /// through the old one are forgotten.
     pub fn modem_changed(&mut self) {
         self.buffer = None;
+        self.offsets = Offsets::default();
     }
 
     /// Add an activity line; the returned event publishes it.
@@ -259,26 +331,35 @@ impl Discovery {
     /// The activity line and heard-list update after `callsign` was stored.
     fn heard(&mut self, store: &Store, callsign: &str, how: &str) -> Vec<AppEvent> {
         let mut out = vec![self.note("heard", format!("heard {callsign} ({how})"))];
-        match heard_station(store, callsign) {
+        match heard_station(store, callsign, &self.offsets) {
             Ok(station) => out.push(AppEvent::Heard { station }),
             Err(e) => tracing::warn!("could not read the heard list: {e}"),
         }
         out
     }
 
-    /// Store one observation (a single short insert) and publish it.
-    fn record(&mut self, store: Option<&mut Store>, row: HeardRow, how: &str) -> Vec<AppEvent> {
+    /// Store one observation (a single short insert), with the frequency
+    /// and offset that were fresh as it arrived, and publish it.
+    fn record(&mut self, store: Option<&mut Store>, row: HeardRow, how: &str, tuning: &Tuning) -> Vec<AppEvent> {
         let Some(store) = store else { return Vec::new() };
+        let freq = tuning.freq.as_ref().and_then(|f| Some((i64::try_from(f.value).ok()?, f)));
+        let row = HeardRow {
+            freq_hz: freq.map(|(hz, _)| hz),
+            freq_source: freq.map(|_| TELEMETRY_SOURCE.to_string()),
+            freq_age_ms: freq.and_then(|(_, f)| f.age_ms).and_then(|a| i64::try_from(a).ok()),
+            ..row
+        };
         if let Err(e) = store.record_heard(&row) {
             tracing::warn!("could not record a heard station: {e}");
             return Vec::new();
         }
+        self.offsets.set(&row.callsign, &row.observed_utc, tuning.offset.clone());
         self.heard(store, &row.callsign, how)
     }
 
     /// One observation from the modem's control stream. Heard rows need the
     /// station's store; without one they are dropped.
-    pub fn observation(&mut self, store: Option<&mut Store>, o: Observation) -> Vec<AppEvent> {
+    pub fn observation(&mut self, store: Option<&mut Store>, o: Observation, tuning: &Tuning) -> Vec<AppEvent> {
         match o {
             Observation::Cq { source, bw } => {
                 let call = match self.callsign(&source, "CQ") {
@@ -286,7 +367,7 @@ impl Discovery {
                     Err(evs) => return evs,
                 };
                 let row = HeardRow { bandwidth: bandwidth(&bw), ..row(&call, "cq") };
-                self.record(store, row, "CQ")
+                self.record(store, row, "CQ", tuning)
             }
             Observation::MonitorCq(m) => {
                 let call = match self.callsign(&m.from, "monitored CQ") {
@@ -309,7 +390,9 @@ impl Discovery {
                             snr_source: Some(MONITOR_SNR.into()),
                             ..row(&call, "cq")
                         };
-                        self.record(Some(store), row, &how)
+                        // Mercury's offset is never a monitor decoder's.
+                        let tuning = Tuning { offset: None, ..tuning.clone() };
+                        self.record(Some(store), row, &how, &tuning)
                     }
                     Err(e) => {
                         tracing::warn!("could not record a monitored CQ: {e}");
@@ -337,7 +420,7 @@ impl Discovery {
     }
 
     /// One KISS frame from the broadcast port (03 §6).
-    pub fn frame(&mut self, store: Option<&mut Store>, f: KissFrame) -> Vec<AppEvent> {
+    pub fn frame(&mut self, store: Option<&mut Store>, f: KissFrame, tuning: &Tuning) -> Vec<AppEvent> {
         if f.cmd != CMD_DATA_STD {
             return self.unsupported(format!("broadcast frame with KISS command 0x{:02x}", f.cmd));
         }
@@ -348,7 +431,7 @@ impl Discovery {
                     Err(evs) => return evs,
                 };
                 let row = HeardRow { grid: b.grid, caps: Some(i64::from(b.caps)), ..row(&call, "beacon") };
-                self.record(store, row, "beacon")
+                self.record(store, row, "beacon", tuning)
             }
             Received::Malformed(e) => self.malformed(format!("malformed MCB/1 beacon: {e}")),
             Received::Foreign => {
@@ -358,9 +441,9 @@ impl Discovery {
     }
 
     /// A negotiated session with `peer`.
-    pub fn session(&mut self, store: Option<&mut Store>, peer: &str) -> Vec<AppEvent> {
+    pub fn session(&mut self, store: Option<&mut Store>, peer: &str, tuning: &Tuning) -> Vec<AppEvent> {
         match self.callsign(peer, "session") {
-            Ok(call) => self.record(store, row(&call, "session"), "session"),
+            Ok(call) => self.record(store, row(&call, "session"), "session", tuning),
             Err(evs) => evs,
         }
     }

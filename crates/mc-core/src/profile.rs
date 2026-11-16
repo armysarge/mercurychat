@@ -51,6 +51,48 @@ fn err(field: &str, message: &str) -> FieldError {
 
 const NAME_MAX: usize = 64;
 const HOST_MAX: usize = 253;
+const TELEMETRY_URL_MAX: usize = 256;
+
+/// Why a (trimmed, non-empty) telemetry address is refused, if it is: it must
+/// be exactly `ws://host:port/path` (Mercury's plain WebSocket; no TLS, no
+/// credentials), at most 256 characters.
+fn telemetry_url_error(url: &str) -> Option<&'static str> {
+    const SHAPE: &str = "Use ws://host:port/path, e.g. ws://127.0.0.1:10000/websocket";
+    if url.chars().count() > TELEMETRY_URL_MAX {
+        return Some("At most 256 characters");
+    }
+    if url.starts_with("wss://") {
+        return Some("wss:// (TLS) is not supported: use ws://host:port/path");
+    }
+    let Some(rest) = url.strip_prefix("ws://") else { return Some(SHAPE) };
+    let Some(slash) = rest.find('/') else { return Some(SHAPE) };
+    let (authority, path) = rest.split_at(slash);
+    let (host_ok, port) = match authority.strip_prefix('[') {
+        // An IPv6 literal: [addr]:port.
+        Some(v6) => match v6.split_once("]:") {
+            Some((addr, port)) => (!addr.is_empty() && addr.bytes().all(|b| b.is_ascii_hexdigit() || b == b':'), port),
+            None => return Some(SHAPE),
+        },
+        // A name or IPv4 address: no credentials, no other punctuation.
+        None => match authority.rsplit_once(':') {
+            Some((host, port)) => (
+                !host.is_empty()
+                    && host.len() <= HOST_MAX
+                    && host.bytes().all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'-' | b'_')),
+                port,
+            ),
+            None => return Some(SHAPE),
+        },
+    };
+    let port_ok =
+        !port.is_empty() && port.bytes().all(|b| b.is_ascii_digit()) && port.parse::<u16>().is_ok_and(|p| p != 0);
+    let path_ok = path.bytes().all(|b| b.is_ascii_graphic());
+    if host_ok && port_ok && path_ok {
+        None
+    } else {
+        Some(SHAPE)
+    }
+}
 
 impl StationProfile {
     /// An existing Mercury on this PC with Mercury's default ports.
@@ -133,8 +175,8 @@ impl StationProfile {
                 }
             }
             *telemetry_url = telemetry_url.as_deref().map(str::trim).filter(|u| !u.is_empty()).map(String::from);
-            if telemetry_url.as_ref().is_some_and(|u| !(u.starts_with("ws://") || u.starts_with("wss://"))) {
-                errors.push(err("telemetryUrl", "Use a ws:// or wss:// address"));
+            if let Some(why) = telemetry_url.as_deref().and_then(telemetry_url_error) {
+                errors.push(err("telemetryUrl", why));
             }
         }
 

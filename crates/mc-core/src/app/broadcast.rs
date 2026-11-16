@@ -123,7 +123,7 @@ pub fn broadcast_gate(
     Ok(())
 }
 
-/// The modem's listen mode, as far as the actor knows it. Today it comes from
+/// The modem's listen mode, as far as the actor knows it. It comes from
 /// the attach (`MODE 1` accepted or not); a live source (telemetry) is
 /// preferred once one reports.
 #[derive(Debug, Clone, Copy, Default)]
@@ -140,6 +140,12 @@ impl ListenMode {
     /// What the modem task found at (re)attach.
     pub fn set_attach(&mut self, mode: Option<u8>) {
         self.attach = mode;
+    }
+
+    /// What telemetry reports now (ruling P2): `None` while it is lost or
+    /// reports none (-1), and the attach value applies again.
+    pub fn set_live(&mut self, mode: Option<u8>) {
+        self.live = mode;
     }
 }
 
@@ -394,8 +400,11 @@ mod tests {
         assert_eq!(m.current(), None);
         m.set_attach(Some(1));
         assert_eq!(m.current(), Some(1));
-        m.live = Some(11);
+        m.set_live(Some(11));
         assert_eq!(m.current(), Some(11));
+        // Telemetry lost, or reporting -1: the attach value applies again.
+        m.set_live(None);
+        assert_eq!(m.current(), Some(1));
     }
 
     #[test]

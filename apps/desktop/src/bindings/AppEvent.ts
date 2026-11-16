@@ -7,5 +7,6 @@ import type { ChatMessage } from "./ChatMessage";
 import type { HeardStation } from "./HeardStation";
 import type { ModemState } from "./ModemState";
 import type { SessionInfo } from "./SessionInfo";
+import type { TelemetryView } from "./TelemetryView";
 
-export type AppEvent = { "type": "modemState", state: ModemState, detail: string | null, } | { "type": "session", session: SessionInfo | null, } | { "type": "callFailed", peer: string, reason: string, } | { "type": "messageChanged", message: ChatMessage, } | { "type": "profilesChanged" } | { "type": "activeProfileChanged", id: string | null, } | { "type": "fault", code: string, message: string, } | { "type": "heard", station: HeardStation, } | { "type": "activity", entry: ActivityEntry, } | { "type": "broadcast", kind: BroadcastKind, outcome: BroadcastOutcome, } | { "type": "beacon", status: BeaconStatus, };
+export type AppEvent = { "type": "modemState", state: ModemState, detail: string | null, } | { "type": "session", session: SessionInfo | null, } | { "type": "callFailed", peer: string, reason: string, } | { "type": "messageChanged", message: ChatMessage, } | { "type": "profilesChanged" } | { "type": "activeProfileChanged", id: string | null, } | { "type": "fault", code: string, message: string, } | { "type": "heard", station: HeardStation, } | { "type": "activity", entry: ActivityEntry, } | { "type": "broadcast", kind: BroadcastKind, outcome: BroadcastOutcome, } | { "type": "beacon", status: BeaconStatus, } | { "type": "telemetry", telemetry: TelemetryView, };

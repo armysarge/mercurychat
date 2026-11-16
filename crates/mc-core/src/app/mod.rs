@@ -9,6 +9,7 @@ mod discovery;
 mod events;
 mod modem;
 mod service;
+mod telemetry;
 
 pub use beacon::{
     BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus, ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN,
@@ -19,8 +20,12 @@ pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MES
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
 pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
-pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind};
+pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
 pub use service::{spawn_app, AppHandle, AppOptions};
+pub use telemetry::{
+    AudioView, TelemetryLinkView, TelemetryView, Tuning, CONTROL_SOURCE, EVENT_GAP, FREQ_FRESH_MS, OFFSET_FRESH_MS,
+    TELEMETRY_SOURCE,
+};
 
 use ts_rs::TS;
 
@@ -38,5 +43,6 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     BroadcastOutcome::export_all(&cfg)?;
     BeaconStatus::export_all(&cfg)?;
     ChannelState::export_all(&cfg)?;
+    TelemetryView::export_all(&cfg)?;
     Since::export_all(&cfg)
 }

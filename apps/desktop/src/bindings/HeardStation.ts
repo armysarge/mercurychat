@@ -20,4 +20,19 @@ source: HeardSource | null, grid: string | null, caps: number | null,
 /**
  * Observations kept for this callsign.
  */
-count: number, favourite: boolean, snr: Reading<number> | null, bandwidth: string | null, };
+count: number, favourite: boolean, snr: Reading<number> | null, bandwidth: string | null, 
+/**
+ * The radio's dial frequency (Hz) when this station was last heard, if
+ * Mercury's telemetry had one no older than 10 s then.
+ */
+freq: Reading<number> | null, 
+/**
+ * The amateur band of `freq` (e.g. `20m`).
+ */
+band: string | null, 
+/**
+ * How far off nominal the last frame heard from it arrived (Hz), from
+ * Mercury's telemetry when under 2 s old as that frame arrived. Mercury
+ * has no slots: this is an offset, nothing more.
+ */
+offsetHz: Reading<number> | null, };

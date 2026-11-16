@@ -18,13 +18,15 @@ use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
 use mercury_adapter::broadcast::BroadcastPort;
 use mercury_adapter::kiss::KissFrame;
+use mercury_adapter::telemetry::{Spectrum, TelemetryClient, TelemetryLink, TelemetryMsg};
 use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
+use tokio::task::AbortHandle;
 
 /// Where a modem task keeps its data and takes its locks.
 #[derive(Debug, Clone, Default)]
@@ -39,6 +41,19 @@ pub struct ModemOptions {
     /// starts): a new task waits for every stopped predecessor to let go of
     /// the modem, its sockets and its locks before it takes them.
     pub slot: Arc<tokio::sync::Mutex<()>>,
+    /// Where the modem's telemetry client publishes the latest spectrum.
+    pub spectrum: SpectrumFeed,
+}
+
+/// The latest valid spectrum from Mercury's telemetry, shared by every modem
+/// task the actor starts; `None` whenever there is none to show.
+#[derive(Debug, Clone)]
+pub struct SpectrumFeed(pub watch::Sender<Option<Arc<Spectrum>>>);
+
+impl Default for SpectrumFeed {
+    fn default() -> Self {
+        SpectrumFeed(watch::channel(None).0)
+    }
 }
 
 /// What the actor asks of the modem.
@@ -106,6 +121,8 @@ pub enum ReportKind {
         kind: BroadcastKind,
         note: String,
     },
+    /// Mercury's telemetry WebSocket: its link, or a status.
+    Telemetry(TelemetryMsg),
 }
 
 /// What a failed CQFRAME means, truthfully (03 section 6): a modem that never
@@ -340,6 +357,43 @@ impl Broadcast {
     }
 }
 
+/// Mercury's telemetry for one modem task (OBS-02): optional, read-only and
+/// reconnecting by itself; its messages go to the actor as reports. Started
+/// after attach; it never affects the TNC connection or a session, and it
+/// dies with the task (the spectrum is cleared and, if the actor still
+/// follows this task, the link reported lost).
+struct Telemetry {
+    client: AbortHandle,
+    forward: tokio::task::JoinHandle<()>,
+    spectrum: watch::Sender<Option<Arc<Spectrum>>>,
+    r: Reporter,
+}
+
+impl Telemetry {
+    fn start(url: String, spectrum: &SpectrumFeed, r: &Reporter) -> Telemetry {
+        let (tx, mut rx) = mpsc::channel(64);
+        let client = TelemetryClient::spawn(url, tx, spectrum.0.clone());
+        let fwd = r.clone();
+        let forward = tokio::spawn(async move {
+            while let Some(m) = rx.recv().await {
+                fwd.send(ReportKind::Telemetry(m)).await;
+            }
+        });
+        Telemetry { client, forward, spectrum: spectrum.0.clone(), r: r.clone() }
+    }
+}
+
+impl Drop for Telemetry {
+    fn drop(&mut self) {
+        self.client.abort();
+        self.forward.abort();
+        self.spectrum.send_replace(None);
+        let reason = "the modem connection ended".to_string();
+        let kind = ReportKind::Telemetry(TelemetryMsg::Link(TelemetryLink::Lost { reason }));
+        let _ = self.r.tx.try_send(ModemReport { generation: self.r.generation, kind });
+    }
+}
+
 /// Resolves when the actor stops this task (Shutdown, or the handle dropped).
 /// A broadcast that arrives before the modem is up is refused; anything else
 /// is ignored.
@@ -407,7 +461,7 @@ async fn run(
     };
     let mut forwarders = Forwarders::default();
     match profile.modem.clone() {
-        ModemTarget::Existing { host, control_port, data_port, broadcast_port, .. } => {
+        ModemTarget::Existing { host, control_port, data_port, broadcast_port, telemetry_url } => {
             let _lock = match &opts.locks_dir {
                 Some(dir) => match crate::lock::lock_endpoint(dir, &host, control_port) {
                     Ok(l) => Some(l),
@@ -451,6 +505,7 @@ async fn run(
                 _ = broadcast.open(false) => {}
                 _ = stopped(&mut cmds, &r) => return,
             }
+            let _telemetry = telemetry_url.map(|url| Telemetry::start(url, &opts.spectrum, &r));
             r.send(ReportKind::ListenMode(station.listen_mode())).await;
             r.state(ModemState::Ready, None).await;
             let mut station = station;

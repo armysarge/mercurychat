@@ -6,6 +6,7 @@ use super::beacon::BeaconStatus;
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
+use super::telemetry::TelemetryView;
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
@@ -37,6 +38,8 @@ pub struct AppSnapshot {
     pub session: Option<SessionInfo>,
     /// Broadcast traffic that was not a station, since the app started.
     pub discovery: DiscoveryStats,
+    /// Link quality and Mercury's telemetry (OBS-01); `null` is unavailable.
+    pub telemetry: Box<TelemetryView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]

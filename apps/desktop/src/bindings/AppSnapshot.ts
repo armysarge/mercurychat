@@ -4,6 +4,7 @@ import type { DiscoveryStats } from "./DiscoveryStats";
 import type { ModemState } from "./ModemState";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
+import type { TelemetryView } from "./TelemetryView";
 
 export type AppSnapshot = { seq: number, generation: number, modem: ModemState, 
 /**
@@ -33,4 +34,8 @@ session: SessionInfo | null,
 /**
  * Broadcast traffic that was not a station, since the app started.
  */
-discovery: DiscoveryStats, };
+discovery: DiscoveryStats, 
+/**
+ * Link quality and Mercury's telemetry (OBS-01); `null` is unavailable.
+ */
+telemetry: TelemetryView, };
