@@ -5,10 +5,9 @@ import { computed } from "vue";
 // metric is never drawn as a value.
 import { activeProfile, chat, modemState, queuedBytes, session, setReceiveOnly, snapshot } from "../store";
 
-// Receive only can change while idle and mid-session (LISTEN does not end a link).
-const canSwitch = computed(() =>
-  ["ready", "listening", "negotiating", "connected", "draining"].includes(modemState.value),
-);
+// Receive only is a safety switch: it can change in any state with a station
+// (mid-session, calling, recovering); the modem acts on it at the earliest moment.
+const canSwitch = computed(() => modemState.value !== "unavailable");
 const since = (utc: string) => utc.slice(11, 16) + " UTC";
 function where() {
   const p = activeProfile.value;

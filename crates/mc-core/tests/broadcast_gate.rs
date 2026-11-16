@@ -239,9 +239,12 @@ async fn cq_refused_while_calling_and_not_sent_later() {
     // The call ends; the refused CQ must not go out afterwards.
     assert_eq!(h.call(AppCommand::CancelCall).await.unwrap(), CommandOk::Done);
     until_state(&mut rx, ModemState::Listening).await;
-    // The modem takes commands in order: once LISTEN is through, anything
-    // queued before it would have been sent. Listening is on by default, so
-    // the state after the call is Listening and LISTEN ON went out at attach.
+    // The modem takes commands in order: once a LISTEN OFF sent now is through,
+    // anything queued before it would have been sent.
+    let offs = net.log().iter().filter(|l| *l == "A> LISTEN OFF").count();
+    h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    until_state(&mut rx, ModemState::Ready).await;
+    assert!(net.log().iter().filter(|l| *l == "A> LISTEN OFF").count() > offs, "{:?}", net.log());
     assert!(net.log().iter().any(|l| l == "A> LISTEN ON"), "{:?}", net.log());
     assert_eq!(cq_lines(&net), Vec::<String>::new());
     let lines = broadcast_lines(&h).await;

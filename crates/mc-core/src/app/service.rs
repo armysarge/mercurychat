@@ -245,14 +245,19 @@ impl App {
                 let p = profile.validate().map_err(|errors| AppError::Validation { errors })?;
                 // Editing the profile in use: a new callsign or modem must reach
                 // the modem now, not at the next selection.
-                let reattach = self
-                    .active_profile()
-                    .is_some_and(|old| old.id == p.id && (old.callsign != p.callsign || old.modem != p.modem));
+                let old = self.active_profile().filter(|old| old.id == p.id);
+                let reattach = old.as_ref().is_some_and(|old| old.callsign != p.callsign || old.modem != p.modem);
+                let receive_only_changed = old.as_ref().is_some_and(|old| old.receive_only != p.receive_only);
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
                 if reattach {
                     self.log.bump_generation();
                     self.pending = Some(Some(p.clone()));
+                } else if receive_only_changed {
+                    // Receive only applies to the running modem now, too.
+                    if let Some(t) = &self.task {
+                        t.set_receive_only(p.receive_only);
+                    }
                 }
                 Ok(CommandOk::Profile(p))
             }
@@ -271,26 +276,19 @@ impl App {
                 Ok(CommandOk::Done)
             }
             AppCommand::SetReceiveOnly { on } => {
-                // Also mid-session: LISTEN OFF does not end the link.
-                if !matches!(
-                    self.modem,
-                    ModemState::Ready
-                        | ModemState::Listening
-                        | ModemState::Negotiating
-                        | ModemState::Connected
-                        | ModemState::Draining
-                ) {
+                // Always taken (a safety switch), in any state with a station:
+                // the modem task acts on it at the earliest moment, mid-link
+                // (LISTEN OFF does not end it), after a call, or after recovery.
+                if self.modem == ModemState::Unavailable {
                     let state = format!("{:?}", self.modem).to_lowercase();
-                    return Err(conflict(format!(
-                        "the modem is {state}: Receive only can be changed once it is ready"
-                    )));
+                    return Err(conflict(format!("the modem is {state}: pick a station first")));
                 }
                 let Some(mut p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
                 p.receive_only = on;
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
-                if !self.task.as_ref().is_some_and(|t| t.send(ModemCmd::SetListen(!on))) {
-                    return Err(conflict("the modem is not accepting commands".into()));
+                if let Some(t) = &self.task {
+                    t.set_receive_only(on);
                 }
                 Ok(CommandOk::Done)
             }

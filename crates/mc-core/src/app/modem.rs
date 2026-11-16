@@ -21,6 +21,7 @@ use mercury_adapter::kiss::KissFrame;
 use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, oneshot};
@@ -43,7 +44,10 @@ pub struct ModemOptions {
 /// What the actor asks of the modem.
 #[derive(Debug)]
 pub enum ModemCmd {
-    SetListen(bool),
+    /// The Receive only choice changed (it is in the shared flag): bring
+    /// Mercury in line now if idle, mid-link by sending it, else at the
+    /// earliest idle moment.
+    ListenChanged,
     Call(Callsign),
     CancelCall,
     Disconnect,
@@ -125,12 +129,23 @@ fn cq_failure(e: &StationError) -> ReportKind {
 pub struct ModemHandle {
     pub generation: u64,
     cmds: mpsc::Sender<ModemCmd>,
+    /// The Receive only choice, shared with the task: it is read whenever the
+    /// task decides about LISTEN ON (attach, recovery, after a call or link),
+    /// so a change is never lost however busy the modem is.
+    receive_only: Arc<AtomicBool>,
 }
 
 impl ModemHandle {
     /// Queue a command; false if the task has ended or is backed up.
     pub fn send(&self, cmd: ModemCmd) -> bool {
         self.cmds.try_send(cmd).is_ok()
+    }
+
+    /// Set Receive only. The shared flag is the truth; the nudge only makes an
+    /// idle or linked modem act on it at once.
+    pub fn set_receive_only(&self, on: bool) {
+        self.receive_only.store(on, Ordering::SeqCst);
+        let _ = self.cmds.try_send(ModemCmd::ListenChanged);
     }
 }
 
@@ -147,8 +162,9 @@ pub fn spawn(
     reports: mpsc::Sender<ModemReport>,
 ) -> ModemHandle {
     let (tx, rx) = mpsc::channel(64);
-    tokio::spawn(run(profile, opts, rx, Reporter { generation, tx: reports }));
-    ModemHandle { generation, cmds: tx }
+    let receive_only = Arc::new(AtomicBool::new(profile.receive_only));
+    tokio::spawn(run(profile, opts, rx, Reporter { generation, tx: reports }, receive_only.clone()));
+    ModemHandle { generation, cmds: tx, receive_only }
 }
 
 /// How long a new task waits for its stopped predecessors to let go of the
@@ -353,7 +369,13 @@ async fn open_station(cfg: StationConfig) -> Result<Station, StationError> {
     }
 }
 
-async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiver<ModemCmd>, r: Reporter) {
+async fn run(
+    profile: StationProfile,
+    opts: ModemOptions,
+    mut cmds: mpsc::Receiver<ModemCmd>,
+    r: Reporter,
+    receive_only: Arc<AtomicBool>,
+) {
     // A task this one replaces may still hold the modem (recovering, ending a
     // link): wait for it first, or its locks look like another instance. The
     // slot is declared first, so it is released last, after the locks.
@@ -432,9 +454,9 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
             r.send(ReportKind::ListenMode(station.listen_mode())).await;
             r.state(ModemState::Ready, None).await;
             let mut station = station;
-            serve(&mut station, cmds, &r, profile.receive_only, &mut broadcast).await;
+            serve(&mut station, cmds, &r, receive_only, &mut broadcast).await;
         }
-        ModemTarget::Simulator => simulator(&station_dir, call, profile.receive_only, cmds, r, &mut forwarders).await,
+        ModemTarget::Simulator => simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders).await,
     }
 }
 
@@ -442,7 +464,7 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
 async fn simulator(
     station_dir: &Path,
     call: Callsign,
-    receive_only: bool,
+    receive_only: Arc<AtomicBool>,
     mut cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
     forwarders: &mut Forwarders,
@@ -481,7 +503,7 @@ async fn simulator(
 async fn simulator(
     _dir: &Path,
     _call: Callsign,
-    _receive_only: bool,
+    _receive_only: Arc<AtomicBool>,
     _cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
     _forwarders: &mut Forwarders,
@@ -493,6 +515,7 @@ async fn simulator(
 /// retried: a refusal leaves the modem Ready with the reason shown, and the
 /// next successful recovery tries again.
 async fn arm(st: &mut Station, r: &Reporter, listening: &mut bool) {
+    *listening = false;
     match st.set_listen(true).await {
         Ok(()) => {
             *listening = true;
@@ -502,6 +525,35 @@ async fn arm(st: &mut Station, r: &Reporter, listening: &mut bool) {
             *listening = false;
             r.state(ModemState::Ready, Some(format!("not answering calls: {e}"))).await;
         }
+    }
+}
+
+/// Bring Mercury's LISTEN in line with the Receive only flag whenever the
+/// modem is idle again (after a call, a link, or a change made while busy).
+/// `dirty`: a LISTEN was sent mid-link and its answer was not seen, so it is
+/// sent again. A LISTEN ON that fails leaves Ready with the reason (never
+/// retried); a LISTEN OFF that fails is a fault: Mercury may still answer.
+async fn reconcile(
+    st: &mut Station,
+    receive_only: &AtomicBool,
+    on: &mut bool,
+    dirty: &mut bool,
+) -> Result<Option<String>, String> {
+    let want = !receive_only.load(Ordering::SeqCst);
+    if want == *on && !*dirty {
+        return Ok(None);
+    }
+    *dirty = false;
+    match st.set_listen(want).await {
+        Ok(()) => {
+            *on = want;
+            Ok(None)
+        }
+        Err(e) if want => {
+            *on = false;
+            Ok(Some(format!("not answering calls: {e}")))
+        }
+        Err(e) => Err(format!("LISTEN OFF: {e}")),
     }
 }
 
@@ -575,13 +627,14 @@ async fn serve(
     st: &mut Station,
     mut cmds: mpsc::Receiver<ModemCmd>,
     r: &Reporter,
-    receive_only: bool,
+    receive_only: Arc<AtomicBool>,
     broadcast: &mut Broadcast,
 ) {
     let mut listening = false;
+    // A LISTEN sent mid-link whose answer was not seen.
+    let mut dirty = false;
     // Answering calls is the default (D18); Receive only turns it off.
-    let mut want_listen = !receive_only;
-    if want_listen {
+    if !receive_only.load(Ordering::SeqCst) {
         arm(st, r, &mut listening).await;
     }
     let idle = |listening: bool| if listening { ModemState::Listening } else { ModemState::Ready };
@@ -592,14 +645,10 @@ async fn serve(
         };
         let after = match step {
             Idle::Cmd(None | Some(ModemCmd::Shutdown)) => return,
-            Idle::Cmd(Some(ModemCmd::SetListen(on))) => {
-                want_listen = on;
-                match st.set_listen(on).await {
-                    Ok(()) => {
-                        listening = on;
-                        r.state(idle(on), None).await;
-                    }
-                    Err(e) => r.fault(format!("LISTEN {}: {e}", if on { "ON" } else { "OFF" })).await,
+            Idle::Cmd(Some(ModemCmd::ListenChanged)) => {
+                match reconcile(st, &receive_only, &mut listening, &mut dirty).await {
+                    Ok(detail) => r.state(idle(listening), detail).await,
+                    Err(e) => return r.fault(e).await,
                 }
                 continue;
             }
@@ -626,7 +675,7 @@ async fn serve(
                         }
                     }
                     Calling::Answered(Ok(info)) => {
-                        link(st, &mut cmds, r, info, SessionDirection::Outgoing, &mut listening, &mut want_listen).await
+                        link(st, &mut cmds, r, info, SessionDirection::Outgoing, &receive_only, &mut dirty).await
                     }
                     Calling::Answered(Err(StationError::ControlLost | StationError::Detached)) => After::Recover,
                     Calling::Answered(Err(StationError::BadPeer(p))) => {
@@ -689,7 +738,7 @@ async fn serve(
                 continue;
             }
             Idle::Incoming(Ok(info)) => {
-                link(st, &mut cmds, r, info, SessionDirection::Incoming, &mut listening, &mut want_listen).await
+                link(st, &mut cmds, r, info, SessionDirection::Incoming, &receive_only, &mut dirty).await
             }
             Idle::Incoming(Err(StationError::Timeout(_))) => continue,
             Idle::Incoming(Err(StationError::BadPeer(p))) => {
@@ -709,10 +758,14 @@ async fn serve(
         };
         match after {
             After::Stop => return,
-            After::Idle(detail) => r.state(idle(listening), detail).await,
+            After::Idle(detail) => match reconcile(st, &receive_only, &mut listening, &mut dirty).await {
+                Ok(extra) => r.state(idle(listening), extra.or(detail)).await,
+                Err(e) => return r.fault(e).await,
+            },
             After::Recover => {
                 // A recovered modem is not listening until told to be (below).
                 listening = false;
+                dirty = false;
                 r.session(None).await;
                 r.state(ModemState::Recovering, None).await;
                 // Recovery can take a minute; a stop must not wait for it.
@@ -730,7 +783,8 @@ async fn serve(
                 }
                 r.send(ReportKind::ListenMode(st.listen_mode())).await;
                 r.state(ModemState::Ready, None).await;
-                if want_listen {
+                // Receive only may have been chosen while recovering.
+                if !receive_only.load(Ordering::SeqCst) {
                     arm(st, r, &mut listening).await;
                 }
             }
@@ -866,8 +920,8 @@ async fn link(
     r: &Reporter,
     info: ConnectInfo,
     direction: SessionDirection,
-    listening: &mut bool,
-    want_listen: &mut bool,
+    receive_only: &AtomicBool,
+    dirty: &mut bool,
 ) -> After {
     r.state(ModemState::Negotiating, Some(info.peer.clone())).await;
     let records = match Store::open(&st.cfg.data_dir.join("station.db")) {
@@ -943,12 +997,12 @@ async fn link(
                         send_wire(Command::Abort);
                         r.state(ModemState::Draining, Some("aborting".into())).await;
                     }
-                    Some(ModemCmd::SetListen(on)) => {
+                    Some(ModemCmd::ListenChanged) => {
                         // Receive only changes LISTEN, never the session; the
-                        // modem takes LISTEN mid-link. The state shown stays.
-                        send_wire(Command::Listen(on));
-                        *want_listen = on;
-                        *listening = on;
+                        // modem takes LISTEN mid-link. The answer is not seen
+                        // here, so the modem repeats it once idle (dirty).
+                        send_wire(Command::Listen(!receive_only.load(Ordering::SeqCst)));
+                        *dirty = true;
                     }
                     Some(ModemCmd::Submit { peer, id }) => {
                         if peer == link.info.peer && !ending && !aborted {

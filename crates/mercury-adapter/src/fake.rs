@@ -26,6 +26,8 @@ struct Station {
     mode_wrong: bool,
     /// Answer `LISTEN ON` with WRONG (fault injection).
     listen_wrong: bool,
+    /// Answer `LISTEN OFF` with WRONG (fault injection); the setting stays.
+    listen_off_wrong: bool,
 }
 
 impl Station {
@@ -43,6 +45,8 @@ struct Shared {
     hold_from: [bool; 2],
     /// A CONNECT nobody answers stays pending (Mercury keeps retrying).
     unanswered_calls: bool,
+    /// DISCONNECT is acknowledged but the link stays up until `drop_link`.
+    hold_disconnect: bool,
     held: Vec<(usize, Vec<u8>)>,
     /// Bytes delivered to the far data socket, per direction (0: A->B, 1: B->A).
     delivered: [u64; 2],
@@ -143,6 +147,11 @@ impl FakeNet {
         self.shared.lock().unwrap().unanswered_calls = on;
     }
 
+    /// A DISCONNECT is answered OK but does not end the link (until `drop_link`).
+    pub fn set_hold_disconnect(&self, on: bool) {
+        self.shared.lock().unwrap().hold_disconnect = on;
+    }
+
     /// Deliver held bytes (to whichever far data socket is attached now).
     pub fn release_held(&self) {
         let mut s = self.shared.lock().unwrap();
@@ -184,6 +193,11 @@ impl FakeNet {
     /// Make station `i` answer `LISTEN ON` with WRONG.
     pub fn set_listen_wrong(&self, i: usize, wrong: bool) {
         self.shared.lock().unwrap().st[i].listen_wrong = wrong;
+    }
+
+    /// Make station `i` answer `LISTEN OFF` with WRONG (and stay listening).
+    pub fn set_listen_off_wrong(&self, i: usize, wrong: bool) {
+        self.shared.lock().unwrap().st[i].listen_off_wrong = wrong;
     }
 
     /// Whether station `i` is listening now, as the fake modem sees it.
@@ -289,7 +303,7 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             send_line(&s, i, &format!("REGISTERED {c}"));
         }
         ["LISTEN", v] => {
-            if *v != "OFF" && s.st[i].listen_wrong {
+            if (*v != "OFF" && s.st[i].listen_wrong) || (*v == "OFF" && s.st[i].listen_off_wrong) {
                 send_line(&s, i, "WRONG");
             } else {
                 s.st[i].listen = *v != "OFF";
@@ -344,7 +358,9 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             if words[0] == "ABORT" {
                 s.held.clear();
             }
-            if s.session.take().is_some() {
+            if words[0] == "DISCONNECT" && s.hold_disconnect {
+                // Fault injection: the link stays up until `drop_link`.
+            } else if s.session.take().is_some() {
                 for k in 0..2 {
                     send_line(&s, k, "DISCONNECTED");
                 }

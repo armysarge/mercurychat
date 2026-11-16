@@ -299,3 +299,156 @@ async fn set_receive_only_while_unavailable_is_conflict() {
         other => panic!("expected Conflict, got {other:?}"),
     }
 }
+
+/// Have `peer` call us and then say nothing (no HELLO), held by the test.
+fn silent_call(mut peer: Station) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let _ = peer.call(&Callsign::parse("ZS6ABC").unwrap(), Duration::from_secs(10)).await;
+        tokio::time::sleep(Duration::from_secs(60)).await;
+    })
+}
+
+async fn saved_profile(h: &AppHandle) -> StationProfile {
+    snapshot(h).await.profiles.into_iter().next().unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn receive_only_set_mid_session_survives_an_abrupt_link_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let peer = peer_station(&net, &dir.path().join("peer")).await;
+    let o = AppOptions { radio_hello_timeout: Some(Duration::from_secs(1)), ..opts(dir.path()) };
+    let h = spawn_app(Store::open_in_memory().unwrap(), o);
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    // The peer calls (it never sends HELLO): the link ends by HelloTimeout.
+    let _peer = silent_call(peer);
+    until(&mut rx, ModemState::Negotiating).await;
+    // The HELLO wait ends and the modem is asked to DISCONNECT; Mercury is slow
+    // to do it, so the modem waits for the link to end (the cut-short wait).
+    net.set_hold_disconnect(true);
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(10);
+    while count(&net, "A> DISCONNECT") == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "no DISCONNECT after the HELLO timeout");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert_eq!(h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap(), CommandOk::Done);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    net.set_hold_disconnect(false);
+    net.drop_link(); // the link ends now
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let s = snapshot(&h).await;
+    assert_eq!((s.modem, s.listening, s.receive_only), (ModemState::Ready, false, true));
+    assert!(!net.listening(0), "Mercury must not be answering calls");
+
+    let ons = listen_ons(&net);
+    net.kill_client(0);
+    until(&mut rx, ModemState::Recovering).await;
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(listen_ons(&net), ons, "recovery sent LISTEN ON for a Receive only station");
+    assert!(!net.listening(0));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn refused_listen_off_mid_session_is_reconciled_when_idle() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let mut peer = peer_station(&net, &dir.path().join("peer")).await;
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    let peer_task = tokio::spawn(async move {
+        let info = peer.call(&Callsign::parse("ZS6ABC").unwrap(), Duration::from_secs(10)).await.unwrap();
+        let (_cmd_tx, mut cmd_rx) = mpsc::channel(8);
+        let (_req_tx, mut req_rx) = mpsc::channel(1);
+        let (ev_tx, _ev_rx) = mpsc::unbounded_channel();
+        peer.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await
+    });
+    until(&mut rx, ModemState::Connected).await;
+
+    net.set_listen_off_wrong(0, true);
+    let offs = listen_offs(&net);
+    h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while listen_offs(&net) == offs {
+        assert!(tokio::time::Instant::now() < deadline, "LISTEN OFF never reached the modem");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    assert!(net.listening(0), "the fake refused LISTEN OFF");
+    net.set_listen_off_wrong(0, false);
+
+    h.call(AppCommand::Disconnect).await.unwrap();
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(!net.listening(0), "the refused LISTEN OFF was not retried when the session ended");
+    let s = snapshot(&h).await;
+    assert_eq!((s.modem, s.listening, s.receive_only), (ModemState::Ready, false, true));
+    peer_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saving_the_active_profile_as_receive_only_applies_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+
+    let p = receive_only(saved_profile(&h).await);
+    h.call(AppCommand::SaveProfile { profile: p }).await.unwrap();
+    until(&mut rx, ModemState::Ready).await;
+    let s = snapshot(&h).await;
+    assert!(s.receive_only && !s.listening);
+    assert!(!net.listening(0), "Mercury still answers after the profile was saved as Receive only");
+
+    let ons = listen_ons(&net);
+    net.kill_client(0);
+    until(&mut rx, ModemState::Recovering).await;
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(listen_ons(&net), ons, "recovery re-armed a Receive only profile");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn receive_only_during_recovery_prevents_listen_on_after_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    let ons = listen_ons(&net);
+
+    net.kill_client(0);
+    until(&mut rx, ModemState::Recovering).await;
+    assert_eq!(h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap(), CommandOk::Done);
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let s = snapshot(&h).await;
+    assert_eq!((s.modem, s.listening, s.receive_only), (ModemState::Ready, false, true));
+    assert_eq!(listen_ons(&net), ons, "LISTEN ON after a recovery the operator declined");
+    assert!(!net.listening(0));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn receive_only_while_calling_sends_listen_off_when_the_call_ends() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    net.set_unanswered_calls(true);
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    h.call(AppCommand::Call { peer: "ZS6PEER".into() }).await.unwrap();
+    until(&mut rx, ModemState::Calling).await;
+
+    assert_eq!(h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap(), CommandOk::Done);
+    let offs = listen_offs(&net);
+    h.call(AppCommand::CancelCall).await.unwrap();
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let s = snapshot(&h).await;
+    assert_eq!((s.modem, s.listening, s.receive_only), (ModemState::Ready, false, true));
+    assert!(listen_offs(&net) > offs, "LISTEN OFF never went out after the call");
+    assert!(!net.listening(0));
+}
