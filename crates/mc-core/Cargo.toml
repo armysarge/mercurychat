@@ -33,3 +33,5 @@ filetime = "0.2"
 mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }
 tokio = { version = "1", features = ["full"] }
 tempfile = "3"
+# Same version as mc-storage: lets a test break the peer's store on purpose.
+rusqlite = { version = "0.37", features = ["bundled"] }

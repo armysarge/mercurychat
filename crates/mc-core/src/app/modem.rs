@@ -18,8 +18,9 @@ use mch_protocol::ObjectId;
 use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 /// Where a modem task keeps its data and takes its locks.
 #[derive(Debug, Clone, Default)]
@@ -30,6 +31,10 @@ pub struct ModemOptions {
     pub locks_dir: Option<PathBuf>,
     /// HELLO wait over a real Mercury; `None` is `RADIO_HELLO_TIMEOUT`.
     pub radio_hello_timeout: Option<Duration>,
+    /// Held by a modem task for its whole life (shared by every task the actor
+    /// starts): a new task waits for every stopped predecessor to let go of
+    /// the modem, its sockets and its locks before it takes them.
+    pub slot: Arc<tokio::sync::Mutex<()>>,
 }
 
 /// What the actor asks of the modem.
@@ -101,6 +106,38 @@ pub fn spawn(
     ModemHandle { generation, cmds: tx }
 }
 
+/// How long a new task waits for its stopped predecessors to let go of the
+/// modem. A stopping task ends a call it was placing first (about 7 s).
+const HANDOVER: Duration = Duration::from_secs(30);
+
+/// How long a Disconnect waits for receipts of messages already handed to the
+/// session before it ends the link anyway (they then go uncertain). Abort
+/// still ends it at once.
+const RECEIPT_DRAIN: Duration = Duration::from_secs(120);
+
+/// After a hand-over, how long an attach that finds Mercury still occupied
+/// (by the predecessor's just-closed sockets) is retried.
+const HANDOVER_ATTACH: Duration = Duration::from_secs(5);
+
+/// What cut a long modem wait short.
+enum Cut {
+    Stop,
+    Abort,
+}
+
+/// Resolves when a long wait (recovery, ending a link) must give way: on
+/// Shutdown or a dropped handle, and on Abort when `abortable`. Anything else
+/// is ignored: the actor only allows it once the modem is idle again.
+async fn cut_short(cmds: &mut mpsc::Receiver<ModemCmd>, abortable: bool) -> Cut {
+    loop {
+        match cmds.recv().await {
+            Some(ModemCmd::Shutdown) | None => return Cut::Stop,
+            Some(ModemCmd::Abort) if abortable => return Cut::Abort,
+            Some(other) => tracing::debug!(?other, "ignored while the modem is busy"),
+        }
+    }
+}
+
 struct Reporter {
     generation: u64,
     tx: mpsc::Sender<ModemReport>,
@@ -161,6 +198,27 @@ async fn open_station(cfg: StationConfig) -> Result<Station, StationError> {
 }
 
 async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiver<ModemCmd>, r: Reporter) {
+    // A task this one replaces may still hold the modem (recovering, ending a
+    // link): wait for it first, or its locks look like another instance. The
+    // slot is declared first, so it is released last, after the locks.
+    let mut handed_over = false;
+    let _slot = match opts.slot.clone().try_lock_owned() {
+        Ok(slot) => slot,
+        Err(_) => {
+            handed_over = true;
+            r.state(ModemState::Attaching, Some("closing the previous connection".into())).await;
+            tokio::select! {
+                slot = tokio::time::timeout(HANDOVER, opts.slot.clone().lock_owned()) => match slot {
+                    Ok(slot) => slot,
+                    Err(_) => {
+                        let s = HANDOVER.as_secs();
+                        return r.fault(format!("the previous modem connection did not close within {s} s")).await;
+                    }
+                },
+                _ = stopped(&mut cmds) => return,
+            }
+        }
+    };
     let Some(stations) = opts.stations_root.clone() else {
         return r.fault("no data folder for the station".into()).await;
     };
@@ -188,8 +246,24 @@ async fn run(profile: StationProfile, opts: ModemOptions, mut cmds: mpsc::Receiv
                 Ok(s) => s,
                 Err(e) => return r.fault(format!("station data: {e}")).await,
             };
+            // Mercury may still see the predecessor's sockets for a moment
+            // after they close: after a hand-over, "occupied" is retried briefly.
+            let patience = if handed_over { HANDOVER_ATTACH } else { Duration::ZERO };
+            let attach = async {
+                let deadline = tokio::time::Instant::now() + patience;
+                loop {
+                    match station.attach().await {
+                        Err(StationError::Attach(mercury_adapter::AttachError::Occupied { .. }))
+                            if tokio::time::Instant::now() < deadline =>
+                        {
+                            tokio::time::sleep(Duration::from_millis(100)).await
+                        }
+                        other => return other,
+                    }
+                }
+            };
             tokio::select! {
-                res = station.attach() => match res {
+                res = attach => match res {
                     Ok(()) => r.state(ModemState::Ready, unarmed).await,
                     Err(e) => return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await,
                 },
@@ -345,13 +419,25 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
                         let _ = st.cancel_call().await;
                         return;
                     }
-                    Calling::Cancelled => match st.cancel_call().await {
-                        Ok(()) => After::Idle(None),
-                        Err(_) => After::Recover,
-                    },
+                    Calling::Cancelled => {
+                        let res = tokio::select! {
+                            res = st.cancel_call() => Some(res),
+                            _ = cut_short(&mut cmds, false) => None,
+                        };
+                        match res {
+                            Some(Ok(())) => After::Idle(None),
+                            Some(Err(_)) => After::Recover,
+                            None => After::Stop,
+                        }
+                    }
                     Calling::Answered(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Outgoing).await,
                     Calling::Answered(Err(StationError::ControlLost | StationError::Detached)) => After::Recover,
-                    Calling::Answered(Err(StationError::BadPeer(p))) => refuse_link(st, r, &p).await,
+                    Calling::Answered(Err(StationError::BadPeer(p))) => {
+                        tokio::select! {
+                            a = refuse_link(st, r, &p) => a,
+                            _ = cut_short(&mut cmds, false) => After::Stop,
+                        }
+                    }
                     Calling::Answered(Err(e)) => {
                         let reason = match e {
                             StationError::CallFailed => format!("{} did not answer", peer.as_str()),
@@ -371,7 +457,12 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
             }
             Idle::Incoming(Ok(info)) => link(st, &mut cmds, r, info, SessionDirection::Incoming).await,
             Idle::Incoming(Err(StationError::Timeout(_))) => continue,
-            Idle::Incoming(Err(StationError::BadPeer(p))) => refuse_link(st, r, &p).await,
+            Idle::Incoming(Err(StationError::BadPeer(p))) => {
+                tokio::select! {
+                    a = refuse_link(st, r, &p) => a,
+                    _ = cut_short(&mut cmds, false) => After::Stop,
+                }
+            }
             Idle::Incoming(Err(StationError::NotOurSession { src, dest, .. })) => {
                 tracing::warn!(%src, %dest, "ignoring a link that is not ours");
                 continue;
@@ -389,7 +480,12 @@ async fn serve(st: &mut Station, mut cmds: mpsc::Receiver<ModemCmd>, r: &Reporte
                 listening = false;
                 r.session(None).await;
                 r.state(ModemState::Recovering, None).await;
-                match st.recover(5).await {
+                // Recovery can take a minute; a stop must not wait for it.
+                let res = tokio::select! {
+                    res = st.recover(5) => res,
+                    _ = cut_short(&mut cmds, false) => return,
+                };
+                match res {
                     Ok(()) => r.state(ModemState::Ready, preferred.then(|| UNARMED.to_string())).await,
                     Err(e) => return r.fault(format!("could not recover the modem: {e}")).await,
                 }
@@ -429,6 +525,13 @@ impl Link {
     fn row(&self, id: &[u8; 16]) -> Option<ChatMessage> {
         let row = self.records.as_ref()?.message(&self.info.peer, id).ok()??;
         Some(ChatMessage::from(&row))
+    }
+
+    /// Whether a message handed to this session has no receipt yet.
+    fn unconfirmed(&self) -> bool {
+        self.submitted.iter().any(|id| {
+            self.row(id).is_some_and(|m| matches!(m.state.as_str(), "queued" | "submitting" | "awaiting_receipt"))
+        })
     }
 
     async fn report(&mut self, r: &Reporter, id: &[u8; 16]) {
@@ -544,43 +647,68 @@ async fn link(
     let mut aborted = false;
     let mut stop = false;
 
+    // Disconnect was asked for (no new submissions from then on).
+    let mut ending = false;
+    // Disconnect waits for receipts until then (RF-03: a disconnect drains).
+    let mut drain_until: Option<tokio::time::Instant> = None;
+    // The session's control pump sends it; its reply is not awaited here,
+    // because the pump only runs while the session is polled.
+    let send_wire = |wire: Command| {
+        let (reply, _) = oneshot::channel();
+        let _ = req_tx.try_send(StationRequest::Command(wire, reply));
+    };
+
     let end = {
         let run = st.run_session(&info, &mut chat_rx, &mut req_rx, ev_tx);
         tokio::pin!(run);
         loop {
             tokio::select! {
                 end = &mut run => break end,
-                Some(ev) = ev_rx.recv() => link.on_event(r, ev).await,
-                c = cmds.recv() => {
-                    let wire = match c {
-                        Some(ModemCmd::Disconnect) => Command::Disconnect,
-                        Some(ModemCmd::Abort) => {
-                            aborted = true;
-                            Command::Abort
-                        }
-                        Some(ModemCmd::Submit { peer, id }) => {
-                            if peer == link.info.peer {
-                                link.submit(r, id.0).await;
-                            }
-                            continue;
-                        }
-                        Some(ModemCmd::Shutdown) | None => {
-                            // Leaving: the modem ends the link when our sockets close.
-                            stop = true;
-                            break SessionEnd::CommandsClosed;
-                        }
-                        Some(other) => {
-                            tracing::debug!(?other, "ignored during a session");
-                            continue;
-                        }
-                    };
-                    // The session's control pump sends it; its reply is not awaited
-                    // here, because the pump only runs while the session is polled.
-                    let (reply, _) = tokio::sync::oneshot::channel();
-                    let _ = req_tx.try_send(StationRequest::Command(wire, reply));
-                    let detail = if aborted { "aborting" } else { "sending what the modem holds, then disconnecting" };
-                    r.state(ModemState::Draining, Some(detail.into())).await;
+                Some(ev) = ev_rx.recv() => {
+                    link.on_event(r, ev).await;
+                    if drain_until.is_some() && !link.unconfirmed() {
+                        drain_until = None;
+                        send_wire(Command::Disconnect);
+                    }
                 }
+                _ = tokio::time::sleep_until(drain_until.unwrap_or_else(tokio::time::Instant::now)), if drain_until.is_some() => {
+                    tracing::info!("receipts still outstanding after {} s; disconnecting", RECEIPT_DRAIN.as_secs());
+                    drain_until = None;
+                    send_wire(Command::Disconnect);
+                }
+                c = cmds.recv() => match c {
+                    Some(ModemCmd::Disconnect) => {
+                        if ending || aborted {
+                            continue; // one DISCONNECT is enough
+                        }
+                        ending = true;
+                        let detail = if link.unconfirmed() {
+                            drain_until = Some(tokio::time::Instant::now() + RECEIPT_DRAIN);
+                            "waiting for receipts, then disconnecting"
+                        } else {
+                            send_wire(Command::Disconnect);
+                            "sending what the modem holds, then disconnecting"
+                        };
+                        r.state(ModemState::Draining, Some(detail.into())).await;
+                    }
+                    Some(ModemCmd::Abort) => {
+                        aborted = true;
+                        drain_until = None;
+                        send_wire(Command::Abort);
+                        r.state(ModemState::Draining, Some("aborting".into())).await;
+                    }
+                    Some(ModemCmd::Submit { peer, id }) => {
+                        if peer == link.info.peer && !ending && !aborted {
+                            link.submit(r, id.0).await;
+                        }
+                    }
+                    Some(ModemCmd::Shutdown) | None => {
+                        // Leaving: the modem ends the link when our sockets close.
+                        stop = true;
+                        break SessionEnd::CommandsClosed;
+                    }
+                    Some(other) => tracing::debug!(?other, "ignored during a session"),
+                },
             }
         }
     };
@@ -620,14 +748,23 @@ async fn link(
         }
         SessionEnd::Disconnected => After::Idle(None),
         // The application session ended but the link may still be up.
+        // Ending it can take a minute; Shutdown and Abort still apply meanwhile.
         SessionEnd::HelloTimeout | SessionEnd::Protocol(_) | SessionEnd::CommandsClosed => {
-            match st.disconnect(Duration::from_secs(60)).await {
-                Ok(()) => After::Idle(None),
-                Err(StationError::Timeout(_)) => match st.abort().await {
-                    Ok(()) => After::Idle(None),
+            let cut = {
+                let ended = st.end_link_after(&end, Duration::from_secs(60));
+                tokio::select! {
+                    res = ended => Ok(res),
+                    c = cut_short(cmds, true) => Err(c),
+                }
+            };
+            match cut {
+                Ok(Ok(())) => After::Idle(None),
+                Ok(Err(_)) => After::Recover,
+                Err(Cut::Stop) => After::Stop,
+                Err(Cut::Abort) => match st.abort().await {
+                    Ok(()) => After::Idle(Some("aborted: delivery of anything not yet confirmed is uncertain".into())),
                     Err(_) => After::Recover,
                 },
-                Err(_) => After::Recover,
             }
         }
     }

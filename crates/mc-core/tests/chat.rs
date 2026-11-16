@@ -172,7 +172,8 @@ fn spawn_peer(net: &FakeNet, dir: &Path, chats: Vec<(ObjectId, &'static str)>) -
             }
             let (_req_tx, mut req_rx) = mpsc::channel(1);
             let (ev_tx, _ev_rx) = mpsc::unbounded_channel();
-            st.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await;
+            let end = st.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await;
+            st.end_link_after(&end, Duration::from_secs(10)).await.unwrap();
         }
     })
 }
@@ -195,7 +196,12 @@ async fn send_while_connected_reaches_delivered() {
     assert_eq!(m.id.len(), 32);
     // The queued event is on the stream too, before the modem takes it.
     let seen = states_of(&mut app.rx, &m.id, "delivered", 15).await;
-    assert_eq!(seen, ["queued", "submitting", "awaiting_receipt", "delivered"]);
+    // Each report reads the row as it is now, so under load a state can be
+    // overtaken before it is read: only forward, queued first, delivered last.
+    let order = ["queued", "submitting", "awaiting_receipt", "delivered"];
+    let rank = |s: &String| order.iter().position(|o| o == s).unwrap_or_else(|| panic!("unexpected state {s}"));
+    assert_eq!(seen.first().map(String::as_str), Some("queued"), "{seen:?}");
+    assert!(seen.windows(2).all(|w| rank(&w[0]) < rank(&w[1])), "states went backwards or repeated: {seen:?}");
     let echo = message(&mut app.rx, None, 15).await;
     assert_eq!((echo.body.as_str(), echo.peer.as_str()), ("echo: hi", PEER));
     let h = history(&app.h, PEER).await;
@@ -319,6 +325,78 @@ async fn drop_then_late_receipt_is_delivered() {
     let last = message(&mut app.rx, Some(&m.id), 10).await;
     assert_eq!(last.state, "delivered", "a late receipt is the truth");
     assert_eq!(received_by(&dir.path().join("peer").join("station.db")).len(), 1, "and nothing was resent");
+}
+
+/// 05 section 3: a receipt only follows a durable store. SIM1's store refuses
+/// the incoming row, so SIM1 must send no receipt and keep no dedup key; once
+/// its store works again, a Retry is stored once and delivered.
+#[tokio::test(flavor = "multi_thread")]
+async fn no_receipt_without_a_durable_store() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let peer_db = dir.path().join("peer").join("station.db");
+    let _peer = spawn_peer(&net, &dir.path().join("peer"), vec![]);
+    let broken = rusqlite::Connection::open(&peer_db).unwrap();
+    broken
+        .execute_batch(
+            "CREATE TRIGGER refuse_in BEFORE INSERT ON messages WHEN NEW.direction = 'in'
+             BEGIN SELECT RAISE(ABORT, 'injected storage failure'); END;",
+        )
+        .unwrap();
+    let mut app = start(&dir.path().join("app.db"), dir.path(), Some(existing(net.a_base))).await;
+    connect(&mut app).await;
+    let m = send(&app.h, PEER, "must be stored first").await.unwrap();
+    let end = loop {
+        let state = message(&mut app.rx, Some(&m.id), 30).await.state;
+        if state == "uncertain" || state == "delivered" {
+            break state;
+        }
+    };
+    assert_eq!(end, "uncertain", "delivered without a durable store at SIM1");
+    let keys: i64 = broken
+        .query_row("SELECT count(*) FROM dedup WHERE wire_id = ?1", [hex::decode(&m.id).unwrap()], |r| r.get(0))
+        .unwrap();
+    assert_eq!(keys, 0, "the dedup key was kept without the message");
+    assert!(received_by(&peer_db).is_empty());
+    until(&mut app.rx, ModemState::Ready, 60).await;
+
+    broken.execute_batch("DROP TRIGGER refuse_in;").unwrap();
+    connect(&mut app).await;
+    app.h.call(AppCommand::RetryChat { peer: PEER.into(), id: m.id.clone() }).await.unwrap();
+    states_of(&mut app.rx, &m.id, "delivered", 15).await;
+    let at_sim1 = received_by(&peer_db);
+    assert_eq!(at_sim1.len(), 1, "the retry was stored once at SIM1");
+    assert_eq!(hex::encode(at_sim1[0].1), m.id);
+}
+
+/// RF-03: Disconnect drains. A message still awaiting its receipt keeps the
+/// link up until the receipt arrives (bounded); only then is DISCONNECT sent,
+/// and the message ends delivered, not uncertain (final review I4).
+#[tokio::test(flavor = "multi_thread")]
+async fn disconnect_waits_for_outstanding_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let _peer = spawn_peer(&net, &dir.path().join("peer"), vec![]);
+    let mut app = start(&dir.path().join("app.db"), dir.path(), Some(existing(net.a_base))).await;
+    connect(&mut app).await;
+    net.set_hold_from(1, true); // SIM1's receipt is slow to come back
+    let m = send(&app.h, PEER, "last words").await.unwrap();
+    states_of(&mut app.rx, &m.id, "awaiting_receipt", 10).await;
+    wait_for("the receipt to be held", || net.held_len() > 0).await;
+
+    assert_eq!(app.h.call(AppCommand::Disconnect).await.unwrap(), CommandOk::Done);
+    until(&mut app.rx, ModemState::Draining, 5).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert!(!net.log().iter().any(|l| l == "A> DISCONNECT"), "DISCONNECT sent with a receipt outstanding");
+
+    let receipt = net.take_held();
+    net.set_hold_from(1, false);
+    for (from, bytes) in receipt {
+        net.inject(from, bytes);
+    }
+    assert_eq!(message(&mut app.rx, Some(&m.id), 10).await.state, "delivered");
+    until(&mut app.rx, ModemState::Ready, 15).await;
+    assert!(net.log().iter().any(|l| l == "A> DISCONNECT"), "the link was ended once drained");
 }
 
 #[tokio::test(flavor = "multi_thread")]

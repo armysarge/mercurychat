@@ -48,7 +48,17 @@ function useSimulator() {
 
 function useExisting() {
   const v = ex.value;
-  const draft: StationProfile = {
+  // The same Mercury for the same callsign is the same station: reuse it, so
+  // its history stays reachable (as useSimulator does).
+  const existing = snapshot.value?.profiles.find(
+    (p) =>
+      p.modem.kind === "existing" &&
+      p.callsign === v.callsign.trim().toUpperCase() &&
+      p.modem.host.toLowerCase() === v.host.trim().toLowerCase() &&
+      p.modem.controlPort === Number(v.controlPort) &&
+      p.modem.dataPort === Number(v.dataPort),
+  );
+  const draft: StationProfile = existing ?? {
     id: "",
     callsign: v.callsign,
     name: null,

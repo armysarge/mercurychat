@@ -257,6 +257,62 @@ async fn control_loss_recovers_unarmed() {
 
 /// Over a real modem HELLO takes tens of seconds (M0: 23 s at BW2300, 48.7 s
 /// at BW500), so a real Mercury's session must not give up after a few.
+/// A task stopped mid-recovery still holds the endpoint lock and sockets; the
+/// station selected again must wait for it to let go, not fault with
+/// "another MercuryChat instance" naming our own pid (final review I1).
+#[tokio::test(flavor = "multi_thread")]
+async fn reselect_while_recovering_hands_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let h = spawn_app(
+        Store::open_in_memory().unwrap(),
+        AppOptions { locks_dir: Some(dir.path().join("locks")), ..opts(dir.path()) },
+    );
+    let id = match h.call(AppCommand::SaveProfile { profile: existing(net.a_base) }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
+    until(&mut rx, ModemState::Ready, 15).await;
+
+    net.kill_client(0); // idle: recovery waits ~20 s for a teardown frame that never keys
+    until(&mut rx, ModemState::Recovering, 10).await;
+    h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    until(&mut rx, ModemState::Ready, 15).await;
+    assert_eq!(snapshot(&h).await.modem, ModemState::Ready);
+}
+
+/// Deterministic form of the above: a task stopped while calling ends the call
+/// at the modem first (about 2 s) and holds the endpoint lock meanwhile. "No
+/// station" then the same station again must still wait for it (CI found the
+/// hand-over lost across the "no station" selection).
+#[tokio::test(flavor = "multi_thread")]
+async fn reselect_while_a_call_is_cancelled_hands_over() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    net.set_unanswered_calls(true); // nobody answers, and Mercury keeps trying
+    let h = spawn_app(
+        Store::open_in_memory().unwrap(),
+        AppOptions { locks_dir: Some(dir.path().join("locks")), ..opts(dir.path()) },
+    );
+    let id = match h.call(AppCommand::SaveProfile { profile: existing(net.a_base) }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
+    until(&mut rx, ModemState::Ready, 15).await;
+    call(&h, "SIM1").await.unwrap();
+    until(&mut rx, ModemState::Calling, 5).await;
+
+    h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    until(&mut rx, ModemState::Ready, 15).await;
+    assert!(net.log().iter().any(|l| l == "A> ABORT"), "the stopped task ended the call at the modem");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn existing_modem_waits_for_a_slow_hello() {
     let dir = tempfile::tempdir().unwrap();

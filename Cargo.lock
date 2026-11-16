@@ -2008,6 +2008,7 @@ dependencies = [
  "mch-protocol",
  "mercury-adapter",
  "rand",
+ "rusqlite",
  "serde",
  "serde_json",
  "sha2",

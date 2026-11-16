@@ -22,7 +22,13 @@ async function act(step: () => Promise<unknown>) {
   }
 }
 const select = (id: string | null) => act(() => call({ type: "selectProfile", id }));
-const remove = (id: string) => act(() => call({ type: "deleteProfile", id }));
+/** The profile whose Delete is waiting for a yes (docs/04 §5: destructive
+ *  actions are explicit). */
+const confirming = ref<string | null>(null);
+const remove = (id: string) => {
+  confirming.value = null;
+  return act(() => call({ type: "deleteProfile", id }));
+};
 const where = (p: StationProfile) => (p.modem.kind === "simulator" ? "simulator" : `${p.modem.host}:${p.modem.controlPort}`);
 </script>
 
@@ -37,9 +43,20 @@ const where = (p: StationProfile) => (p.modem.kind === "simulator" ? "simulator"
           <span class="muted small">{{ where(p) }}</span>
           <span v-if="p.id === snapshot.activeProfileId" class="ok small">in use</span>
           <span class="grow"></span>
-          <button v-if="p.id === snapshot.activeProfileId" :disabled="working" @click="select(null)">Stop using</button>
-          <button v-else :disabled="working" @click="select(p.id)">Use</button>
-          <button class="quiet" :disabled="working" :aria-label="'Delete ' + p.callsign" @click="remove(p.id)">Delete</button>
+          <template v-if="confirming === p.id">
+            <p class="confirm small" role="alert">
+              Delete {{ p.callsign }}?
+              <template v-if="p.id === snapshot.activeProfileId">It is in use: any session ends at once. </template>
+              Its message history stays on this computer but is no longer shown.
+            </p>
+            <button class="danger" :disabled="working" @click="remove(p.id)">Delete {{ p.callsign }}</button>
+            <button :disabled="working" @click="confirming = null">Cancel</button>
+          </template>
+          <template v-else>
+            <button v-if="p.id === snapshot.activeProfileId" :disabled="working" @click="select(null)">Stop using</button>
+            <button v-else :disabled="working" @click="select(p.id)">Use</button>
+            <button class="quiet" :disabled="working" :aria-label="'Delete ' + p.callsign" @click="confirming = p.id">Delete</button>
+          </template>
         </li>
       </ul>
       <p v-else class="muted">No station profile yet.</p>
@@ -57,4 +74,5 @@ h1 { font-size: 20px; }
 .profiles li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); padding: 6px 8px; border-radius: 8px; background: var(--raised); }
 .profiles li.active { outline: 1px solid var(--success); }
 .call { font-weight: 650; }
+.confirm { flex-basis: 100%; color: var(--warning); }
 </style>

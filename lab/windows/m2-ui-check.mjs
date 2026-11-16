@@ -9,7 +9,10 @@
 //   6. 1200 px: the session pane is a drawer; Escape closes it, the session stays
 //   7. 800x480: peer, mode, composer, Disconnect and Abort visible and on top
 //   8. a burst of long messages, then Abort -> "uncertain" with Retry, nothing in limbo
-//   9. restart -> history is there, not listening, nothing resent
+//   9. a draft for SIM1 survives switching to another peer at once and back
+//  10. restart -> history and the draft are there, not listening, nothing resent
+//  11. Delete asks first; Cancel keeps the station
+//  12. the same Mercury added twice is one station, not two
 // Usage: node lab/windows/m2-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 //   Against a real Mercury instead (Task 10, see m2-existing.mjs):
 //   ... --existing HOST:PORT --peer SIM2 --peer-log FILE --stop-a CMD --start-a CMD
@@ -43,6 +46,17 @@ const CALL = "ZS6SIM";
 // A textarea normalises CR LF to LF, so the window sends LF line breaks; the
 // core's CR LF round trip is covered by crates/mc-core/tests/chat.rs.
 const TEXT = "héllo 👋\r\nline two\n\tשלום";
+
+/** Open `peer` from the callsign box, as typing it and leaving the box does. */
+const openPeerBox = (peer) => `(() => {
+  const i = document.querySelector('input.peer');
+  i.value = ${JSON.stringify(peer)};
+  i.dispatchEvent(new Event('input'));
+  i.dispatchEvent(new Event('change'));
+})()`;
+const openHeader = "document.querySelector('.peer-header h1')?.textContent.trim()";
+const composerValue = "document.querySelector('textarea.composer')?.value";
+const DRAFT = "a draft for SIM1, not sent";
 
 /** True when `sel` is inside the viewport and is what a click there would hit. */
 const onTop = (sel) => `(() => {
@@ -148,6 +162,21 @@ try {
   }
   results.push(`PASS abort: ${longOnes.map((m) => m.state).join(", ")}; uncertain ones say so and offer Retry`);
   const echoesBefore = after.filter((m) => m.direction === "in").length;
+
+  // A draft typed for SIM1, then another peer opened at once (inside the
+  // save delay), then SIM1 again: the draft is still SIM1's.
+  await s.eval(setInput("textarea.composer", DRAFT));
+  await s.eval(openPeerBox("ZZ9ZZ"));
+  await until(s, `${openHeader} === 'ZZ9ZZ'`, "ZZ9ZZ open");
+  if ((await s.eval(composerValue)) === DRAFT) throw new Error("SIM1's draft is in ZZ9ZZ's composer");
+  await sleep(150);
+  await s.eval(openPeerBox("SIM1"));
+  await until(s, `${openHeader} === 'SIM1'`, "SIM1 open again");
+  await sleep(800);
+  const back = await s.eval(composerValue);
+  if (back !== DRAFT) throw new Error(`SIM1's draft after switching away and back: ${JSON.stringify(back)}`);
+  results.push("PASS draft: kept for SIM1 across a quick switch to ZZ9ZZ and back, never shown for ZZ9ZZ");
+  await sleep(800); // past the save delay
   s.close();
   kill(first);
   await sleep(1500);
@@ -165,7 +194,39 @@ try {
   });
   if (again.filter((m) => m.direction === "in").length > echoesBefore) throw new Error("new incoming messages after restart");
   if (changed.length) throw new Error(`messages changed after restart: ${JSON.stringify(changed)}`);
-  results.push(`PASS restart: ${again.length} message(s) in history unchanged, Receive-only, nothing resent`);
+  await s.eval(openPeerBox("SIM1"));
+  await until(s, `${openHeader} === 'SIM1'`, "SIM1 open after restart");
+  await until(s, `${composerValue} === ${JSON.stringify(DRAFT)}`, "the draft after restart", 5000);
+  results.push(`PASS restart: ${again.length} message(s) in history unchanged, draft kept, Receive-only, nothing resent`);
+
+  // Delete is destructive: it asks first, and Cancel keeps the station.
+  await s.eval(`(${button("Settings")}).click()`);
+  await until(s, "document.querySelector('.profiles li.active')", "the profile list");
+  const count = "document.querySelectorAll('.profiles li').length";
+  const before = await s.eval(count);
+  await s.eval(`[...document.querySelectorAll('.profiles li.active button')].find(b => b.textContent.trim() === 'Delete').click()`);
+  await sleep(500);
+  if ((await s.eval(count)) !== before) throw new Error("Delete removed the station without asking");
+  const asked = await s.eval("document.querySelector('.profiles li.active')?.innerText ?? ''");
+  if (!/delete/i.test(asked) || !asked.includes(CALL)) throw new Error(`no confirmation naming the station: ${asked}`);
+  await s.eval(click("Cancel"));
+  await sleep(300);
+  if ((await s.eval(count)) !== before || !(await s.eval("document.querySelector('.profiles li.active')"))) throw new Error("Cancel did not keep the station");
+  results.push(`PASS delete: asks first ("${asked.split("\n").find((l) => /delete/i.test(l))}"), Cancel keeps ${CALL}`);
+
+  // The same Mercury (callsign, host, ports) added twice is one station, so
+  // its history stays reachable. Port 59001: nothing listens there.
+  for (let i = 0; i < 2; i++) {
+    await s.eval(setInput('form.existing input[name="callsign"]', "zs6sim"));
+    await s.eval(setInput('form.existing input[name="host"]', "127.0.0.1"));
+    await s.eval(setInput('form.existing input[name="controlPort"]', "59001"));
+    await s.eval(setInput('form.existing input[name="dataPort"]', "59002"));
+    await s.eval(click("Use this Mercury"));
+    await sleep(1000);
+  }
+  const same = await s.eval("[...document.querySelectorAll('.profiles li')].filter(l => l.innerText.includes('127.0.0.1:59001')).length");
+  if (same !== 1) throw new Error(`the same Mercury added twice made ${same} stations`);
+  results.push("PASS re-add: the same Mercury added twice is one station");
   s.close();
 } catch (e) {
   results.push(`FAIL ${e.message}`);
