@@ -1,8 +1,6 @@
-<img src="apps/desktop/public/mercurychat.svg" width="96" height="96" alt="MercuryChat logo" />
+# <img style="vertical-align: middle; height: 2em;" src="apps/desktop/public/mercurychat.svg" width="60" height="60" alt="MercuryChat logo" /> MercuryChat
 
-# MercuryChat
-
-Open-source radio messaging for Windows and Linux, powered by the Mercury HF modem.
+Open-source HF radio messaging for Windows and Linux, powered by the Mercury HF modem.
 
 [![Status: Early alpha](https://img.shields.io/badge/status-early%20alpha-B45309)](#immediate-next-milestone)
 [![Platform: Windows and Linux](https://img.shields.io/badge/platform-Windows%20%7C%20Linux-24657D)](src-tauri/tauri.conf.json)

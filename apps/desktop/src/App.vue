@@ -134,8 +134,8 @@ onUnmounted(() => {
   </div>
 
   <div v-else class="shell">
-    <!-- The window has no system frame: this header is the title bar. Every
-         non-interactive part of it drags the window; a double-click maximises. -->
+    <!-- This header is the frameless window's title bar. The drag attributes
+         handle dragging on platforms without WebView2's native drag region. -->
     <header data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
         <img class="mark" src="/mercurychat.svg" width="28" height="28" alt="" data-tauri-drag-region />
@@ -218,8 +218,11 @@ header {
   display: flex; align-items: center; gap: calc(var(--space) * 2); min-height: 46px; flex: none;
   padding: 0 0 0 calc(var(--space) * 2); background: var(--surface); border-bottom: 1px solid var(--border);
   user-select: none; -webkit-user-select: none;
+  app-region: drag;
 }
 header > * { flex: none; }
+/* With the whole header a native drag region, every control in it must opt out or it stops taking clicks. */
+header button, header input, header label, header select, header a { app-region: no-drag; }
 header > .grow { flex: 1; align-self: stretch; }
 header > .state { flex: 0 1 auto; min-width: 0; }
 .utc { margin-right: var(--space); }

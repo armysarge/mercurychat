@@ -45,7 +45,7 @@ onUnmounted(() => unlisten?.());
 </template>
 
 <style scoped>
-.winctl { display: flex; align-self: stretch; }
+.winctl { display: flex; align-self: stretch; app-region: no-drag; }
 .winctl button {
   width: 46px; padding: 0; border: 0; border-radius: 0; background: transparent; color: var(--text-2);
   display: grid; place-items: center;
