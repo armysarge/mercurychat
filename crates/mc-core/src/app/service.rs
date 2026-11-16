@@ -26,6 +26,10 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 const ACTIVE_PROFILE: &str = "activeProfileId";
+/// The setting holding the interface language (`system` when absent).
+pub const UI_LANGUAGE_SETTING: &str = "ui.language";
+/// The values `ui.language` may hold. The UI maps `system` to the OS language.
+pub const UI_LANGUAGES: [&str; 5] = ["system", "en", "es", "pt-BR", "fr"];
 /// Longest history search text, in characters.
 const SEARCH_MAX: usize = 128;
 
@@ -507,6 +511,15 @@ impl App {
             }
             AppCommand::SetFinaliseOnDisconnect { on } => {
                 self.store.set_setting(FINALISE_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SetUiLanguage { language } => {
+                if !UI_LANGUAGES.contains(&language.as_str()) {
+                    return Err(AppError::Validation {
+                        errors: chat::field("language", format!("not one of {}", UI_LANGUAGES.join(", "))),
+                    });
+                }
+                self.store.set_setting(UI_LANGUAGE_SETTING, &language).map_err(storage)?;
                 Ok(CommandOk::Done)
             }
             AppCommand::Macros => self.macros_list().map(|macros| CommandOk::Macros { macros }),
@@ -1050,6 +1063,14 @@ impl App {
         matches!(self.store.setting(FINALISE_SETTING), Ok(Some(v)) if v == "true")
     }
 
+    fn ui_language(&self) -> String {
+        // A stored value outside the list (an older or edited database) reads as the default.
+        match self.store.setting(UI_LANGUAGE_SETTING) {
+            Ok(Some(v)) if UI_LANGUAGES.contains(&v.as_str()) => v,
+            _ => UI_LANGUAGES[0].to_string(),
+        }
+    }
+
     fn snapshot(&mut self) -> Result<AppSnapshot, AppError> {
         let mut profiles = Vec::new();
         for row in self.store.profiles().map_err(storage)? {
@@ -1078,6 +1099,7 @@ impl App {
             telemetry: Box::new(self.telemetry.view(tokio::time::Instant::now())),
             current_qso: self.qso.as_ref().map(|r| Box::new(Qso::from(r))),
             finalise_on_disconnect: self.finalise_on_disconnect(),
+            ui_language: self.ui_language(),
         })
     }
 }

@@ -9,6 +9,7 @@ import type { ChatMessage } from "./bindings/ChatMessage";
 import type { CommandOk } from "./bindings/CommandOk";
 import type { EventEnvelope } from "./bindings/EventEnvelope";
 import type { Since } from "./bindings/Since";
+import { t, te } from "./i18n";
 
 export const EVENT_CHANNEL = "mc://event";
 
@@ -32,18 +33,19 @@ export async function snapshot(): Promise<AppSnapshot> {
   return snap;
 }
 
-/** Operator-readable text for anything a command rejects with. */
+/**
+ * Operator-readable text for anything a command rejects with: the translation
+ * of the error's stable `key` when the UI has one, else the core's English
+ * message. Field errors (validation) carry the core's English text only.
+ */
 export function describeError(e: unknown): string {
   if (e && typeof e === "object" && "code" in e) {
     const err = e as AppError;
-    switch (err.code) {
-      case "validation":
-        return err.errors.map((f) => `${f.field}: ${f.message}`).join("; ");
-      case "notFound":
-        return `Nothing found with id ${err.id}.`;
-      default:
-        return err.message;
+    if (err.code === "validation" && err.errors.length) return err.errors.map((f) => `${f.field}: ${f.message}`).join("; ");
+    if (te(err.key)) {
+      return err.code === "notFound" ? t(err.key, { id: err.id }) : t(err.key, { message: "message" in err ? err.message : "" });
     }
+    return "message" in err ? err.message : String(err.code);
   }
   return String(e);
 }
@@ -81,6 +83,13 @@ export class Mirror {
     // Listen first, then snapshot: anything the snapshot already holds is skipped by seq.
     this.unlisten = await onEvent((env) => this.enqueue(() => this.receive(env)));
     await this.enqueue(() => this.resync());
+  }
+
+  /** The core has stored a new interface language: show it (no event announces it). */
+  setUiLanguage(language: string): void {
+    if (!this.view) return;
+    this.view.snapshot.uiLanguage = language;
+    this.publish();
   }
 
   stop(): void {

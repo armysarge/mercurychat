@@ -47,6 +47,9 @@ pub struct AppSnapshot {
     pub current_qso: Option<Box<Qso>>,
     /// Whether a session's record is finalised when it ends (default no).
     pub finalise_on_disconnect: bool,
+    /// The interface language the operator chose: `system`, `en`, `es`,
+    /// `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
+    pub ui_language: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -152,6 +155,11 @@ pub enum AppCommand {
     SetFinaliseOnDisconnect {
         on: bool,
     },
+    /// Choose the interface language: one of `system`, `en`, `es`, `pt-BR`,
+    /// `fr`. Anything else is refused. Kept in the setting `ui.language`.
+    SetUiLanguage {
+        language: String,
+    },
     /// The active profile's macros (the first call seeds three defaults, once).
     Macros,
     /// Add (empty id) or edit a macro of the active profile.
@@ -195,9 +203,11 @@ pub enum CommandOk {
     Done,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS, thiserror::Error)]
-#[serde(tag = "code", rename_all = "camelCase", rename_all_fields = "camelCase")]
-#[ts(export)]
+/// Why a command was refused. On the wire each variant carries a stable
+/// `key` (see `key`) beside its English `message`: the UI shows its own
+/// translation of the key, and the message is the fallback for a key it does
+/// not know (see `AppErrorWire`).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum AppError {
     #[error("{} field(s) need attention", errors.len())]
     Validation { errors: Vec<FieldError> },
@@ -212,4 +222,101 @@ pub enum AppError {
     /// The request does not fit the current state (e.g. no modem attached).
     #[error("{message}")]
     Conflict { message: String },
+}
+
+impl AppError {
+    /// The stable message key the UI translates (`errors.<variant>`). An
+    /// exhaustive match: a new variant must name its key here.
+    pub fn key(&self) -> &'static str {
+        match self {
+            AppError::Validation { .. } => "errors.validation",
+            AppError::Busy { .. } => "errors.busy",
+            AppError::NotFound { .. } => "errors.notFound",
+            AppError::Storage { .. } => "errors.storage",
+            AppError::Internal { .. } => "errors.internal",
+            AppError::Conflict { .. } => "errors.conflict",
+        }
+    }
+}
+
+/// What `AppError` serialises to, and the source of the generated TypeScript
+/// `AppError`: the old shape plus `key`.
+#[derive(Serialize, TS)]
+#[serde(tag = "code", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export, rename = "AppError")]
+pub(super) enum AppErrorWire {
+    Validation { key: &'static str, errors: Vec<FieldError> },
+    Busy { key: &'static str, message: String },
+    NotFound { key: &'static str, id: String },
+    Storage { key: &'static str, message: String },
+    Internal { key: &'static str, message: String },
+    Conflict { key: &'static str, message: String },
+}
+
+impl From<&AppError> for AppErrorWire {
+    fn from(e: &AppError) -> Self {
+        let key = e.key();
+        match e {
+            AppError::Validation { errors } => AppErrorWire::Validation { key, errors: errors.clone() },
+            AppError::Busy { message } => AppErrorWire::Busy { key, message: message.clone() },
+            AppError::NotFound { id } => AppErrorWire::NotFound { key, id: id.clone() },
+            AppError::Storage { message } => AppErrorWire::Storage { key, message: message.clone() },
+            AppError::Internal { message } => AppErrorWire::Internal { key, message: message.clone() },
+            AppError::Conflict { message } => AppErrorWire::Conflict { key, message: message.clone() },
+        }
+    }
+}
+
+impl Serialize for AppError {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        AppErrorWire::from(self).serialize(serializer)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    /// The key each variant must serialise. A match with no wildcard: adding a
+    /// variant to `AppError` stops this test compiling until it is covered here.
+    fn expected_key(e: &AppError) -> &'static str {
+        match e {
+            AppError::Validation { .. } => "errors.validation",
+            AppError::Busy { .. } => "errors.busy",
+            AppError::NotFound { .. } => "errors.notFound",
+            AppError::Storage { .. } => "errors.storage",
+            AppError::Internal { .. } => "errors.internal",
+            AppError::Conflict { .. } => "errors.conflict",
+        }
+    }
+
+    fn samples() -> Vec<AppError> {
+        vec![
+            AppError::Validation { errors: vec![] },
+            AppError::Busy { message: "b".into() },
+            AppError::NotFound { id: "x".into() },
+            AppError::Storage { message: "s".into() },
+            AppError::Internal { message: "i".into() },
+            AppError::Conflict { message: "c".into() },
+        ]
+    }
+
+    #[test]
+    fn every_app_error_has_a_key() {
+        let mut seen = HashSet::new();
+        for e in samples() {
+            let key = expected_key(&e);
+            assert_eq!(e.key(), key);
+            assert!(key.starts_with("errors."), "{key}");
+            assert!(seen.insert(key), "{key} is used twice");
+            let json = serde_json::to_value(&e).unwrap();
+            assert_eq!(json["key"], key, "serialised beside the code: {json}");
+            assert!(json["code"].is_string(), "{json}");
+            if !matches!(e, AppError::Validation { .. } | AppError::NotFound { .. }) {
+                assert!(json["message"].is_string(), "the English message stays as the fallback: {json}");
+            }
+        }
+        assert_eq!(seen.len(), samples().len());
+    }
 }

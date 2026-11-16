@@ -48,4 +48,9 @@ currentQso: Qso | null,
 /**
  * Whether a session's record is finalised when it ends (default no).
  */
-finaliseOnDisconnect: boolean, };
+finaliseOnDisconnect: boolean, 
+/**
+ * The interface language the operator chose: `system`, `en`, `es`,
+ * `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
+ */
+uiLanguage: string, };

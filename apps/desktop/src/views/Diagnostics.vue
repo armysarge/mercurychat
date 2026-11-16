@@ -3,6 +3,7 @@
 // the IPC round-trip measurement (moved here from the M1 window).
 import { invoke } from "@tauri-apps/api/core";
 import { ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { describeError } from "../api";
 import { info, measureIpc, pingMs } from "../diag";
 
@@ -11,6 +12,7 @@ interface ProbeResult {
   summary: string;
   lines: string[];
 }
+const { t } = useI18n();
 const host = ref("127.0.0.1");
 const port = ref(8300);
 const probing = ref(false);
@@ -31,37 +33,37 @@ async function runProbe() {
 
 <template>
   <div class="diag">
-    <h1>Diagnostics</h1>
+    <h1>{{ t("diag.title") }}</h1>
     <section class="card" aria-labelledby="h-build">
-      <h2 id="h-build">Build and storage</h2>
+      <h2 id="h-build">{{ t("diag.buildTitle") }}</h2>
       <dl v-if="info">
-        <dt>App</dt><dd class="mono">{{ info.app_version }}</dd>
-        <dt>Protocol</dt><dd class="mono">{{ info.protocol }}</dd>
-        <dt>Platform</dt><dd class="mono">{{ info.os }} / {{ info.arch }}</dd>
-        <dt>SQLite</dt><dd class="mono">schema v{{ info.db_schema }}</dd>
-        <dt>Data</dt><dd class="mono path">{{ info.data_root }}</dd>
-        <dt>Locks</dt><dd class="mono path">{{ info.locks_dir }}</dd>
-        <dt>Core ready</dt><dd class="mono">{{ info.startup_ms }} ms after launch</dd>
+        <dt>{{ t("diag.app") }}</dt><dd class="mono">{{ info.app_version }}</dd>
+        <dt>{{ t("diag.protocol") }}</dt><dd class="mono">{{ info.protocol }}</dd>
+        <dt>{{ t("diag.platform") }}</dt><dd class="mono">{{ info.os }} / {{ info.arch }}</dd>
+        <dt>{{ t("diag.sqlite") }}</dt><dd class="mono">{{ t("diag.schema", { n: info.db_schema }) }}</dd>
+        <dt>{{ t("diag.data") }}</dt><dd class="mono path">{{ info.data_root }}</dd>
+        <dt>{{ t("diag.locks") }}</dt><dd class="mono path">{{ info.locks_dir }}</dd>
+        <dt>{{ t("diag.coreReady") }}</dt><dd class="mono">{{ t("diag.afterLaunch", { ms: info.startup_ms }) }}</dd>
       </dl>
-      <p v-else class="muted">Loading…</p>
+      <p v-else class="muted">{{ t("diag.loading") }}</p>
     </section>
 
     <section class="card stack" aria-labelledby="h-probe">
-      <h2 id="h-probe">Modem probe (read-only)</h2>
-      <p class="muted small">Attaches control + data, asks VERSION and BUFFER, reads 3 s of status lines, detaches. Changes no modem setting. Only this computer or a modem named in a station profile.</p>
+      <h2 id="h-probe">{{ t("diag.probeTitle") }}</h2>
+      <p class="muted small">{{ t("diag.probeBody") }}</p>
       <form class="row" @submit.prevent="runProbe">
-        <label>Host <input v-model="host" class="mono" size="14" /></label>
-        <label>Control port <input v-model.number="port" class="mono" type="number" min="1" max="65534" /></label>
-        <button type="submit" :disabled="probing">{{ probing ? "Probing…" : "Probe" }}</button>
+        <label>{{ t("diag.host") }} <input v-model="host" class="mono" size="14" /></label>
+        <label>{{ t("diag.controlPort") }} <input v-model.number="port" class="mono" type="number" min="1" max="65534" /></label>
+        <button type="submit" :disabled="probing">{{ probing ? t("diag.probing") : t("diag.probe") }}</button>
       </form>
       <div v-if="probe" :class="['result', probe.ok ? 'ok' : 'err']" role="status">{{ probe.summary }}</div>
       <pre v-if="probe?.lines.length" class="mono log">{{ probe.lines.join("\n") }}</pre>
     </section>
 
     <section class="card stack" aria-labelledby="h-perf">
-      <h2 id="h-perf">Responsiveness</h2>
-      <div><button @click="measureIpc()">Measure IPC round trip (50×)</button></div>
-      <p v-if="pingMs.length" class="mono">p50 {{ pingMs[0].toFixed(2) }} ms · p95 {{ pingMs[1].toFixed(2) }} ms · max {{ pingMs[2].toFixed(2) }} ms</p>
+      <h2 id="h-perf">{{ t("diag.perfTitle") }}</h2>
+      <div><button @click="measureIpc()">{{ t("diag.measure") }}</button></div>
+      <p v-if="pingMs.length" class="mono">{{ t("diag.latency", { p50: pingMs[0].toFixed(2), p95: pingMs[1].toFixed(2), max: pingMs[2].toFixed(2) }) }}</p>
     </section>
   </div>
 </template>

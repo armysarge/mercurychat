@@ -1,10 +1,11 @@
 // Shared window state: the core's mirrored snapshot, the open conversation
 // and the layout. Views read it; every change to the core goes through a
 // typed command (api.ts) and comes back as an event.
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
+import { applyLanguage, t } from "./i18n";
 
 export const MAX_BYTES = 4096; // CHT-01
 export const PAGE = 50; // messages per history page
@@ -38,6 +39,16 @@ export const activeProfile = computed(() => {
 });
 export const session = computed(() => snapshot.value?.session ?? null);
 
+// The language chosen in Settings is kept by the core: show it as soon as the
+// snapshot says which it is, and whenever it changes.
+watch(
+  () => snapshot.value?.uiLanguage,
+  (language) => {
+    if (language) applyLanguage(language);
+  },
+  { immediate: true },
+);
+
 /** The peer a call or session in progress is with, if any. */
 export const linkPeer = computed(() => {
   switch (modemState.value) {
@@ -54,28 +65,29 @@ export const linkPeer = computed(() => {
 
 /** The header's mode, in words (docs/04 §2: never confuse app-online with reachable). */
 export const modeWord = computed(() => {
-  if (!activeProfile.value) return "No station";
+  if (!activeProfile.value) return t("mode.noStation");
+  const peer = detail.value ?? "";
   switch (modemState.value) {
     case "unavailable":
-      return "Not attached";
+      return t("mode.notAttached");
     case "attaching":
-      return "Attaching";
+      return t("mode.attaching");
     case "ready":
-      return snapshot.value?.receiveOnly ? "Receive only" : "Not answering calls";
+      return snapshot.value?.receiveOnly ? t("mode.receiveOnly") : t("mode.notAnswering");
     case "listening":
-      return "Answering calls";
+      return t("mode.answering");
     case "calling":
-      return `Calling ${detail.value ?? ""}`.trim();
+      return t("mode.calling", { peer }).trim();
     case "negotiating":
-      return `Negotiating with ${detail.value ?? ""}`.trim();
+      return t("mode.negotiating", { peer }).trim();
     case "connected":
-      return `Connected to ${session.value?.peer ?? detail.value ?? ""}`.trim();
+      return t("mode.connected", { peer: session.value?.peer ?? peer }).trim();
     case "draining":
-      return detail.value === "aborting" ? "Aborting" : "Finishing queued traffic";
+      return detail.value === "aborting" ? t("mode.aborting") : t("mode.finishing");
     case "recovering":
-      return "Recovering";
+      return t("mode.recovering");
     case "faulted":
-      return "Modem fault";
+      return t("mode.fault");
   }
 });
 
@@ -254,3 +266,6 @@ export function stopTimers() {
   clearTimeout(convTimer);
   for (const peer of [...draftTimers.values()].map((d) => d.peer)) flushDraft(peer);
 }
+
+/** The modem's state as a word in the current language (the pill and the Link panel). */
+export const modemLabel = computed(() => t(`modem.${modemState.value}`));

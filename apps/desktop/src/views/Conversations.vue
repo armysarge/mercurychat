@@ -2,10 +2,12 @@
 // Conversations (docs/04 §4): callsign list with search and the chosen
 // peer's history, readable whether or not a link is up. Ctrl+F searches it.
 import { onMounted, onUnmounted, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import ConversationList from "../components/ConversationList.vue";
 import Transcript from "../components/Transcript.vue";
 import { chat } from "../store";
 
+const { t } = useI18n();
 const search = ref("");
 const box = ref<HTMLInputElement | null>(null);
 
@@ -22,11 +24,11 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 <template>
   <div class="conversations">
     <aside class="list-pane"><ConversationList /></aside>
-    <section class="history" aria-label="History">
+    <section class="history" :aria-label="t('conversations.history')">
       <div class="row head">
-        <h1 class="mono">{{ chat.open || "History" }}</h1>
+        <h1 class="mono">{{ chat.open || t("conversations.history") }}</h1>
         <span class="grow"></span>
-        <input ref="box" v-model="search" type="search" class="history-search" aria-label="Search this history (Ctrl+F)" placeholder="Search history (Ctrl+F)" />
+        <input ref="box" v-model="search" type="search" class="history-search" :aria-label="t('conversations.historySearchAria')" :placeholder="t('conversations.historySearchPlaceholder')" />
       </div>
       <Transcript class="fill" :filter="search" />
     </section>

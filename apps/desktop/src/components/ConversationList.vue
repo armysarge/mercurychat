@@ -2,8 +2,10 @@
 // Conversations with search, plus a callsign entry to open a new one.
 // Heard stations (discovery) are not part of M2 and are not shown.
 import { computed, ref } from "vue";
+import { useI18n } from "vue-i18n";
 import { activeProfile, chat, linkPeer, openPeer } from "../store";
 
+const { t } = useI18n();
 const emit = defineEmits<{ opened: [peer: string] }>();
 const query = ref("");
 const entry = ref("");
@@ -27,12 +29,12 @@ function openEntry() {
 <template>
   <div class="conv">
     <div class="row head">
-      <h2>Conversations</h2>
+      <h2>{{ t("conversations.title") }}</h2>
       <span class="pill">{{ chat.conversations.length }}</span>
     </div>
     <form class="stack" @submit.prevent="openEntry">
       <label>
-        Callsign
+        {{ t("conversations.callsign") }}
         <input
           v-model="entry"
           class="mono peer"
@@ -40,32 +42,32 @@ function openEntry() {
           autocomplete="off"
           spellcheck="false"
           :disabled="!activeProfile"
-          placeholder="e.g. ZS1ABC"
+          :placeholder="t('conversations.callsignExample')"
           @change="openEntry"
         />
       </label>
     </form>
-    <input v-model="query" class="search" type="search" aria-label="Search conversations" placeholder="Search callsign" />
-    <ul class="list" aria-label="Conversations">
+    <input v-model="query" class="search" type="search" :aria-label="t('conversations.searchAria')" :placeholder="t('conversations.searchPlaceholder')" />
+    <ul class="list" :aria-label="t('conversations.listAria')">
       <li v-for="c in shown" :key="c.peer">
         <button :class="['item', { active: c.peer === chat.open }]" :aria-current="c.peer === chat.open ? 'true' : undefined" @click="open(c.peer)">
           <span class="row top">
             <b class="mono">{{ c.peer }}</b>
-            <span v-if="c.peer === linkPeer" class="small ok">on the link</span>
-            <span v-else-if="chat.unread[c.peer]" class="small accent">{{ chat.unread[c.peer] }} new</span>
+            <span v-if="c.peer === linkPeer" class="small ok">{{ t("conversations.onLink") }}</span>
+            <span v-else-if="chat.unread[c.peer]" class="small accent">{{ t("conversations.newCount", chat.unread[c.peer]) }}</span>
           </span>
           <span class="meta small muted">
-            <span>{{ c.messages }} message{{ c.messages === 1 ? "" : "s" }}</span>
-            <span v-if="c.uncertain" class="warn">{{ c.uncertain }} uncertain</span>
-            <span v-if="c.draft">draft</span>
+            <span>{{ t("conversations.messageCount", c.messages) }}</span>
+            <span v-if="c.uncertain" class="warn">{{ t("conversations.uncertain", c.uncertain) }}</span>
+            <span v-if="c.draft">{{ t("conversations.draft") }}</span>
             <span class="grow"></span>
             <span v-if="c.messages" class="mono">{{ ago(c.lastUtc) }}</span>
           </span>
         </button>
       </li>
     </ul>
-    <p v-if="!shown.length" class="muted small">{{ query ? "No callsign matches." : "No conversations yet. Type a callsign to start one." }}</p>
-    <p class="note small muted">Stations heard on the air are not listed yet. A conversation here does not mean the station is reachable now.</p>
+    <p v-if="!shown.length" class="muted small">{{ query ? t("conversations.noMatch") : t("conversations.none") }}</p>
+    <p class="note small muted">{{ t("conversations.note") }}</p>
   </div>
 </template>
 

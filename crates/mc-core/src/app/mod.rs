@@ -37,7 +37,7 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     let cfg = ts_rs::Config::from_env();
     AppCommand::export_all(&cfg)?;
     CommandOk::export_all(&cfg)?;
-    AppError::export_all(&cfg)?;
+    contract::AppErrorWire::export_all(&cfg)?;
     EventEnvelope::export_all(&cfg)?;
     HeardStation::export_all(&cfg)?;
     ActivityEntry::export_all(&cfg)?;

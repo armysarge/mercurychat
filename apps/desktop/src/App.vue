@@ -6,8 +6,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { describeError } from "./api";
 import { info, measureIpc } from "./diag";
+import { t } from "./i18n";
 import {
-  activeProfile, app, chat, detail, mirror, modemState, modeWord, openPeer, reloadChat, session, snapshot, stopTimers,
+  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, openPeer, reloadChat, session, snapshot, stopTimers,
   type ViewName,
 } from "./store";
 import Conversations from "./views/Conversations.vue";
@@ -22,10 +23,10 @@ const now = ref(new Date());
 let clock: ReturnType<typeof setInterval> | undefined;
 
 const RAIL: { page: ViewName; label: string; icon: string }[] = [
-  { page: "operate", label: "Operate", icon: "M12 12.5V21m-4 0h8M8.5 6.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7M5 3a10 10 0 0 0 0 14m14 0a10 10 0 0 0 0-14M12 9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" },
-  { page: "conversations", label: "Conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
-  { page: "settings", label: "Settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
-  { page: "diagnostics", label: "Diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
+  { page: "operate", label: "nav.operate", icon: "M12 12.5V21m-4 0h8M8.5 6.5a5 5 0 0 0 0 7m7 0a5 5 0 0 0 0-7M5 3a10 10 0 0 0 0 14m14 0a10 10 0 0 0 0-14M12 9.5a1.5 1.5 0 1 0 0 3 1.5 1.5 0 0 0 0-3Z" },
+  { page: "conversations", label: "nav.conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
+  { page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
+  { page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
 ];
 
 const firstUse = computed(() => snapshot.value !== null && snapshot.value.profiles.length === 0);
@@ -33,23 +34,23 @@ const utc = computed(() => now.value.toISOString().slice(11, 19) + " UTC");
 const where = computed(() => {
   const p = activeProfile.value;
   if (!p) return "";
-  return p.modem.kind === "simulator" ? "Simulator · no radio" : `Mercury ${p.modem.host}:${p.modem.controlPort}`;
+  return p.modem.kind === "simulator" ? t("where.simulator") : t("where.mercury", { host: p.modem.host, port: p.modem.controlPort });
 });
 
 /** The persistent banner for the modem's state (docs/04 §3 Recover). */
 const banner = computed(() => {
   switch (modemState.value) {
     case "recovering":
-      return { tone: "warn", role: "alert", text: "Reconnecting to the modem after the connection was lost. Nothing is resent automatically." };
+      return { tone: "warn", role: "alert", text: t("banner.recovering") };
     case "faulted":
-      return { tone: "err", role: "alert", text: `Modem fault: ${detail.value ?? "unknown"}. Use the station again in Settings to retry.` };
+      return { tone: "err", role: "alert", text: t("banner.fault", { detail: detail.value ?? t("banner.faultUnknown") }) };
     case "draining":
       return detail.value === "aborting"
-        ? { tone: "warn", role: "status", text: "Aborting. RF activity may continue briefly." }
-        : { tone: "info", role: "status", text: "Finishing queued traffic, then disconnecting. Abort stops at once." };
+        ? { tone: "warn", role: "status", text: t("banner.aborting") }
+        : { tone: "info", role: "status", text: t("banner.finishing") };
     default:
       if (detail.value?.startsWith("aborted:")) {
-        return { tone: "warn", role: "status", text: `Session aborted: ${detail.value.slice(8).trim()}. Check the messages marked uncertain.` };
+        return { tone: "warn", role: "status", text: t("banner.aborted", { reason: detail.value.slice(8).trim() }) };
       }
       return null;
   }
@@ -103,9 +104,9 @@ onUnmounted(() => {
 <template>
   <div v-if="startupError" class="failed">
     <section class="card" role="alert" aria-labelledby="h-fail">
-      <h2 id="h-fail">MercuryChat cannot start</h2>
+      <h2 id="h-fail">{{ t("app.startFailed") }}</h2>
       <p class="err">{{ startupError }}</p>
-      <p class="muted">Close this window to exit.</p>
+      <p class="muted">{{ t("app.closeToExit") }}</p>
     </section>
   </div>
 
@@ -115,7 +116,7 @@ onUnmounted(() => {
     <header data-tauri-drag-region>
       <div class="brand" data-tauri-drag-region>
         <img class="mark" src="/mercurychat.svg" width="28" height="28" alt="" data-tauri-drag-region />
-        <b>MercuryChat</b><span class="alpha small">early alpha</span>
+        <b>MercuryChat</b><span class="alpha small">{{ t("app.alpha") }}</span>
       </div>
       <div v-if="activeProfile" class="station" data-tauri-drag-region>
         <b class="mono">{{ activeProfile.callsign }}</b>
@@ -124,25 +125,28 @@ onUnmounted(() => {
       <span class="mode" role="status" aria-live="polite" data-tauri-drag-region>{{ modeWord }}</span>
       <span class="grow" data-tauri-drag-region></span>
       <span class="state" data-tauri-drag-region>
-        <span :class="['pill', modemState]">{{ modemState }}</span>
+        <span :class="['pill', modemState]">{{ modemLabel }}</span>
         <span v-if="detail" class="detail muted small">{{ detail }}</span>
       </span>
-      <span class="utc mono small muted" aria-label="UTC time" data-tauri-drag-region>{{ utc }}</span>
+      <span class="utc mono small muted" :aria-label="t('app.utcAria')" data-tauri-drag-region>{{ utc }}</span>
       <WindowControls />
     </header>
 
     <p v-if="banner" :class="['banner', banner.tone]" :role="banner.role">{{ banner.text }}</p>
     <p v-if="app.view?.callFailed" class="banner err" role="alert">
-      Call failed: {{ app.view.callFailed }}
-      <button class="quiet" @click="app.view && (app.view.callFailed = null)">Dismiss</button>
+      {{ t("banner.callFailed", { reason: app.view.callFailed }) }}
+      <button class="quiet" @click="app.view && (app.view.callFailed = null)">{{ t("banner.dismiss") }}</button>
     </p>
     <p v-if="otherSession && app.page === 'operate'" class="banner info" role="status">
-      Session with <b class="mono">{{ otherSession.peer }}</b> ({{ otherSession.direction === "incoming" ? "they called" : "we called" }}).
-      <button class="quiet" @click="openPeer(otherSession.peer)">Open</button>
+      <i18n-t keypath="banner.otherSession" tag="span" scope="global">
+        <template #peer><b class="mono">{{ otherSession.peer }}</b></template>
+        <template #direction>{{ t(otherSession.direction === "incoming" ? "direction.incomingInline" : "direction.outgoingInline") }}</template>
+      </i18n-t>
+      <button class="quiet" @click="openPeer(otherSession.peer)">{{ t("banner.open") }}</button>
     </p>
 
     <div class="body">
-      <nav class="rail" aria-label="Sections">
+      <nav class="rail" :aria-label="t('nav.label')">
         <button
           v-for="r in RAIL"
           :key="r.page"
@@ -151,11 +155,11 @@ onUnmounted(() => {
           @click="go(r.page)"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="r.icon" /></svg>
-          {{ r.label }}
+          {{ t(r.label) }}
         </button>
       </nav>
       <main class="view">
-        <p v-if="!snapshot" class="muted loading">Loading…</p>
+        <p v-if="!snapshot" class="muted loading">{{ t("app.loading") }}</p>
         <Welcome v-else-if="firstUse" />
         <Operate v-else-if="app.page === 'operate'" />
         <Conversations v-else-if="app.page === 'conversations'" />
@@ -194,11 +198,12 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .banner.err { border-left: 3px solid var(--danger); }
 .banner.info { border-left: 3px solid var(--accent); }
 .banner button { padding: 2px 10px; }
-.body { flex: 1; display: grid; grid-template-columns: 84px minmax(0, 1fr); min-height: 0; }
+.body { flex: 1; display: grid; grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); min-height: 0; }
 .rail { display: flex; flex-direction: column; gap: 6px; padding: var(--space) 6px; border-right: 1px solid var(--border); background: var(--surface); }
 .rail button {
   display: grid; justify-items: center; gap: 2px; padding: 8px 2px; font-size: 11px;
   border-color: transparent; background: transparent; color: var(--text-2);
+  overflow-wrap: anywhere; hyphens: auto; text-align: center;
 }
 .rail svg {
   width: 18px; height: 18px; fill: none; stroke: currentColor;
@@ -213,7 +218,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   header { gap: var(--space); }
 }
 @media (max-width: 900px) {
-  .body { grid-template-columns: 64px minmax(0, 1fr); }
+  .body { grid-template-columns: minmax(64px, 84px) minmax(0, 1fr); }
   .rail button { font-size: 9px; }
   .alpha, .utc { display: none; }
 }

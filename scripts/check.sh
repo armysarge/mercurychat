@@ -15,6 +15,7 @@ cargo test --workspace --features mc-core/sim
 # The workspace build turns the simulator on (src-tauri enables it); check the
 # core without it too, so the cfg(not(feature = "sim")) path keeps compiling.
 cargo clippy -p mc-core --all-targets -- -D warnings
+node apps/desktop/scripts/check-i18n.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`
