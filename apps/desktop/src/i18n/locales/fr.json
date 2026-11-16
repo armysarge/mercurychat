@@ -246,7 +246,8 @@
     "opening": "Ouverture des données de la station…",
     "modem": "Démarrage du modem…",
     "close": "Fermer",
-    "progressAria": "Démarrage de MercuryChat"
+    "progressAria": "Démarrage de MercuryChat",
+    "timedOut": "Le démarrage prend trop de temps. Fermez cette fenêtre et réessayez."
   },
   "menu": {
     "cut": "Couper",

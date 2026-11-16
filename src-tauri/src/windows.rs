@@ -17,8 +17,9 @@ pub const MAIN: &str = "main";
 /// The splash stays at least this long, so the bar is seen rather than flashed.
 /// `MC_SPLASH_MIN_MS` overrides it (the lab holds the splash to inspect it).
 const SPLASH_MIN: Duration = Duration::from_millis(700);
-/// If the UI never reports ready, show the window anyway after this long.
-const REVEAL_FAILSAFE: Duration = Duration::from_secs(20);
+/// If nothing has been shown by then, the splash says start-up is taking too
+/// long and offers Close. `MC_STARTUP_TIMEOUT_MS` overrides it (lab and tests).
+const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 /// Moves and resizes are saved once the window has been still for this long.
 const SAVE_DELAY: Duration = Duration::from_millis(500);
 
@@ -32,6 +33,8 @@ pub enum Stage {
     Modem,
     /// Start-up failed: the splash shows the message and a Close button.
     Failed { message: String },
+    /// Nothing was shown in time (a stalled core or window): the splash says so, with Close.
+    TimedOut,
 }
 
 /// Shared by the splash page (it polls `splash_status`) and the hand-over.
@@ -154,7 +157,7 @@ pub fn create_main(app: &AppHandle, data_dir: &Path) -> tauri::Result<()> {
     let r = placement.rect;
     let win = WebviewWindowBuilder::new(app, MAIN, WebviewUrl::default())
         .title("MercuryChat")
-        .min_inner_size(800.0, 480.0)
+        .min_inner_size(window_state::MIN_SIZE.width as f64, window_state::MIN_SIZE.height as f64)
         .decorations(false)
         .shadow(false)
         .visible(false)
@@ -180,13 +183,29 @@ pub fn create_main(app: &AppHandle, data_dir: &Path) -> tauri::Result<()> {
         WindowEvent::CloseRequested { .. } => tracker.capture(&watched),
         _ => {}
     });
-    // A UI that never reports ready must not leave the operator with only a splash.
+    Ok(())
+}
+
+/// Arm the start-up timeout. It lives apart from `boot`, so it also covers a
+/// core that hangs or a UI that never reports ready.
+pub fn arm_startup_timeout(app: &AppHandle) {
+    let wait = std::env::var("MC_STARTUP_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .map(Duration::from_millis)
+        .unwrap_or(STARTUP_TIMEOUT);
     let app = app.clone();
     std::thread::spawn(move || {
-        std::thread::sleep(REVEAL_FAILSAFE);
-        reveal(&app);
+        std::thread::sleep(wait);
+        let Some(splash) = app.try_state::<Splash>() else { return };
+        if splash.revealed.load(Ordering::SeqCst) {
+            return;
+        }
+        let mut stage = splash.stage.lock().unwrap_or_else(|e| e.into_inner());
+        if !matches!(*stage, Stage::Failed { .. }) {
+            *stage = Stage::TimedOut;
+        }
     });
-    Ok(())
 }
 
 /// Show the main window and close the splash (once).

@@ -112,6 +112,8 @@ onMounted(async () => {
     if (selfMeasure) await measureIpc(200);
   } catch (e) {
     startupError.value = describeError(e);
+    // The window is still hidden behind the splash: show it now, with the error.
+    void invoke("ui_ready").catch(() => {});
   }
 });
 onUnmounted(() => {

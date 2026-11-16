@@ -101,7 +101,12 @@ try {
   // A lab-only hold (MC_SPLASH_MIN_MS) keeps the splash up long enough to list the native windows.
   const during = windows(first.pid);
   if (during.length !== 1 || Math.abs(during[0].w / dom.dpr - 360) > 24) throw new Error(`windows while the splash is up: ${JSON.stringify(during)}`);
-  const quiet = await sc.eval("(() => { const m = matchMedia('(prefers-reduced-motion: reduce)'); return !!document.querySelector('style, link[rel=stylesheet]') && typeof m.matches === 'boolean'; })()");
+  // Reduced motion, emulated: the bar must stop moving (not merely have a rule somewhere).
+  await sc.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  const still = await sc.eval("getComputedStyle(document.querySelector('.bar i')).animationName");
+  await sc.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  const moving = await sc.eval("getComputedStyle(document.querySelector('.bar i')).animationName");
+  if (still !== "none" || moving === "none") throw new Error(`reduced motion: animation "${still}" when reduced, "${moving}" otherwise`);
   sc.close();
   s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
   const after = await pages(port);
@@ -111,7 +116,7 @@ try {
   if ((await pages(port)).some(isSplash)) throw new Error("the splash is still open after the main window loaded");
   const main = windows(first.pid);
   if (main.length !== 1 || main[0].w < 960 * 0.9) throw new Error(`main window after hand-over: ${JSON.stringify(main)}`);
-  results.push(`PASS splash: ${dom.w}x${dom.h} CSS px, centred, frameless, the only visible window of the app while it was up ("${dom.status}", logo, bar animated, reduced-motion rule ${quiet ? "present" : "missing"}), gone once the UI loaded (${after.length} pages seen)`);
+  results.push(`PASS splash: ${dom.w}x${dom.h} CSS px, centred, frameless, the only visible window of the app while it was up ("${dom.status}", logo, bar animated, bar animation "${moving}" -> "${still}" under emulated prefers-reduced-motion), gone once the UI loaded (${after.length} pages seen)`);
 
   // ---- 2. first use and the header mode
   const welcome = await s.eval("document.querySelector('.welcome').innerText");
@@ -263,7 +268,27 @@ try {
   try { process.kill(second.pid, 0); } catch { alive = false; }
   if (alive) throw new Error("Close did not exit the failed instance");
   results.push(`PASS start-up failure: the splash shows "${failure.replace(/\s+/g, " ").slice(0, 90)}…" with a Close button, no blank window, Close exits`);
-  s.close();
+
+  // ---- 10. a stalled start-up gives up: the splash says so and offers Close
+  kill(first);
+  await sleep(1500);
+  process.env.MC_BOOT_STALL_MS = "60000";
+  process.env.MC_STARTUP_TIMEOUT_MS = "3000";
+  const stalled = launch(exe, dataDir, port);
+  delete process.env.MC_BOOT_STALL_MS;
+  delete process.env.MC_STARTUP_TIMEOUT_MS;
+  children.push(stalled);
+  const t0 = Date.now();
+  const sp = await page(port, (t) => /too long/i.test(t), "the splash giving up on a stalled start", 15000);
+  const waited = Date.now() - t0;
+  if (!(await sp.eval("!!document.querySelector('.failure') && [...document.querySelectorAll('button')].some(b => b.textContent.trim() === 'Close')"))) throw new Error("no Close button on the timed-out splash");
+  await sp.eval(click("Close"));
+  await sleep(1500);
+  let up = true;
+  try { process.kill(stalled.pid, 0); } catch { up = false; }
+  if (up) throw new Error("Close did not exit the stalled instance");
+  results.push(`PASS stalled start-up: after a 3 s test timeout (seen at ${waited} ms) the splash says it is taking too long and Close exits`);
+  sp.close();
 } catch (e) {
   results.push(`FAIL ${e.message}`);
 } finally {

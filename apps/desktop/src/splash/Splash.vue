@@ -3,10 +3,10 @@
 // line while the station data opens and the modem starts. A start-up failure
 // shows its message here with a Close button instead of a blank window.
 import { invoke } from "@tauri-apps/api/core";
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 
-type Status = { stage: "opening" } | { stage: "modem" } | { stage: "failed"; message: string };
+type Status = { stage: "opening" } | { stage: "modem" } | { stage: "timedOut" } | { stage: "failed"; message: string };
 
 const { t } = useI18n();
 const status = ref<Status>({ stage: "opening" });
@@ -25,16 +25,17 @@ onMounted(() => {
 });
 onUnmounted(() => clearInterval(timer));
 const quit = () => invoke("quit_app");
+const stuck = computed(() => status.value.stage === "failed" || status.value.stage === "timedOut");
 </script>
 
 <template>
   <main class="splash">
-    <img v-if="status.stage !== 'failed'" class="mark" src="/mercurychat.svg" width="56" height="56" alt="" />
-    <b v-if="status.stage !== 'failed'" class="name">MercuryChat</b>
-    <template v-if="status.stage === 'failed'">
+    <img v-if="!stuck" class="mark" src="/mercurychat.svg" width="56" height="56" alt="" />
+    <b v-if="!stuck" class="name">MercuryChat</b>
+    <template v-if="stuck">
       <section class="failure" role="alert">
         <p class="err title">{{ t("app.startFailed") }}</p>
-        <p class="message small">{{ status.message }}</p>
+        <p class="message small">{{ status.stage === "failed" ? status.message : t("splash.timedOut") }}</p>
       </section>
       <button class="primary" @click="quit">{{ t("splash.close") }}</button>
     </template>

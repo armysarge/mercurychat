@@ -246,7 +246,8 @@
     "opening": "Abrindo os dados da estação…",
     "modem": "Iniciando o modem…",
     "close": "Fechar",
-    "progressAria": "Iniciando o MercuryChat"
+    "progressAria": "Iniciando o MercuryChat",
+    "timedOut": "A inicialização está demorando demais. Feche esta janela e tente novamente."
   },
   "menu": {
     "cut": "Recortar",

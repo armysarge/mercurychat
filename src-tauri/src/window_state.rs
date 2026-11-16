@@ -9,12 +9,13 @@
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// The smallest the window is restored at, unless the screen itself is smaller.
-pub const MIN_SIZE: Size = Size { width: 960, height: 640 };
+/// The smallest the window can be: the runtime minimum (`min_inner_size`) and
+/// the floor a saved size is restored at, unless the screen itself is smaller.
+pub const MIN_SIZE: Size = Size { width: 800, height: 480 };
 /// The size on first run, in logical pixels (scaled by the primary monitor).
 pub const DEFAULT_LOGICAL: Size = Size { width: 1180, height: 760 };
 /// A saved rectangle is restored only when this much of it (percent) lies on one monitor.
-const VISIBLE_PERCENT: i64 = 80;
+const VISIBLE_PERCENT: i128 = 80;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Size {
@@ -74,10 +75,11 @@ pub fn clamp_to(area: MonitorArea, rect: WindowRect) -> WindowRect {
 }
 
 /// How much of `rect` lies inside `area`, in square pixels.
-fn overlap(area: &MonitorArea, rect: &WindowRect) -> i64 {
+fn overlap(area: &MonitorArea, rect: &WindowRect) -> i128 {
+    // Wide arithmetic: a damaged file may hold any numbers, and must not overflow.
     let span = |a: i32, alen: u32, r: i32, rlen: u32| {
-        let lo = (a as i64).max(r as i64);
-        let hi = (a as i64 + alen as i64).min(r as i64 + rlen as i64);
+        let lo = (a as i128).max(r as i128);
+        let hi = (a as i128 + alen as i128).min(r as i128 + rlen as i128);
         (hi - lo).max(0)
     };
     span(area.x, area.width, rect.x, rect.width) * span(area.y, area.height, rect.y, rect.height)
@@ -87,7 +89,7 @@ fn overlap(area: &MonitorArea, rect: &WindowRect) -> i64 {
 /// `default` is the first-run size (physical pixels).
 pub fn restore_rect(saved: Option<WindowRect>, monitors: &[MonitorArea], default: Size) -> Placement {
     if let Some(saved) = saved {
-        let whole = saved.width as i64 * saved.height as i64;
+        let whole = saved.width as i128 * saved.height as i128;
         let home = monitors.iter().find(|m| whole > 0 && overlap(m, &saved) * 100 >= whole * VISIBLE_PERCENT);
         if let Some(monitor) = home {
             let rect = clamp_to(*monitor, saved);
@@ -222,10 +224,41 @@ mod tests {
     #[test]
     fn minimum_size_holds_unless_the_screen_is_smaller() {
         let c = clamp_to(main_screen(), rect(10, 10, 300, 200));
-        assert_eq!((c.width, c.height), (960, 640));
-        let tiny = area(0, 0, 800, 600, true);
+        assert_eq!((c.width, c.height), (800, 480));
+        let tiny = area(0, 0, 700, 400, true);
         let c = clamp_to(tiny, rect(10, 10, 300, 200));
-        assert_eq!((c.x, c.y, c.width, c.height), (0, 0, 800, 600));
+        assert_eq!((c.x, c.y, c.width, c.height), (0, 0, 700, 400));
+    }
+
+    #[test]
+    fn a_size_the_user_left_between_the_floors_comes_back_unchanged() {
+        // 900x600 is below the old 960x640 floor but allowed at run time.
+        let saved = rect(100, 80, 900, 600);
+        let p = restore_rect(Some(saved), &[main_screen()], DEFAULT);
+        assert!(p.restored);
+        assert_eq!(p.rect, saved);
+        assert_eq!((MIN_SIZE.width, MIN_SIZE.height), (800, 480));
+    }
+
+    #[test]
+    fn extreme_saved_values_do_not_panic_and_fall_back_to_the_default() {
+        let huge = WindowRect { x: i32::MAX, y: i32::MIN, width: u32::MAX, height: u32::MAX, maximized: true };
+        let p = restore_rect(Some(huge), &[main_screen()], DEFAULT);
+        assert!(!p.restored && !p.maximized);
+        assert_eq!((p.rect.x, p.rect.y, p.rect.width, p.rect.height), (370, 140, 1180, 760));
+        let wide = WindowRect { x: i32::MIN, y: 0, width: u32::MAX, height: 1, maximized: false };
+        assert!(!restore_rect(Some(wide), &[main_screen()], DEFAULT).restored);
+        // The same through the file: numbers that fit no field are no state at all.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("window.json"), r#"{"x":99999999999,"y":0,"width":1,"height":1}"#).unwrap();
+        assert_eq!(load(dir.path()), None);
+        std::fs::write(
+            dir.path().join("window.json"),
+            r#"{"x":2147483647,"y":-2147483648,"width":4294967295,"height":4294967295}"#,
+        )
+        .unwrap();
+        let p = restore_rect(load(dir.path()), &[main_screen()], DEFAULT);
+        assert!(!p.restored);
     }
 
     #[test]

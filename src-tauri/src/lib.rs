@@ -258,6 +258,23 @@ fn data_root(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Erro
 /// Start the core on a thread of its own so the splash is painted meanwhile,
 /// then open the (hidden) main window; the UI's first snapshot reveals it.
 fn boot(app: tauri::AppHandle) {
+    // A panic must not leave the splash spinning: it becomes a start-up failure.
+    let guarded = app.clone();
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| boot_steps(app))) {
+        let message =
+            panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()));
+        windows::set_stage(
+            &guarded,
+            windows::Stage::Failed { message: message.unwrap_or_else(|| "internal error".into()) },
+        );
+    }
+}
+
+fn boot_steps(app: tauri::AppHandle) {
+    // Lab only: stall start-up to prove the splash gives up (MC_BOOT_STALL_MS).
+    if let Some(ms) = std::env::var("MC_BOOT_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
     windows::set_stage(&app, windows::Stage::Opening);
     let shell = start(&app).unwrap_or_else(|e| Shell::Failed(e.to_string()));
     let failure = match &shell {
@@ -283,6 +300,7 @@ pub fn run() {
     tauri::Builder::default()
         .setup(|app| {
             windows::open_splash(app.handle())?;
+            windows::arm_startup_timeout(app.handle());
             let handle = app.handle().clone();
             std::thread::spawn(move || boot(handle));
             Ok(())
