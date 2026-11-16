@@ -201,3 +201,18 @@ fn macros_round_trip_in_order() {
     assert!(s.delete_macro("a").unwrap());
     assert!(!s.delete_macro("a").unwrap());
 }
+
+#[test]
+fn a_new_frequency_replaces_the_whole_reading() {
+    let mut s = Store::open_in_memory().unwrap();
+    let mut q = qso("q1", Some("s1"));
+    (q.freq_hz, q.freq_source, q.freq_age_ms, q.band) =
+        (Some(14_105_000), Some("mercury telemetry".into()), Some(200), Some("20m".into()));
+    s.create_qso(&q).unwrap();
+    let edit = QsoEdit { freq_hz: Some(7_074_000), freq_source: Some("operator".into()), ..Default::default() };
+    let r = s.update_qso("q1", &edit).unwrap();
+    assert_eq!(
+        (r.freq_hz, r.freq_source.as_deref(), r.freq_age_ms, r.band),
+        (Some(7_074_000), Some("operator"), None, None)
+    );
+}

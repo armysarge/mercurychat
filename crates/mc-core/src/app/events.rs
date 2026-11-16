@@ -7,6 +7,7 @@ use super::beacon::BeaconStatus;
 use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
+use super::logbook::Qso;
 use super::telemetry::TelemetryView;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -46,6 +47,10 @@ pub struct SessionInfo {
     pub direction: SessionDirection,
     pub since_utc: String,
     pub peer_app: Option<String>,
+    /// One id per session; a new id is a new session (and a new QSO draft).
+    pub session_id: String,
+    /// The negotiated bandwidth token the modem reported.
+    pub bandwidth: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -99,6 +104,10 @@ pub enum AppEvent {
     /// snapshot always has the latest.
     Telemetry {
         telemetry: TelemetryView,
+    },
+    /// A QSO record was drafted, edited, ended or finalised.
+    Qso {
+        qso: Qso,
     },
 }
 

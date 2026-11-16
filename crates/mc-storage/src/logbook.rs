@@ -84,11 +84,16 @@ impl Store {
     }
 
     /// Apply the `Some` fields of `edit` to a draft. A final record is refused.
+    /// A new `freq_hz` replaces the whole frequency reading (band, source and
+    /// age too, `None` clearing them): a stale age never outlives its value.
     pub fn update_qso(&mut self, id: &str, edit: &QsoEdit) -> Result<QsoRow> {
         let n = self.conn.execute(
             "UPDATE qso_records SET
-               grid = COALESCE(?2, grid), band = COALESCE(?3, band), freq_hz = COALESCE(?4, freq_hz),
-               freq_source = COALESCE(?5, freq_source), freq_age_ms = COALESCE(?6, freq_age_ms),
+               grid = COALESCE(?2, grid),
+               band = CASE WHEN ?4 IS NOT NULL THEN ?3 ELSE COALESCE(?3, band) END,
+               freq_hz = COALESCE(?4, freq_hz),
+               freq_source = CASE WHEN ?4 IS NOT NULL THEN ?5 ELSE COALESCE(?5, freq_source) END,
+               freq_age_ms = CASE WHEN ?4 IS NOT NULL THEN ?6 ELSE COALESCE(?6, freq_age_ms) END,
                bandwidth = COALESCE(?7, bandwidth), tx_modes = COALESCE(?8, tx_modes),
                rx_modes = COALESCE(?9, rx_modes), rst_sent = COALESCE(?10, rst_sent),
                rst_rcvd = COALESCE(?11, rst_rcvd), name = COALESCE(?12, name), qth = COALESCE(?13, qth),

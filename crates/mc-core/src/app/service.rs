@@ -11,11 +11,12 @@ use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
+use super::logbook::{self, Qso, Start, FINALISE_SETTING};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
-use super::telemetry::Telemetry;
+use super::telemetry::{Telemetry, Tuning};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use crate::station::Observation;
-use mc_storage::{OutState, StorageError, Store};
+use mc_storage::{OutState, QsoEdit as RowEdit, QsoRow, StorageError, Store};
 use mch_protocol::ObjectId;
 use mercury_adapter::telemetry::Spectrum;
 use mercury_adapter::Callsign;
@@ -147,6 +148,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         broadcasts: Tracker::default(),
         beacon: BeaconState::new(),
         telemetry: Telemetry::default(),
+        qso: None,
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -227,6 +229,8 @@ struct App {
     beacon: BeaconState,
     /// Link quality and Mercury's telemetry (OBS-01), and its event throttle.
     telemetry: Telemetry,
+    /// The record of the latest session this run, as stored.
+    qso: Option<QsoRow>,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -241,6 +245,14 @@ fn conflict(message: String) -> AppError {
 
 fn storage(e: StorageError) -> AppError {
     AppError::Storage { message: e.to_string() }
+}
+
+fn qso_error(e: StorageError, id: &str) -> AppError {
+    match e {
+        StorageError::QsoNotFound(_) => AppError::NotFound { id: id.to_string() },
+        StorageError::QsoFinal(_) => conflict("the record is final and cannot be edited".into()),
+        e => storage(e),
+    }
 }
 
 impl App {
@@ -470,6 +482,23 @@ impl App {
                 Ok(CommandOk::Done)
             }
             AppCommand::SendBeaconNow => self.send_beacon().map(|_| CommandOk::Done),
+            AppCommand::Qsos { limit } => {
+                let rows = self.chat_store()?.qsos(limit.clamp(1, 500)).map_err(storage)?;
+                Ok(CommandOk::Qsos { qsos: rows.iter().map(Qso::from).collect() })
+            }
+            AppCommand::UpdateQso { id, edit } => {
+                let edit = edit.validate().map_err(|errors| AppError::Validation { errors })?;
+                let row = self.chat_store()?.update_qso(&id, &edit).map_err(|e| qso_error(e, &id))?;
+                Ok(CommandOk::Qso(self.qso_changed(row)))
+            }
+            AppCommand::FinaliseQso { id } => {
+                let row = self.chat_store()?.finalise_qso(&id).map_err(|e| qso_error(e, &id))?;
+                Ok(CommandOk::Qso(self.qso_changed(row)))
+            }
+            AppCommand::SetFinaliseOnDisconnect { on } => {
+                self.store.set_setting(FINALISE_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -667,6 +696,11 @@ impl App {
     }
 
     fn set_session(&mut self, session: Option<SessionInfo>) {
+        if session.is_none() {
+            if let Some(ended) = self.session.clone() {
+                self.end_qso(&ended.session_id);
+            }
+        }
         if self.session != session {
             self.session = session.clone();
             self.emit(AppEvent::Session { session });
@@ -711,6 +745,7 @@ impl App {
         self.beacon.select(target.as_ref().map(|p| p.id.clone()), &self.store);
         self.set_session(None);
         self.chat = None;
+        self.qso = None;
         self.discovery.modem_changed();
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
@@ -737,10 +772,17 @@ impl App {
             ReportKind::State { state, detail } => self.set_modem(state, detail),
             ReportKind::Session(session) => {
                 let now = tokio::time::Instant::now();
-                if let Some(s) = session.as_ref().filter(|s| self.session.as_ref() != Some(*s)) {
-                    let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &self.telemetry.tuning(now));
+                // A new session id is a new session: one draft each.
+                let new_session =
+                    session.as_ref().filter(|s| self.session.as_ref().map(|c| &c.session_id) != Some(&s.session_id));
+                if let Some(s) = new_session {
+                    let tuning = self.telemetry.tuning(now);
+                    // Before the session itself is recorded as the latest heard row (which has no grid).
+                    let grid = self.heard_grid(&s.peer);
+                    let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &tuning);
                     self.emit_all(heard);
                     self.telemetry.session_started(now);
+                    self.begin_qso(s, grid, &tuning);
                 }
                 if session.is_none() {
                     self.telemetry.session_ended();
@@ -774,6 +816,7 @@ impl App {
                 let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
                 // Ruling P2: the gate prefers telemetry's live listen mode.
                 self.listen_mode.set_live(self.telemetry.live_listen_mode());
+                self.observe_modes();
                 if let Some(text) = line {
                     let line = self.discovery.note("telemetry", text);
                     self.emit(line);
@@ -810,6 +853,89 @@ impl App {
         }
     }
 
+    /// The locator the heard list holds for `peer`, if any.
+    fn heard_grid(&self, peer: &str) -> Option<String> {
+        let store = self.chat.as_ref()?;
+        discovery::heard_station(store, peer, self.discovery.offsets()).ok()?.grid
+    }
+
+    /// Draft the QSO record of a session that just started.
+    fn begin_qso(&mut self, s: &SessionInfo, grid: Option<String>, tuning: &Tuning) {
+        let Some(store) = self.chat.as_mut() else { return };
+        let mut row = logbook::draft_row(&Start {
+            session_id: &s.session_id,
+            peer: &s.peer,
+            start_utc: &s.since_utc,
+            bandwidth: &s.bandwidth,
+            grid,
+            tuning,
+        });
+        let view = self.telemetry.view(tokio::time::Instant::now());
+        row.tx_modes = view.tx_mode.as_deref().and_then(|m| logbook::with_mode(None, m));
+        row.rx_modes = view.rx_mode.as_deref().and_then(|m| logbook::with_mode(None, m));
+        if let Err(e) = store.create_qso(&row) {
+            tracing::warn!("could not draft the QSO record: {e}");
+            return;
+        }
+        self.qso = Some(row.clone());
+        self.emit(AppEvent::Qso { qso: Qso::from(&row) });
+    }
+
+    /// Stamp the end of a session's record, and finalise it if asked to.
+    fn end_qso(&mut self, session_id: &str) {
+        let finalise = self.finalise_on_disconnect();
+        let Some(store) = self.chat.as_mut() else { return };
+        let ended = store.end_qso_for_session(session_id, &mc_storage::now_utc()).and_then(|row| match row {
+            Some(r) if finalise => store.finalise_qso(&r.id).map(Some),
+            other => Ok(other),
+        });
+        match ended {
+            Ok(Some(row)) => {
+                self.qso_changed(row);
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!("could not end the QSO record: {e}"),
+        }
+    }
+
+    /// Add Mercury's newly observed ARQ modes to the session's draft, each once.
+    fn observe_modes(&mut self) {
+        let Some(session) = self.session.as_ref() else { return };
+        let Some(row) =
+            self.qso.as_ref().filter(|r| r.state == "draft" && r.session_id.as_deref() == Some(&session.session_id))
+        else {
+            return;
+        };
+        let view = self.telemetry.view(tokio::time::Instant::now());
+        let tx_modes = view.tx_mode.as_deref().and_then(|m| logbook::with_mode(row.tx_modes.as_deref(), m));
+        let rx_modes = view.rx_mode.as_deref().and_then(|m| logbook::with_mode(row.rx_modes.as_deref(), m));
+        if tx_modes.is_none() && rx_modes.is_none() {
+            return;
+        }
+        let id = row.id.clone();
+        let Some(store) = self.chat.as_mut() else { return };
+        match store.update_qso(&id, &RowEdit { tx_modes, rx_modes, ..RowEdit::default() }) {
+            Ok(row) => {
+                self.qso_changed(row);
+            }
+            Err(e) => tracing::warn!("could not record the observed modes: {e}"),
+        }
+    }
+
+    /// Publish a changed record, and keep it as the current one if it is.
+    fn qso_changed(&mut self, row: QsoRow) -> Qso {
+        let qso = Qso::from(&row);
+        if self.qso.as_ref().is_some_and(|c| c.id == row.id) {
+            self.qso = Some(row);
+        }
+        self.emit(AppEvent::Qso { qso: qso.clone() });
+        qso
+    }
+
+    fn finalise_on_disconnect(&self) -> bool {
+        matches!(self.store.setting(FINALISE_SETTING), Ok(Some(v)) if v == "true")
+    }
+
     fn snapshot(&mut self) -> Result<AppSnapshot, AppError> {
         let mut profiles = Vec::new();
         for row in self.store.profiles().map_err(storage)? {
@@ -836,6 +962,8 @@ impl App {
             active_profile_id: active,
             discovery: self.discovery.stats(),
             telemetry: Box::new(self.telemetry.view(tokio::time::Instant::now())),
+            current_qso: self.qso.as_ref().map(|r| Box::new(Qso::from(r))),
+            finalise_on_disconnect: self.finalise_on_disconnect(),
         })
     }
 }

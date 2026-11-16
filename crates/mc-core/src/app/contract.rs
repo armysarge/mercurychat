@@ -6,6 +6,7 @@ use super::beacon::BeaconStatus;
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
+use super::logbook::{Qso, QsoEdit};
 use super::telemetry::TelemetryView;
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
@@ -40,6 +41,11 @@ pub struct AppSnapshot {
     pub discovery: DiscoveryStats,
     /// Link quality and Mercury's telemetry (OBS-01); `null` is unavailable.
     pub telemetry: Box<TelemetryView>,
+    /// The QSO record of the latest session this run (a draft until it is
+    /// finalised); `null` before the first session.
+    pub current_qso: Option<Box<Qso>>,
+    /// Whether a session's record is finalised when it ends (default no).
+    pub finalise_on_disconnect: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -128,6 +134,23 @@ pub enum AppCommand {
     SetBeaconContent {
         include_grid: bool,
     },
+    /// Logbook records, newest first (at most 500).
+    Qsos {
+        limit: u32,
+    },
+    /// Edit a draft record; a final one is refused.
+    UpdateQso {
+        id: String,
+        edit: Box<QsoEdit>,
+    },
+    /// Lock a record against further edits.
+    FinaliseQso {
+        id: String,
+    },
+    /// Finalise a record when its session ends (default off).
+    SetFinaliseOnDisconnect {
+        on: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -141,6 +164,8 @@ pub enum CommandOk {
     History { messages: Vec<ChatMessage> },
     Heard { stations: Vec<HeardStation> },
     Activity { entries: Vec<ActivityEntry> },
+    Qsos { qsos: Vec<Qso> },
+    Qso(Qso),
     Done,
 }
 

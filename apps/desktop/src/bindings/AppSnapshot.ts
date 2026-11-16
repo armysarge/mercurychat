@@ -2,6 +2,7 @@
 import type { BeaconStatus } from "./BeaconStatus";
 import type { DiscoveryStats } from "./DiscoveryStats";
 import type { ModemState } from "./ModemState";
+import type { Qso } from "./Qso";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
 import type { TelemetryView } from "./TelemetryView";
@@ -38,4 +39,13 @@ discovery: DiscoveryStats,
 /**
  * Link quality and Mercury's telemetry (OBS-01); `null` is unavailable.
  */
-telemetry: TelemetryView, };
+telemetry: TelemetryView, 
+/**
+ * The QSO record of the latest session this run (a draft until it is
+ * finalised); `null` before the first session.
+ */
+currentQso: Qso | null, 
+/**
+ * Whether a session's record is finalised when it ends (default no).
+ */
+finaliseOnDisconnect: boolean, };

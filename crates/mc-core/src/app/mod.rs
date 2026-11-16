@@ -7,6 +7,7 @@ mod chat;
 mod contract;
 mod discovery;
 mod events;
+mod logbook;
 mod modem;
 mod service;
 mod telemetry;
@@ -20,6 +21,7 @@ pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MES
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
 pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
+pub use logbook::{Qso, QsoEdit, FINALISE_SETTING, OPERATOR_SOURCE};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
 pub use service::{spawn_app, AppHandle, AppOptions};
 pub use telemetry::{
@@ -44,5 +46,7 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     BeaconStatus::export_all(&cfg)?;
     ChannelState::export_all(&cfg)?;
     TelemetryView::export_all(&cfg)?;
+    Qso::export_all(&cfg)?;
+    QsoEdit::export_all(&cfg)?;
     Since::export_all(&cfg)
 }

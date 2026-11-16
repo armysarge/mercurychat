@@ -943,6 +943,8 @@ impl Link {
                     direction: self.direction,
                     since_utc: since,
                     peer_app: Some(peer_app),
+                    session_id: self.session_id.clone(),
+                    bandwidth: self.info.bandwidth.clone(),
                 }))
                 .await;
                 // The outbox for this peer goes out in order, after HELLO.
