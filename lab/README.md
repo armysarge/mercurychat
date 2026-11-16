@@ -121,3 +121,21 @@ OUT=lab/run/win-bcast-N RUN='target/release/m0-client.exe broadcast --a 127.0.0.
 The exploratory probe that produced the design is `RUN='python lab/windows/broadcast-probe.py "$OUT"'`. For the slow-mode scenario add `CLIENT_ARGS='--bw 500'`.
 
 To re-check route isolation, run Mercury's TX test (`-t`) into one cable's input with RX tests (`-r`) on both cable outputs; only the matching output should decode frames (see `lab/run/win-iso`).
+
+### M3a discovery over two Mercury modems (no RF)
+
+`lab/windows/m3-discovery.mjs` runs the M3a discovery checks against two real modems and two MercuryChat windows in lab mode. It starts both `mercury.exe` itself (the crossed VB-Audio cables as above, WASAPI, PTT `none`, `bind_address = 127.0.0.1`, telemetry WebSocket on with `-G -U 10000` / `-U 10001`), then two app instances (`MC_DATA_DIR` and a WebView2 profile each, DevTools on 9351/9352), saves an Existing profile in each and drives them by invoking the app's typed commands in the page. It reads the heard list, beacon status, telemetry view, activity ring, events and QSO drafts from the app; it does not use the Operate screens.
+
+Every app-to-modem socket goes through a loopback relay the script runs (control 8310/8410, data 8311/8411, broadcast 8110/8210), which logs each control line with its time: those transcripts, the modem logs and the app's events are the evidence. Station B's telemetry goes through its own relay (10011), which the script closes mid-session. A plain WebSocket client on each modem's UI port records how the status JSON fields are written.
+
+Build the app with its assets embedded, then run it with a fresh run directory (Mercury locks files in an old one):
+
+```bash
+cargo build -p mercurychat --features tauri/custom-protocol
+```
+
+```bash
+M=lab/bin-patched/windows-x64/mercury.exe node lab/windows/m3-discovery.mjs target/debug/mercurychat.exe lab/run/m3-disc-N
+```
+
+It checks: a CQ heard with source CQ and the MONITOR SNR; a beacon heard with its locator; the session gate (beacon toggle, Beacon now and CQ refused during a session, and an armed beacon that falls due inside it never reaches the air); exactly one beacon one interval (5 min, `BEACON_MIN`) after the session; telemetry lost mid-session while chat keeps delivering both ways; frequency unavailable without a rig (telemetry, QSO drafts, heard rows). It also records how each side learns of a session end, with Receive only chosen while the call rings, kept throughout, and switched on mid-session; CQFRAME vs MONITOR order; PENDING/CANCELPENDING around our CQ; a second client on a broadcast port; and the status JSON's types. Results: `report.md` and `report.json` in the run directory, modem logs in `a/` and `b/`. About 21 minutes; do not touch the two windows while it runs (commands the windows send themselves are logged and fail the run).
