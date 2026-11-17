@@ -476,7 +476,6 @@
       "refused": "non envoyé : {reason}"
     },
     "spectrum": "Spectre",
-    "spectrumSoon": "La vue du spectre arrive dans une version ultérieure.",
     "telemetryUnavailable": "télémesure indisponible"
   },
   "qso": {
@@ -576,5 +575,15 @@
       "dseg": "Police DSEG7 Classic par keshikan (SIL Open Font License 1.1)"
     },
     "openFailed": "Le navigateur n'a pas pu être ouvert : {reason}"
+  },
+  "waterfall": {
+    "show": "Afficher",
+    "hide": "Masquer",
+    "closed": "Le spectre et la cascade sont masqués.",
+    "unavailable": "Spectre indisponible : télémétrie {link}.",
+    "spectrumAria": "Spectre : niveau du signal selon la fréquence audio",
+    "waterfallAria": "Cascade : le spectre dans le temps, le plus récent en haut",
+    "spectrumAxis": "dB selon les Hz audio",
+    "waterfallAxis": "Hz audio, le plus récent en haut"
   }
 }

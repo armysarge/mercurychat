@@ -28,6 +28,8 @@
 //        frequency is dashes in the seven-segment font; channel occupancy unknown
 //   T10d turning beacons on shows a countdown; the activity drawer lists PTT lines
 //   T10e after a restart beacons are off and the prompt asks to turn them on
+// M3a Task 12: the spectrum and waterfall are collapsed by default and, on the
+//   simulator (no telemetry), say "telemetry unavailable" and draw nothing
 // M3a Task 11 (QSO card, Logbook, macros, search, About):
 //   T11a station information and a macro are saved in Settings; finalise on
 //        disconnect is off by default
@@ -201,6 +203,16 @@ try {
   if (freq.text !== "--.---.---" || freq.aria !== "Frequency unavailable" || !/DSEG7/.test(freq.font)) throw new Error(`strip frequency: ${JSON.stringify(freq)}`);
   const channel = await s.eval("document.querySelector('.beacon .channel').textContent.trim()");
   if (channel !== "Channel occupancy unknown") throw new Error(`channel: ${channel}`);
+
+  // ---- T12. the spectrum and waterfall are collapsed by default and, with no telemetry, draw nothing
+  const wf = await s.eval("({ expanded: document.querySelector('.strip .wf-toggle')?.getAttribute('aria-expanded'), text: document.querySelector('.strip .waterfall')?.innerText ?? '' })");
+  if (wf.expanded !== "false" || !/telemetry unavailable/.test(wf.text)) throw new Error(`waterfall collapsed: ${JSON.stringify(wf)}`);
+  await s.eval("document.querySelector('.strip .wf-toggle').click()");
+  await until(s, "!!document.querySelector('.strip .wf-status')", "the open waterfall panel's status");
+  const wfOpen = await s.eval("({ status: document.querySelector('.strip .wf-status').textContent.trim(), canvases: document.querySelectorAll('.strip canvas').length })");
+  if (wfOpen.status !== "Spectrum unavailable: telemetry Not configured." || wfOpen.canvases !== 0) throw new Error(`waterfall open without telemetry: ${JSON.stringify(wfOpen)}`);
+  await s.eval("document.querySelector('.strip .wf-toggle').click()");
+  results.push(`PASS waterfall: collapsed by default ("telemetry unavailable"); opened on the simulator it says "${wfOpen.status}" and has no canvas`);
 
   // ---- T10d. beacons on show a countdown; the activity drawer lists PTT lines
   await s.eval("document.querySelector('input.beacon-toggle').click()");

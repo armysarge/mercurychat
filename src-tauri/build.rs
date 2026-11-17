@@ -12,6 +12,7 @@ fn main() {
         "report_ipc",
         "ping",
         "open_link",
+        "set_waterfall_visible",
         "modem_probe",
         "splash_status",
         "quit_app",

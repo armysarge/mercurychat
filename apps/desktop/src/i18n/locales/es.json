@@ -476,7 +476,6 @@
       "refused": "no enviado: {reason}"
     },
     "spectrum": "Espectro",
-    "spectrumSoon": "La vista de espectro llega en una versión posterior.",
     "telemetryUnavailable": "telemetría no disponible"
   },
   "qso": {
@@ -576,5 +575,15 @@
       "dseg": "Fuente DSEG7 Classic de keshikan (SIL Open Font License 1.1)"
     },
     "openFailed": "No se pudo abrir el navegador: {reason}"
+  },
+  "waterfall": {
+    "show": "Mostrar",
+    "hide": "Ocultar",
+    "closed": "El espectro y la cascada están ocultos.",
+    "unavailable": "Espectro no disponible: telemetría {link}.",
+    "spectrumAria": "Espectro: nivel de señal frente a frecuencia de audio",
+    "waterfallAria": "Cascada: el espectro en el tiempo, lo más reciente arriba",
+    "spectrumAxis": "dB frente a Hz de audio",
+    "waterfallAxis": "Hz de audio, lo más reciente arriba"
   }
 }

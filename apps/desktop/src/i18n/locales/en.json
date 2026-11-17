@@ -475,7 +475,6 @@
       "refused": "not sent: {reason}"
     },
     "spectrum": "Spectrum",
-    "spectrumSoon": "The spectrum view arrives in a later version.",
     "telemetryUnavailable": "telemetry unavailable"
   },
   "qso": {
@@ -575,5 +574,15 @@
       "dseg": "DSEG7 Classic font by keshikan (SIL Open Font License 1.1)"
     },
     "openFailed": "The browser could not be opened: {reason}"
+  },
+  "waterfall": {
+    "show": "Show",
+    "hide": "Hide",
+    "closed": "Spectrum and waterfall are hidden.",
+    "unavailable": "Spectrum unavailable: telemetry {link}.",
+    "spectrumAria": "Spectrum: signal level against audio frequency",
+    "waterfallAria": "Waterfall: the spectrum over time, newest at the top",
+    "spectrumAxis": "dB against audio Hz",
+    "waterfallAxis": "Audio Hz, newest at the top"
   }
 }

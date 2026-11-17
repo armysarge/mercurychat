@@ -31,3 +31,5 @@ devtools = ["tauri/devtools"]
 
 [dev-dependencies]
 tempfile = "3"
+# The spectrum forwarder's test runs on a paused clock.
+tokio = { version = "1", features = ["time", "sync", "macros", "rt", "test-util"] }

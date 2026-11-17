@@ -16,6 +16,7 @@
     "allow-report-ipc",
     "allow-ping",
     "allow-open-link",
+    "allow-set-waterfall-visible",
     "allow-modem-probe",
     "allow-appearance-load",
     "allow-appearance-save"

@@ -6,6 +6,7 @@
 mod appearance;
 mod links;
 mod probe;
+mod spectrum;
 mod startup;
 mod window_state;
 mod windows;
@@ -36,6 +37,8 @@ enum Shell {
 
 struct Running {
     core: Core,
+    /// Whether the window shows the spectrum or waterfall (spectrum.rs).
+    waterfall: tokio::sync::watch::Sender<bool>,
     data_root: PathBuf,
     db_path: PathBuf,
     /// Endpoint locks (MOD-02), shared by every instance on this machine.
@@ -176,6 +179,19 @@ fn report_ipc(p50: f64, p95: f64, max: f64, samples: u32) {
 #[tauri::command]
 fn ping() {}
 
+/// The window shows (true) or hides (false) the spectrum and waterfall: only
+/// while shown does the shell forward spectra, at most 5 a second.
+#[tauri::command]
+fn set_waterfall_visible(shell: tauri::State<'_, Shell>, visible: bool) -> Result<(), AppError> {
+    match shell.inner() {
+        Shell::Running(r) => {
+            r.waterfall.send_replace(visible);
+            Ok(())
+        }
+        Shell::Failed(message) => Err(AppError::Internal { message: message.clone() }),
+    }
+}
+
 /// Open one of About's named web pages in the system browser (links.rs).
 #[tauri::command]
 fn open_link(link: String) -> Result<(), String> {
@@ -277,7 +293,21 @@ fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
     // spawn_app needs a runtime context; Tauri's runtime keeps the actor alive.
     let core = tauri::async_runtime::block_on(async move { spawn_app(store, opts) });
     forward_events(app.clone(), core.subscribe());
-    Ok(Shell::Running(Box::new(Running { core, data_root: root, db_path, locks_dir, schema, _log: log, _lock: lock })))
+    let (waterfall, visible) = tokio::sync::watch::channel(false);
+    let window = app.clone();
+    tauri::async_runtime::spawn(spectrum::forward(core.spectrum(), visible, move |frame| {
+        let _ = window.emit(spectrum::CHANNEL, frame);
+    }));
+    Ok(Shell::Running(Box::new(Running {
+        core,
+        waterfall,
+        data_root: root,
+        db_path,
+        locks_dir,
+        schema,
+        _log: log,
+        _lock: lock,
+    })))
 }
 
 /// The data root. Lab mode (MOD-02): MC_DATA_DIR gives each instance its own.
@@ -346,6 +376,7 @@ pub fn run() {
             report_ipc,
             ping,
             open_link,
+            set_waterfall_visible,
             modem_probe,
             appearance_load,
             appearance_save,

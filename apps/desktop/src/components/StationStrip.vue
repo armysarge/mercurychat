@@ -7,17 +7,18 @@
 //     countdown or why it is held. Call / Disconnect / Abort stay in the
 //     conversation header, which is always on screen (docs/04 §7), so a
 //     collapsed strip never hides them.
-//  3. Spectrum: Task 12; until then, and whenever its telemetry is not Up,
-//     "telemetry unavailable".
+//  3. Spectrum and waterfall (Waterfall.vue, Task 12): collapsed by default;
+//     "telemetry unavailable" whenever its telemetry is not Up.
 // Collapsible as one unit; the choice is remembered. Narrow windows wrap it,
 // and at 960 px or less only the station and the actions show.
-import { computed, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { BroadcastOutcome } from "../bindings/BroadcastOutcome";
 import {
   activeProfile, discovery, discoveryError, inSession, modemState, selectProfile, sendBeaconNow, sendCq, session, snapshot,
 } from "../store";
 import { countdown } from "./countdown";
+import Waterfall from "./Waterfall.vue";
 
 const { t } = useI18n();
 const props = defineProps<{ now: number }>();
@@ -72,7 +73,12 @@ function outcomeText(o: BroadcastOutcome | undefined): string {
 const cqLine = computed(() => discoveryError.cq || outcomeText(discovery.outcome.cq));
 const beaconLine = computed(() => outcomeText(discovery.outcome.beacon));
 const tone = (o: BroadcastOutcome | undefined) => (o?.type === "transmitted" ? "ok" : o?.type === "submitted" ? "muted" : "warn");
-const spectrumUp = computed(() => tel.value?.link.type === "up");
+// At 960 px or less the spectrum group is not shown (CSS): nothing is forwarded then.
+const narrowQuery = window.matchMedia("(max-width: 960px)");
+const narrow = ref(narrowQuery.matches);
+const onNarrow = (e: MediaQueryListEvent) => (narrow.value = e.matches);
+onMounted(() => narrowQuery.addEventListener("change", onNarrow));
+onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
 </script>
 
 <template>
@@ -114,8 +120,7 @@ const spectrumUp = computed(() => tel.value?.link.type === "up");
       </div>
 
       <div class="group spectrum">
-        <span class="label">{{ t("strip.spectrum") }}</span>
-        <p class="muted small">{{ spectrumUp ? t("strip.spectrumSoon") : t("strip.telemetryUnavailable") }}</p>
+        <Waterfall :shown="open && !narrow" />
       </div>
     </div>
     <p v-show="!open" class="closed-line small">
@@ -132,7 +137,7 @@ const spectrumUp = computed(() => tel.value?.link.type === "up");
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .collapse { position: absolute; top: 6px; right: 6px; padding: 2px 8px; border-color: transparent; }
-.groups { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(180px, 260px); gap: calc(var(--space) * 2); align-items: center; }
+.groups { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(240px, 520px); gap: calc(var(--space) * 2); align-items: center; }
 .group { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .group + .group { border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
 .freq { display: flex; align-items: baseline; gap: var(--space); }
