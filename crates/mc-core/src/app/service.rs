@@ -20,6 +20,7 @@ use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use crate::station::Observation;
 use mc_storage::{MacroRow, OutState, QsoEdit as RowEdit, QsoRow, StorageError, Store};
 use mch_protocol::ObjectId;
+use mercury_adapter::broadcast::BroadcastAbort;
 use mercury_adapter::telemetry::Spectrum;
 use mercury_adapter::Callsign;
 use std::path::PathBuf;
@@ -158,6 +159,8 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         discovery: Discovery::default(),
         listen_mode: ListenMode::default(),
         broadcasts: Tracker::default(),
+        broadcast_abort: None,
+        broadcast_silent: false,
         beacon: BeaconState::new(),
         telemetry: Telemetry::default(),
         qso: None,
@@ -239,6 +242,9 @@ struct App {
     listen_mode: ListenMode,
     /// The one CQ or beacon awaiting its outcome.
     broadcasts: Tracker,
+    broadcast_abort: Option<BroadcastAbort>,
+    /// The closed port cannot take another beacon until an explicit retry or recovery.
+    broadcast_silent: bool,
     /// Periodic beacons: the schedule, the profile's settings, the status shown.
     beacon: BeaconState,
     /// Link quality and Mercury's telemetry (OBS-01), and its event throttle.
@@ -677,6 +683,12 @@ impl App {
         if self.broadcasts.busy() {
             return Err(self.refuse_broadcast(kind, "not sent: a broadcast is still being sent".into()));
         }
+        if kind == BroadcastKind::Beacon && self.broadcast_silent {
+            let why = NotConfirmedReason::BroadcastPortSilent.text();
+            let refusal = self.refuse_broadcast(kind, format!("not sent: {why}"));
+            self.record_silent_beacon();
+            return Err(refusal);
+        }
         let cmd = match kind {
             BroadcastKind::Cq => ModemCmd::Cq,
             BroadcastKind::Beacon => ModemCmd::Broadcast(payload),
@@ -703,7 +715,14 @@ impl App {
         BeaconPrefs::save_preferred(&mut self.store, &id, on).map_err(storage)?;
         self.beacon.prefs.preferred = on;
         match (on, self.beacon.sched.active()) {
-            (true, false) => self.beacon.sched.arm(tokio::time::Instant::now()),
+            (true, false) => {
+                // Queue the reopen before a possible Beacon now. A healthy
+                // connection is kept, including if it has a beacon in flight.
+                if self.task.as_ref().is_some_and(|t| t.send(ModemCmd::ReopenBroadcast)) {
+                    self.broadcast_silent = false;
+                }
+                self.beacon.sched.arm(tokio::time::Instant::now());
+            }
             (false, _) => self.beacon.sched.disarm(),
             (true, true) => {}
         }
@@ -767,38 +786,49 @@ impl App {
             if kind == BroadcastKind::Beacon && outcome == BroadcastOutcome::Submitted {
                 self.beacon.submitted();
             }
+            let silent = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
             let line = self.discovery.note("broadcast", activity_text(kind, &outcome));
-            let held = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
             self.emit(AppEvent::Broadcast { kind, outcome });
             self.emit(line);
-            if held {
-                let why = NotConfirmedReason::BroadcastPortSilent.text();
-                let line = self.discovery.note(
-                    "broadcast",
-                    format!(
-                        "beacons held: {why} ({SILENT_HOLD} beacons in a row); turn beacons off and on to try again"
-                    ),
-                );
-                self.emit(line);
+            if silent {
+                self.record_silent_beacon();
             }
         }
     }
 
-    /// What a beacon's outcome tells the schedule (lab F3): a beacon that
-    /// went out shows the broadcast port works; one the port took that was
-    /// never keyed counts towards a hold. True when this one began a hold.
+    /// Stop a silent beacon from lingering on its TCP connection. This
+    /// cannot wait for the modem to return to idle (lab F5).
     fn beacon_outcome(&mut self, outcome: &BroadcastOutcome) -> bool {
-        let sched = &mut self.beacon.sched;
         match outcome {
-            BroadcastOutcome::Transmitted => sched.on_transmitted(tokio::time::Instant::now()),
+            BroadcastOutcome::Transmitted => self.beacon.sched.on_transmitted(tokio::time::Instant::now()),
             BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) } => {
-                let was = sched.held();
-                sched.on_silent();
-                return !was && sched.held();
+                if let Some(port) = self.broadcast_abort.take() {
+                    port.abort();
+                    let line = self.discovery.note(
+                        "broadcast",
+                        "broadcast port reset after an unconfirmed beacon; turn beacons off and on to reconnect",
+                    );
+                    self.emit(line);
+                }
+                self.broadcast_silent = true;
+                return true;
             }
             _ => {}
         }
         false
+    }
+
+    fn record_silent_beacon(&mut self) {
+        let was_held = self.beacon.sched.held();
+        self.beacon.sched.on_silent();
+        if !was_held && self.beacon.sched.held() {
+            let why = NotConfirmedReason::BroadcastPortSilent.text();
+            let line = self.discovery.note(
+                "broadcast",
+                format!("beacons held: {why} ({SILENT_HOLD} attempts in a row); turn beacons off and on to try again"),
+            );
+            self.emit(line);
+        }
     }
 
     fn state_word(&self) -> String {
@@ -947,6 +977,8 @@ impl App {
         self.task = None;
         let abandoned = self.broadcasts.abandon();
         self.publish_broadcasts(abandoned);
+        self.broadcast_abort = None;
+        self.broadcast_silent = false;
         self.listen_mode = ListenMode::default();
         let telemetry =
             matches!(&target, Some(p) if matches!(&p.modem, ModemTarget::Existing { telemetry_url: Some(_), .. }));
@@ -1033,6 +1065,10 @@ impl App {
                     let line = self.discovery.note("telemetry", text);
                     self.emit(line);
                 }
+            }
+            ReportKind::BroadcastOpened(abort) => {
+                self.broadcast_abort = Some(abort);
+                self.broadcast_silent = false;
             }
             ReportKind::Broadcast(why) => {
                 let line = self.discovery.note("broadcast", why);

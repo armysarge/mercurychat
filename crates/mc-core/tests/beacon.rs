@@ -586,27 +586,48 @@ mod service {
         assert_eq!(b.seq, a.seq.wrapping_add(1));
     }
 
-    /// A broadcast port that takes every write and never transmits: what
-    /// MercuryChat gets when another KISS program holds Mercury's broadcast
-    /// port (lab Q5: the connect succeeds, nothing is ever keyed). Returns
-    /// the port and the bytes written to it so far.
-    async fn dead_broadcast_port() -> (u16, Arc<AtomicUsize>) {
+    /// What a second client of Mercury's broadcast port gets (lab Q5, F5):
+    /// the connection is made but nothing is read, and nothing is keyed.
+    /// Once `release` is sent, it reads what is waiting, as Mercury does when
+    /// the holder lets go.
+    struct StalledPort {
+        port: u16,
+        /// Connections made to it.
+        conns: Arc<AtomicUsize>,
+        /// Bytes read after the release.
+        read: Arc<AtomicUsize>,
+        /// How each released connection ended (`eof`, or the error kind).
+        ended: Arc<std::sync::Mutex<Vec<String>>>,
+        release: tokio::sync::watch::Sender<bool>,
+    }
+
+    async fn stalled_broadcast_port() -> StalledPort {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = l.local_addr().unwrap().port();
-        let got = Arc::new(AtomicUsize::new(0));
-        let count = got.clone();
+        let (release, watch) = tokio::sync::watch::channel(false);
+        let fake = StalledPort { port, conns: Arc::default(), read: Arc::default(), ended: Arc::default(), release };
+        let (conns, read, ended) = (fake.conns.clone(), fake.read.clone(), fake.ended.clone());
         tokio::spawn(async move {
             while let Ok((mut sock, _)) = l.accept().await {
-                let count = count.clone();
+                conns.fetch_add(1, Ordering::SeqCst);
+                let (read, ended, mut watch) = (read.clone(), ended.clone(), watch.clone());
                 tokio::spawn(async move {
+                    let _ = watch.wait_for(|go| *go).await;
                     let mut buf = [0u8; 2048];
-                    while let Ok(n @ 1..) = sock.read(&mut buf).await {
-                        count.fetch_add(n, Ordering::SeqCst);
-                    }
+                    let end = loop {
+                        match sock.read(&mut buf).await {
+                            Ok(0) => break "eof".to_string(),
+                            Ok(n) => {
+                                read.fetch_add(n, Ordering::SeqCst);
+                            }
+                            Err(e) => break format!("{:?}", e.kind()),
+                        }
+                    };
+                    ended.lock().unwrap().push(end);
                 });
             }
         });
-        (port, got)
+        fake
     }
 
     fn beacon_outcomes(rx: &mut Receiver<EventEnvelope>) -> Vec<BroadcastOutcome> {
@@ -627,52 +648,83 @@ mod service {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn a_dead_broadcast_port_is_named_and_holds_beacons_after_two() {
+    async fn a_silent_broadcast_connection_is_reset_and_requires_rearming() {
+        // Lab F3 and F5: another program holds Mercury's broadcast port.
         let net = FakeNet::start().await;
-        let (port, written) = dead_broadcast_port().await;
+        let fake = stalled_broadcast_port().await;
         let mut p = profile(&net, Some("KG33"));
         if let ModemTarget::Existing { broadcast_port, .. } = &mut p.modem {
-            *broadcast_port = Some(port);
+            *broadcast_port = Some(fake.port);
         }
         let dir = tempfile::tempdir().unwrap();
         let (h, mut rx) = ready(dir.path(), p).await;
         tokio::time::pause();
         done(&h, AppCommand::SetBeacon { on: true }).await;
         let silent = NotConfirmedReason::BroadcastPortSilent;
+        let refused = BroadcastOutcome::Refused { reason: format!("not sent: {}", silent.text()) };
+        assert_eq!(fake.conns.load(Ordering::SeqCst), 1);
 
-        // Beacon now: the port takes it, the modem never keys.
+        // Beacon now: written, never read, never keyed. A second one while
+        // the first is unconfirmed is not written on the same connection.
         done(&h, AppCommand::SendBeaconNow).await;
         settle().await;
+        let busy = conflict(h.call(AppCommand::SendBeaconNow).await);
+        assert_eq!(busy, "not sent: a broadcast is still being sent");
         advance(Duration::from_secs(16)).await;
-        assert!(written.load(Ordering::SeqCst) > 0, "the beacon was written to the port");
         assert_eq!(
             beacon_outcomes(&mut rx),
-            [BroadcastOutcome::Submitted, BroadcastOutcome::NotConfirmed { reason: Some(silent) }]
+            [
+                BroadcastOutcome::Submitted,
+                BroadcastOutcome::Refused { reason: busy },
+                BroadcastOutcome::NotConfirmed { reason: Some(silent) }
+            ]
         );
         let log = activity_texts(&h).await;
         assert!(log.iter().any(|t| t.contains(silent.text())), "{log:?}");
+        assert!(log.iter().any(|t| t.starts_with("broadcast port reset")), "{log:?}");
         let st = beacon(&h).await;
         assert!(st.active && st.next_due_utc.is_some(), "one is not enough to hold: {st:?}");
-        assert_eq!(st.suppressed, None);
 
-        // The scheduled beacon is the second in a row: the schedule holds.
-        advance(12 * MIN).await;
-        assert_eq!(
-            beacon_outcomes(&mut rx),
-            [BroadcastOutcome::Submitted, BroadcastOutcome::NotConfirmed { reason: Some(silent) }]
-        );
+        // The connection is gone, and no new one is made by itself: the next
+        // beacon is refused with the reason, the second in a row, so beacons hold.
+        assert_eq!(conflict(h.call(AppCommand::SendBeaconNow).await), format!("not sent: {}", silent.text()));
+        assert_eq!(beacon_outcomes(&mut rx), [refused]);
         let st = beacon(&h).await;
         assert!(st.active, "still armed: the operator's choice stands");
         assert_eq!(st.next_due_utc, None, "held, not silently re-armed");
         assert_eq!(st.suppressed.as_deref(), Some(silent.text()));
-        let log = activity_texts(&h).await;
-        assert!(log.iter().any(|t| t.starts_with("beacons held")), "{log:?}");
-
-        // Nothing more goes to the dead port.
-        let before = written.load(Ordering::SeqCst);
+        assert!(activity_texts(&h).await.iter().any(|t| t.starts_with("beacons held")));
         advance(40 * MIN).await;
-        assert_eq!(written.load(Ordering::SeqCst), before);
         assert!(beacon_outcomes(&mut rx).is_empty());
+        assert_eq!(fake.conns.load(Ordering::SeqCst), 1, "no reconnect by itself");
+
+        // Model the holder letting go. Winsock discards its unread bytes on
+        // reset. Linux can deliver bytes buffered before the reset.
+        fake.release.send_replace(true);
+        for _ in 0..50 {
+            if !fake.ended.lock().unwrap().is_empty() {
+                break;
+            }
+            settle().await;
+        }
+        if cfg!(windows) {
+            assert_eq!(fake.read.load(Ordering::SeqCst), 0, "a stale beacon would have gone out");
+        }
+        let ended = fake.ended.lock().unwrap().clone();
+        assert_eq!(ended, ["ConnectionReset"], "the connection was reset, not closed in order");
+
+        // Re-arming is the operator's retry: a fresh connection.
+        done(&h, AppCommand::SetBeacon { on: false }).await;
+        done(&h, AppCommand::SetBeacon { on: true }).await;
+        for _ in 0..50 {
+            if fake.conns.load(Ordering::SeqCst) == 2 {
+                break;
+            }
+            settle().await;
+        }
+        assert_eq!(fake.conns.load(Ordering::SeqCst), 2, "re-arming reopens the broadcast port");
+        let st = beacon(&h).await;
+        assert!(st.active && st.next_due_utc.is_some() && st.suppressed.is_none(), "{st:?}");
     }
 
     #[tokio::test(flavor = "current_thread")]

@@ -16,7 +16,7 @@ use crate::session::{SessionCommand, SessionEnd, SessionEvent};
 use crate::station::{ConnectInfo, Observation, Station, StationConfig, StationError, StationRequest};
 use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
-use mercury_adapter::broadcast::BroadcastPort;
+use mercury_adapter::broadcast::{BroadcastAbort, BroadcastPort};
 use mercury_adapter::kiss::KissFrame;
 use mercury_adapter::telemetry::{Spectrum, TelemetryClient, TelemetryLink, TelemetryMsg};
 use mercury_adapter::{Callsign, Command, Endpoint};
@@ -76,6 +76,8 @@ pub enum ModemCmd {
     Cq,
     /// Send one wrapped payload on the broadcast port. Idle only, as `Cq`.
     Broadcast(Vec<u8>),
+    /// The operator re-armed beacons. Retry a closed broadcast connection.
+    ReopenBroadcast,
     Shutdown,
 }
 
@@ -106,6 +108,8 @@ pub enum ReportKind {
     Frame(KissFrame),
     /// The broadcast port was unavailable, closed or reopened, in plain words.
     Broadcast(String),
+    /// The actor may have to close this connection while the modem is busy.
+    BroadcastOpened(BroadcastAbort),
     /// The listen mode found at attach or re-attach (`None`: unknown).
     ListenMode(Option<u8>),
     /// The modem took a CQ or beacon the actor asked for.
@@ -351,7 +355,9 @@ impl Broadcast {
             let why = format!("broadcast port {port} closed: beacons are not heard until it is reopened");
             r.send(ReportKind::Broadcast(why)).await;
         }));
+        let abort = bp.abort_handle();
         self.port = Some(bp);
+        self.r.send(ReportKind::BroadcastOpened(abort)).await;
         if again {
             self.r.send(ReportKind::Broadcast(format!("broadcast port {port} reopened"))).await;
         }
@@ -775,6 +781,12 @@ async fn serve(
                     }
                 }
             },
+            Idle::Cmd(Some(ModemCmd::ReopenBroadcast)) => {
+                if broadcast.port().is_none() {
+                    broadcast.open(true).await;
+                }
+                continue;
+            }
             Idle::Cmd(Some(ModemCmd::Broadcast(payload))) => {
                 // The actor has gated it; checked again against what this
                 // modem itself knows.

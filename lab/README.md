@@ -142,7 +142,7 @@ It checks:
 
 - every CQ is heard as one row with source CQ and the MONITOR SNR, whichever of CQFRAME and MONITOR comes first;
 - no telemetry SNR is shown before Mercury has decoded anything;
-- with Mercury A's broadcast port held by a raw client before the app attaches, two Beacon now are named "another program may be using Mercury's broadcast port" and beacons hold (the client is then released, and what Mercury does with the queued bytes is recorded);
+- with Mercury A's broadcast port held by a raw client, the first Beacon now times out and resets the connection. A second attempt is refused and beacons hold. Releasing the raw client must produce zero queued frames and zero beacons heard on B. Re-arming opens a fresh connection;
 - a beacon is heard with its locator;
 - the session gate: beacon toggle, Beacon now and CQ are refused during a session, and an armed beacon that falls due inside it never reaches the air;
 - exactly one beacon follows one interval (5 min, `BEACON_MIN`) after the session;
@@ -151,4 +151,6 @@ It checks:
 - session ends reach the other side promptly, with Receive only chosen while the call rings or kept throughout;
 - Receive only switched on mid-session is shown as pending, sends no LISTEN while linked, lets chat continue, and sends one LISTEN OFF after the graceful end.
 
-It also records the CQFRAME vs MONITOR order, PENDING/CANCELPENDING around our CQ, a second client on a broadcast port, and the status JSON's types. Results: `report.md` and `report.json` in the run directory, modem logs in `a/` and `b/`. About 22 minutes; do not touch the two windows while it runs (commands the windows send themselves are logged and fail the run).
+The stale-frame check covers a Windows Mercury receiver. A Linux receiver can read buffered data before it sees a TCP reset, so the Windows result does not qualify a Linux modem for this case.
+
+It also records the CQFRAME vs MONITOR order, PENDING/CANCELPENDING around our CQ, a second client on a broadcast port, and the status JSON's types. Results: `report.md` and `report.json` in the run directory, modem logs in `a/` and `b/`. About 22 minutes. Set `MC_LAB_BROADCAST_ONLY=1` to run only the discovery and broadcast checks before the session tests. Do not touch the two windows while it runs (commands the windows send themselves are logged and fail the run).

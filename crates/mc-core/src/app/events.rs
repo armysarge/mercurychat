@@ -93,6 +93,10 @@ pub enum AppEvent {
     Heard {
         station: HeardStation,
     },
+    /// New details for an observation that was already reported.
+    HeardUpdated {
+        station: HeardStation,
+    },
     /// A line was added to the activity log.
     Activity {
         entry: ActivityEntry,

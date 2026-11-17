@@ -14,9 +14,9 @@
 //!   shown.
 //! * `BUSY ON` is advisory (03 §6): after [`BUSY_HOLD`] with no `BUSY OFF`, a
 //!   due beacon may go out anyway.
-//! * A dead broadcast port is not beaconed into. After [`SILENT_HOLD`]
-//!   beacons in a row that the port took but the modem never keyed, the
-//!   schedule holds, with the reason shown, until a beacon is seen to go out
+//! * An unresponsive broadcast port is reset. After [`SILENT_HOLD`]
+//!   attempts that time out without PTT or are refused because of the reset,
+//!   the schedule holds, with the reason shown, until a beacon is seen to go out
 //!   or beacons are armed again (lab F3: another program may hold Mercury's
 //!   one broadcast client slot, which cannot be seen at connect time).
 
@@ -35,9 +35,8 @@ pub const MAX_INTERVAL_MIN: u32 = 60;
 pub const DEFAULT_INTERVAL_MIN: u32 = 10;
 /// A channel that has shown `BUSY ON` this long no longer holds a beacon back.
 pub const BUSY_HOLD: Duration = Duration::from_secs(10);
-/// This many beacons in a row that the broadcast port took but the modem
-/// never keyed hold the schedule (lab F3): another program may hold
-/// Mercury's broadcast port, and beacons would go nowhere unseen.
+/// This many consecutive attempts at an unresponsive broadcast port hold
+/// the schedule (lab F3).
 pub const SILENT_HOLD: u32 = 2;
 
 /// Jitter is `interval × (JITTER_LOW + JITTER_SPAN × u)` for `u` in [0, 1).
@@ -158,9 +157,8 @@ impl BeaconScheduler {
         self.held
     }
 
-    /// A beacon the broadcast port took was never keyed (the
-    /// [`NotConfirmedReason::BroadcastPortSilent`] outcome). The second in a
-    /// row holds the schedule rather than silently drawing the next one.
+    /// Count a silent beacon attempt or a retry refused because the port
+    /// was reset. The second in a row holds the schedule.
     pub fn on_silent(&mut self) {
         self.silent = self.silent.saturating_add(1);
         if self.active && self.silent >= SILENT_HOLD {

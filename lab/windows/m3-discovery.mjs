@@ -51,6 +51,7 @@ const CA_OUT = process.env.CA_OUT ?? "{0.0.1.00000000}.{a3544a95-51f9-4cdc-aee9-
 const CB_IN = process.env.CB_IN ?? "{0.0.0.00000000}.{964afa2f-cfaa-4fca-90ad-66241370063e}"; // CABLE-B Input
 const CB_OUT = process.env.CB_OUT ?? "{0.0.1.00000000}.{22742773-d4c6-4f25-bdd3-686ec5e365cb}"; // CABLE-B Output
 const BEACON_MIN = Number(process.env.BEACON_MIN ?? 5);
+const BROADCAST_ONLY = process.env.MC_LAB_BROADCAST_ONLY === "1";
 
 const ST = {
   a: { call: "ZS1AAA", grid: "JF96fc", out: CA_IN, in: CB_OUT, ctl: 8300, bc: 8100, ui: 10000, rctl: 8310, rbc: 8110, rws: null, cdp: 9351 },
@@ -112,7 +113,14 @@ function relay(name, listen, target, mode) {
     };
     client.on("close", end("app"));
     up.on("close", end("modem"));
-    client.on("error", () => {});
+    client.on("error", (err) => {
+      // Preserve an abortive close across the KISS relay. A graceful
+      // close here would let queued frames survive on Mercury's socket.
+      if (mode === "frames" && err.code === "ECONNRESET" && !up.destroyed) {
+        r.entries.push({ t: Date.now(), dir: "relay", line: "forwarded broadcast reset to Mercury" });
+        up.resetAndDestroy();
+      }
+    });
     up.on("error", () => {});
   });
   r.server.listen(listen, "127.0.0.1");
@@ -431,7 +439,7 @@ async function endSession(who, other, label) {
 // ---------------------------------------------------------------- run
 
 let A, B, wsA, wsB;
-try {
+run: try {
   mkdirSync(OUT, { recursive: true });
   const sha = (f) => createHash("sha256").update(readFileSync(f)).digest("hex");
   report.manifest.mercury = M;
@@ -532,13 +540,14 @@ try {
     const BCA0 = relays.find((r) => r.name === "a-bc");
     const t = Date.now();
     const f3 = { outcomes: [], refusals: [] };
+    const why = "the modem did not transmit; another program may be using Mercury's broadcast port";
     try {
       await must("a", { type: "setBeacon", on: true });
       for (let i = 0; i < 2; i++) {
         const ti = Date.now();
         const r = await cmd("a", { type: "sendBeaconNow" });
         if (r.err) {
-          f3.refusals.push(JSON.stringify(r.err));
+          f3.refusals.push(r.err);
           continue;
         }
         const o = await until(() => evs("a", "broadcast", ti).find((e) => e.event.kind === "beacon" && e.event.outcome.type !== "submitted"), 40000, "the beacon outcome").catch(() => null);
@@ -553,20 +562,26 @@ try {
       f3.b_heard = evs("b", "heard", t).filter((e) => e.event.station.source === "beacon").length;
       f3.activity = evs("a", "activity", t).filter((e) => e.event.entry.kind === "broadcast").map((e) => `${rel(e.t)} ${e.event.entry.text}`);
       const named = f3.outcomes.filter((o) => o.outcome?.type === "notConfirmed" && o.outcome.reason === "broadcastPortSilent").length;
-      const why = "the modem did not transmit; another program may be using Mercury's broadcast port";
+
       const held = bs.active && bs.nextDueUtc === null && bs.suppressed === why && f3.activity.some((l) => l.includes("beacons held"));
       check(
         "F3: a held broadcast port is named, and beacons hold after two",
-        named === 2 && held && f3.modem_a_took.length === 0 && f3.b_heard === 0,
-        `2 Beacon now into A's held port: ${f3.outcomes.map((o) => `${o.outcome?.type}${o.outcome?.reason ? ` (${o.outcome.reason})` : ""} after ${o.after_s} s`).join(", ")}${f3.refusals.length ? `; refused ${f3.refusals.join(" ")}` : ""}; ` +
+        named === 1 && f3.refusals.length === 1 && JSON.stringify(f3.refusals[0]).includes(why) &&
+          f3.app_wrote.length === 1 && held && f3.modem_a_took.length === 0 && f3.b_heard === 0,
+        `2 Beacon now into A's held port: ${f3.outcomes.map((o) => `${o.outcome?.type}${o.outcome?.reason ? ` (${o.outcome.reason})` : ""} after ${o.after_s} s`).join(", ")}${f3.refusals.length ? `; refused ${JSON.stringify(f3.refusals)}` : ""}; ` +
           `app wrote ${f3.app_wrote.join(", ")} (Mercury took ${f3.modem_a_took.length}, B heard ${f3.b_heard}); beacon status: active ${bs.active}, nextDue ${bs.nextDueUtc}, suppressed "${bs.suppressed}"; activity: ${f3.activity.join(" | ")}`,
       );
     } catch (e) {
       check("F3: a held broadcast port is named, and beacons hold after two", false, e.message);
     }
     await cmd("a", { type: "setBeacon", on: false });
-    // Free the slot: Mercury then accepts the app's waiting connection, with
-    // whatever the app wrote into it meanwhile.
+    // Check the reset before freeing the slot so the test covers a reader
+    // that only accepts the app's connection after its beacon timed out.
+    const reset = await until(
+      () => firstLine(BCA0, /^forwarded broadcast reset/, t),
+      5000,
+      "the relay to propagate the reset",
+    ).catch(() => null);
     const tr = Date.now();
     holder.sock.destroy();
     await sleep(20000);
@@ -580,8 +595,8 @@ try {
     // The app said those beacons were not transmitted; they must not go out later.
     check(
       "beacons reported not transmitted stay off the air when the port frees",
-      f3.stale_sent === 0 && f3.b_heard_after_release.length === 0,
-      `holder closed at +${f3.released_s} s; Mercury A then: ${f3.modem_a_after_release.join(" | ") || "nothing"}; B heard ${f3.b_heard_after_release.join(", ") || "nothing"}`,
+      !!reset && f3.stale_sent === 0 && f3.b_heard_after_release.length === 0,
+      `reset forwarded: ${!!reset}; holder closed at +${f3.released_s} s; Mercury A then: ${f3.modem_a_after_release.join(" | ") || "nothing"}; B heard ${f3.b_heard_after_release.join(", ") || "nothing"}`,
     );
   }
 
@@ -659,6 +674,8 @@ try {
 
   // ---- Beacon A -> B with the locator (and the extra KISS client on B's port)
   {
+    // An explicit off/on re-arm opens the closed port before Beacon now.
+    await must("a", { type: "setBeacon", on: true });
     const t = Date.now();
     await must("a", { type: "setBeaconContent", includeGrid: true });
     const r = await cmd("a", { type: "sendBeaconNow" });
@@ -678,6 +695,7 @@ try {
       beacon_frames_to_extra: extraGot.map((c) => `${rel(c.t)} ${c.n} B ${c.head}`),
       same_bytes: bcB[0] && extraGot[0] ? bcB[0].head === extraGot[0].head : null,
     };
+    await must("a", { type: "setBeacon", on: false });
     const st = h?.event.station;
     check(
       "beacon heard with its locator",
@@ -685,6 +703,8 @@ try {
       r.err ? `refused: ${JSON.stringify(r.err)}` : `B heard ${st?.callsign} source ${st?.source} grid ${st?.grid} caps ${st?.caps} after ${h ? ((h.t - t) / 1000).toFixed(1) : "-"} s; A outcomes ${outs.join(", ")}; A wrote ${bcA.map((e) => `${e.n} B`).join(", ")} on its broadcast port`,
     );
   }
+
+  if (BROADCAST_ONLY) break run;
 
   // ---- Session 1: the beacon gate, telemetry loss, LISTEN OFF mid-session (Q2), then LISTEN OFF after DISCONNECTED (Q1, dirty case)
   const RA = relays.find((r) => r.name === "a-ctl");

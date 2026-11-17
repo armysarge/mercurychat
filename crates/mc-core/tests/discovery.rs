@@ -177,7 +177,11 @@ async fn cq_from_peer_appears_in_heard_with_monitor_snr() {
     b.cq().await.unwrap();
     // CQFRAME first, then MONITOR's SNR merges into the same row.
     let st = wait_for(&mut rx, 10, |e| match e {
-        AppEvent::Heard { station } if station.callsign == PEER && station.snr.is_some() => Some(station.clone()),
+        AppEvent::Heard { station } | AppEvent::HeardUpdated { station }
+            if station.callsign == PEER && station.snr.is_some() =>
+        {
+            Some(station.clone())
+        }
         _ => None,
     })
     .await;
@@ -199,12 +203,56 @@ async fn cq_from_peer_appears_in_heard_with_monitor_snr() {
 /// Send `lines` as Mercury's control stream, then a marker CQ, and wait
 /// until A has heard the marker: control lines are handled in order, so
 /// everything before it has been handled too.
-async fn control_lines(net: &FakeNet, rx: &mut Receiver<EventEnvelope>, lines: &[String]) {
+/// Returns every event published before the marker was heard.
+async fn control_lines(net: &FakeNet, rx: &mut Receiver<EventEnvelope>, lines: &[String]) -> Vec<AppEvent> {
     for l in lines {
         net.send_control(0, l);
     }
     net.send_control(0, "CQFRAME ZS9END 500");
-    heard_event(rx, "ZS9END", 10).await;
+    let mut seen = Vec::new();
+    wait_for(rx, 10, |e| {
+        if matches!(e, AppEvent::Heard { station } if station.callsign == "ZS9END") {
+            return Some(());
+        }
+        seen.push(e.clone());
+        None
+    })
+    .await;
+    seen
+}
+
+/// The `heard` events and the heard activity lines `call` got in `events`.
+fn heard_counts(events: &[AppEvent], call: &str) -> (usize, usize) {
+    let heard = events.iter().filter(|e| matches!(e, AppEvent::Heard { station } if station.callsign == call)).count();
+    let lines = events
+        .iter()
+        .filter(|e| matches!(e, AppEvent::Activity { entry } if entry.kind == "heard" && entry.text.contains(call)))
+        .count();
+    (heard, lines)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn one_heard_event_and_one_heard_line_per_cq_in_either_order() {
+    // Lab F1b: the line that completes a CQ's row is an update of the same
+    // observation, not a second hearing.
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    for (i, lines) in [[monitor(PEER, 25.0), cqframe(PEER)], [cqframe(PEER), monitor(PEER, 20.0)]].iter().enumerate() {
+        let events = control_lines(&net, &mut rx, lines).await;
+        assert_eq!(heard_counts(&events, PEER), (1, 1), "order {i}: {events:?}");
+        let updates: Vec<HeardStation> = events
+            .iter()
+            .filter_map(|e| match e {
+                AppEvent::HeardUpdated { station } if station.callsign == PEER => Some(station.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(updates.len(), 1, "the completing line publishes one update: {events:?}");
+        assert!(updates[0].snr.is_some() && updates[0].bandwidth.is_some(), "{:?}", updates[0]);
+        assert_eq!(updates[0].count, (i + 1) as u32, "the update is the same row, not a new one");
+    }
+    assert_eq!(heard(&h).await.iter().find(|s| s.callsign == PEER).unwrap().count, 2);
 }
 
 fn monitor(call: &str, snr: f32) -> String {

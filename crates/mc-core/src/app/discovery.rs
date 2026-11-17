@@ -419,7 +419,7 @@ impl Discovery {
     /// observation's line has already been written).
     fn updated(&self, store: &Store, callsign: &str) -> Vec<AppEvent> {
         match heard_station(store, callsign, &self.offsets) {
-            Ok(station) => vec![AppEvent::Heard { station }],
+            Ok(station) => vec![AppEvent::HeardUpdated { station }],
             Err(e) => {
                 tracing::warn!("could not read the heard list: {e}");
                 Vec::new()
@@ -465,7 +465,7 @@ impl Discovery {
                 let how = format!("CQ, SNR {:.1} dB", m.snr_db);
                 if let Some(half) = self.take_half(&call, CqLine::Frame) {
                     return match store.set_heard_snr(half.id, m.snr_db, MONITOR_SNR) {
-                        Ok(()) => self.heard(store, &call, &how),
+                        Ok(()) => self.updated(store, &call),
                         Err(e) => {
                             tracing::warn!("could not record a monitored CQ: {e}");
                             Vec::new()
