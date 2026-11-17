@@ -8,6 +8,7 @@ import { call, describeError } from "../api";
 import type { StationProfile } from "../bindings/StationProfile";
 import About from "../components/About.vue";
 import MacroEditor from "../components/MacroEditor.vue";
+import NotificationSettings from "../components/NotificationSettings.vue";
 import ProfileForms from "../components/ProfileForms.vue";
 import StationInfo from "../components/StationInfo.vue";
 import ThemePicker from "../components/ThemePicker.vue";
@@ -131,6 +132,7 @@ async function chooseFinalise(on: boolean) {
     </section>
     <h2>{{ t("settings.addStation") }}</h2>
     <ProfileForms />
+    <NotificationSettings />
     <About />
   </div>
 </template>

@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import type { ActivityEntry } from "./bindings/ActivityEntry";
 import type { AppCommand } from "./bindings/AppCommand";
+import type { AppEvent } from "./bindings/AppEvent";
 import type { BroadcastKind } from "./bindings/BroadcastKind";
 import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { HeardStation } from "./bindings/HeardStation";
@@ -73,6 +74,8 @@ export interface MirrorHooks {
   broadcast?: (kind: BroadcastKind, outcome: BroadcastOutcome) => void;
   /** A QSO record was created, edited or finalised. */
   qso?: (qso: Qso) => void;
+  /** Every event, after it is applied (desktop notifications). */
+  event?: (event: AppEvent) => void;
   /** The local copy was rebuilt from a snapshot: message events may be missing. */
   resynced?: () => void;
 }
@@ -102,6 +105,14 @@ export class Mirror {
   setUiLanguage(language: string): void {
     if (!this.view) return;
     this.view.snapshot.uiLanguage = language;
+    this.publish();
+  }
+
+  /** A setting the core keeps without announcing it by an event: show it in
+   *  the local copy, so the next event does not put the old value back. */
+  patch(change: Partial<AppSnapshot>): void {
+    if (!this.view) return;
+    Object.assign(this.view.snapshot, change);
     this.publish();
   }
 
@@ -149,6 +160,7 @@ export class Mirror {
   private async apply(env: EventEnvelope): Promise<void> {
     const v = this.view!;
     const ev = env.event;
+    this.hooks.event?.(ev);
     switch (ev.type) {
       case "modemState":
         v.snapshot.modem = ev.state;

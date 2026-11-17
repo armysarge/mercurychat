@@ -585,5 +585,63 @@
     "waterfallAria": "Cascada: el espectro en el tiempo, lo más reciente arriba",
     "spectrumAxis": "dB frente a Hz de audio",
     "waterfallAxis": "Hz de audio, lo más reciente arriba"
+  },
+  "notifySettings": {
+    "title": "Notificaciones",
+    "enabled": "Mostrar notificaciones de escritorio",
+    "kindsLegend": "Avisarme de",
+    "kind": {
+      "message": "Mensajes nuevos, salvo si esa conversación está abierta delante",
+      "incoming": "Llamadas y sesiones entrantes",
+      "callFailed": "Una llamada que no conectó",
+      "delivery": "Un mensaje con entrega incierta o fallida",
+      "heardFavourite": "Una estación favorita oída",
+      "heardAny": "Cualquier estación oída por primera vez (CQ o baliza)",
+      "fault": "Fallos y recuperación del módem (también en horas de silencio)",
+      "beaconRefused": "Una baliza que no se envió"
+    },
+    "howLegend": "Cómo",
+    "sound": "Reproducir el sonido de notificación del sistema",
+    "hideText": "Ocultar el texto de los mensajes en las notificaciones",
+    "quiet": "Horas de silencio (los fallos se muestran igual)",
+    "quietFrom": "Desde",
+    "quietTo": "Hasta",
+    "lab": "También para estaciones del Laboratorio de audio virtual",
+    "note": "Su sistema operativo pregunta una vez, cuando activa una notificación. Los sonidos nunca van a los dispositivos de audio de la radio.",
+    "denied": "El sistema operativo no permite notificaciones de MercuryChat; permítalas en su configuración."
+  },
+  "notify": {
+    "message": {
+      "title": "Mensaje nuevo de {callsign}",
+      "body": "{text}",
+      "more": "{n} mensaje nuevo más | {n} mensajes nuevos más"
+    },
+    "incoming": {
+      "title": "{callsign} está llamando",
+      "more": "{n} llamada entrante más | {n} llamadas entrantes más"
+    },
+    "callFailed": {
+      "title": "La llamada a {callsign} no conectó",
+      "more": "{n} llamada más no conectó | {n} llamadas más no conectaron"
+    },
+    "delivery": {
+      "uncertain": "Puede que un mensaje a {callsign} no haya llegado",
+      "failed": "Un mensaje a {callsign} no se entregó",
+      "more": "{n} mensaje más requiere atención | {n} mensajes más requieren atención"
+    },
+    "heard": {
+      "title": "{callsign} oída: {source}",
+      "more": "{n} estación más oída | {n} estaciones más oídas"
+    },
+    "fault": {
+      "faulted": "El módem tiene un fallo",
+      "recovering": "Se perdió la conexión con el módem; reconectando",
+      "more": "{n} alerta más del módem | {n} alertas más del módem"
+    },
+    "beaconRefused": {
+      "title": "No se envió una baliza",
+      "more": "{n} baliza más no enviada | {n} balizas más no enviadas"
+    },
+    "reason": "{reason}"
   }
 }

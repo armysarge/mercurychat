@@ -2,6 +2,7 @@
 import type { BeaconStatus } from "./BeaconStatus";
 import type { DiscoveryStats } from "./DiscoveryStats";
 import type { ModemState } from "./ModemState";
+import type { NotifyPrefs } from "./NotifyPrefs";
 import type { Qso } from "./Qso";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
@@ -59,4 +60,8 @@ finaliseOnDisconnect: boolean,
  * The interface language the operator chose: `system`, `en`, `es`,
  * `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
  */
-uiLanguage: string, };
+uiLanguage: string, 
+/**
+ * Desktop notification preferences (app settings, not per profile).
+ */
+notifyPrefs: NotifyPrefs, };

@@ -585,5 +585,63 @@
     "waterfallAria": "Cascata: o espectro ao longo do tempo, o mais recente no topo",
     "spectrumAxis": "dB contra Hz de áudio",
     "waterfallAxis": "Hz de áudio, o mais recente no topo"
+  },
+  "notifySettings": {
+    "title": "Notificações",
+    "enabled": "Mostrar notificações na área de trabalho",
+    "kindsLegend": "Avisar-me de",
+    "kind": {
+      "message": "Novas mensagens, exceto se essa conversa estiver aberta à sua frente",
+      "incoming": "Chamadas e sessões recebidas",
+      "callFailed": "Uma chamada que não conectou",
+      "delivery": "Uma mensagem com entrega incerta ou falha",
+      "heardFavourite": "Uma estação favorita ouvida",
+      "heardAny": "Qualquer estação ouvida pela primeira vez (CQ ou beacon)",
+      "fault": "Falhas e recuperação do modem (também no horário de silêncio)",
+      "beaconRefused": "Um beacon que não foi enviado"
+    },
+    "howLegend": "Como",
+    "sound": "Tocar o som de notificação do sistema",
+    "hideText": "Ocultar o texto das mensagens nas notificações",
+    "quiet": "Horário de silêncio (falhas ainda aparecem)",
+    "quietFrom": "Das",
+    "quietTo": "Às",
+    "lab": "Também para estações do Laboratório de áudio virtual",
+    "note": "O sistema operacional pergunta uma vez, quando você liga uma notificação. Os sons nunca vão para os dispositivos de áudio do rádio.",
+    "denied": "O sistema operacional não permite notificações do MercuryChat; permita-as nas configurações dele."
+  },
+  "notify": {
+    "message": {
+      "title": "Nova mensagem de {callsign}",
+      "body": "{text}",
+      "more": "Mais {n} mensagem nova | Mais {n} mensagens novas"
+    },
+    "incoming": {
+      "title": "{callsign} está chamando",
+      "more": "Mais {n} chamada recebida | Mais {n} chamadas recebidas"
+    },
+    "callFailed": {
+      "title": "A chamada para {callsign} não conectou",
+      "more": "Mais {n} chamada não conectou | Mais {n} chamadas não conectaram"
+    },
+    "delivery": {
+      "uncertain": "Uma mensagem para {callsign} pode não ter chegado",
+      "failed": "Uma mensagem para {callsign} não foi entregue",
+      "more": "Mais {n} mensagem precisa de atenção | Mais {n} mensagens precisam de atenção"
+    },
+    "heard": {
+      "title": "{callsign} ouvida: {source}",
+      "more": "Mais {n} estação ouvida | Mais {n} estações ouvidas"
+    },
+    "fault": {
+      "faulted": "O modem está com falha",
+      "recovering": "A conexão com o modem caiu; reconectando",
+      "more": "Mais {n} alerta do modem | Mais {n} alertas do modem"
+    },
+    "beaconRefused": {
+      "title": "Um beacon não foi enviado",
+      "more": "Mais {n} beacon não enviado | Mais {n} beacons não enviados"
+    },
+    "reason": "{reason}"
   }
 }

@@ -584,5 +584,63 @@
     "waterfallAria": "Waterfall: the spectrum over time, newest at the top",
     "spectrumAxis": "dB against audio Hz",
     "waterfallAxis": "Audio Hz, newest at the top"
+  },
+  "notifySettings": {
+    "title": "Notifications",
+    "enabled": "Show desktop notifications",
+    "kindsLegend": "Notify me of",
+    "kind": {
+      "message": "New messages, unless that conversation is open in front of you",
+      "incoming": "Incoming calls and sessions",
+      "callFailed": "A call that did not connect",
+      "delivery": "A message whose delivery is uncertain or failed",
+      "heardFavourite": "A favourite station heard",
+      "heardAny": "Any station newly heard (CQ or beacon)",
+      "fault": "Modem faults and recovery (shown in quiet hours too)",
+      "beaconRefused": "A beacon that was not sent"
+    },
+    "howLegend": "How",
+    "sound": "Play the system's notification sound",
+    "hideText": "Hide message text in notifications",
+    "quiet": "Quiet hours (faults still show)",
+    "quietFrom": "From",
+    "quietTo": "To",
+    "lab": "Also for Virtual Audio Lab stations",
+    "note": "Your operating system asks once, when you turn a notification on. Sounds never go to the radio's audio devices.",
+    "denied": "The operating system does not allow notifications from MercuryChat; allow them in its settings."
+  },
+  "notify": {
+    "message": {
+      "title": "New message from {callsign}",
+      "body": "{text}",
+      "more": "{n} more new message | {n} more new messages"
+    },
+    "incoming": {
+      "title": "{callsign} is calling",
+      "more": "{n} more incoming call | {n} more incoming calls"
+    },
+    "callFailed": {
+      "title": "Call to {callsign} did not connect",
+      "more": "{n} more call did not connect | {n} more calls did not connect"
+    },
+    "delivery": {
+      "uncertain": "A message to {callsign} may not have arrived",
+      "failed": "A message to {callsign} was not delivered",
+      "more": "{n} more message needs attention | {n} more messages need attention"
+    },
+    "heard": {
+      "title": "{callsign} heard: {source}",
+      "more": "{n} more station heard | {n} more stations heard"
+    },
+    "fault": {
+      "faulted": "The modem has a fault",
+      "recovering": "The modem connection was lost; reconnecting",
+      "more": "{n} more modem alert | {n} more modem alerts"
+    },
+    "beaconRefused": {
+      "title": "A beacon was not sent",
+      "more": "{n} more beacon not sent | {n} more beacons not sent"
+    },
+    "reason": "{reason}"
   }
 }

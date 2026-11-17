@@ -7,6 +7,7 @@ use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
 use super::logbook::{Qso, QsoEdit};
+use super::notify::NotifyPrefs;
 use super::telemetry::TelemetryView;
 use crate::macros::MacroDef;
 use crate::profile::{FieldError, StationProfile};
@@ -54,6 +55,8 @@ pub struct AppSnapshot {
     /// The interface language the operator chose: `system`, `en`, `es`,
     /// `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
     pub ui_language: String,
+    /// Desktop notification preferences (app settings, not per profile).
+    pub notify_prefs: NotifyPrefs,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -164,6 +167,10 @@ pub enum AppCommand {
     /// `fr`. Anything else is refused. Kept in the setting `ui.language`.
     SetUiLanguage {
         language: String,
+    },
+    /// Keep the desktop notification preferences (quiet hours `HH:MM`, both or neither).
+    SetNotifyPrefs {
+        prefs: Box<NotifyPrefs>,
     },
     /// The active profile's macros (the first call seeds three defaults, once).
     Macros,

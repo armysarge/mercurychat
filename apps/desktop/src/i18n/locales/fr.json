@@ -585,5 +585,63 @@
     "waterfallAria": "Cascade : le spectre dans le temps, le plus récent en haut",
     "spectrumAxis": "dB selon les Hz audio",
     "waterfallAxis": "Hz audio, le plus récent en haut"
+  },
+  "notifySettings": {
+    "title": "Notifications",
+    "enabled": "Afficher des notifications sur le bureau",
+    "kindsLegend": "Me prévenir de",
+    "kind": {
+      "message": "Nouveaux messages, sauf si cette conversation est ouverte devant vous",
+      "incoming": "Appels et sessions entrants",
+      "callFailed": "Un appel qui n'a pas abouti",
+      "delivery": "Un message à la remise incertaine ou en échec",
+      "heardFavourite": "Une station favorite entendue",
+      "heardAny": "Toute station nouvellement entendue (CQ ou balise)",
+      "fault": "Pannes et reprise du modem (aussi pendant les heures calmes)",
+      "beaconRefused": "Une balise non envoyée"
+    },
+    "howLegend": "Comment",
+    "sound": "Jouer le son de notification du système",
+    "hideText": "Masquer le texte des messages dans les notifications",
+    "quiet": "Heures calmes (les pannes s'affichent quand même)",
+    "quietFrom": "De",
+    "quietTo": "À",
+    "lab": "Aussi pour les stations du laboratoire audio virtuel",
+    "note": "Votre système d'exploitation demande une fois, quand vous activez une notification. Les sons ne vont jamais vers les périphériques audio de la radio.",
+    "denied": "Le système d'exploitation n'autorise pas les notifications de MercuryChat ; autorisez-les dans ses réglages."
+  },
+  "notify": {
+    "message": {
+      "title": "Nouveau message de {callsign}",
+      "body": "{text}",
+      "more": "{n} autre nouveau message | {n} autres nouveaux messages"
+    },
+    "incoming": {
+      "title": "{callsign} appelle",
+      "more": "{n} autre appel entrant | {n} autres appels entrants"
+    },
+    "callFailed": {
+      "title": "L'appel vers {callsign} n'a pas abouti",
+      "more": "{n} autre appel n'a pas abouti | {n} autres appels n'ont pas abouti"
+    },
+    "delivery": {
+      "uncertain": "Un message pour {callsign} n'est peut-être pas arrivé",
+      "failed": "Un message pour {callsign} n'a pas été remis",
+      "more": "{n} autre message demande attention | {n} autres messages demandent attention"
+    },
+    "heard": {
+      "title": "{callsign} entendue : {source}",
+      "more": "{n} autre station entendue | {n} autres stations entendues"
+    },
+    "fault": {
+      "faulted": "Le modem est en panne",
+      "recovering": "La connexion au modem est perdue ; reconnexion",
+      "more": "{n} autre alerte du modem | {n} autres alertes du modem"
+    },
+    "beaconRefused": {
+      "title": "Une balise n'a pas été envoyée",
+      "more": "{n} autre balise non envoyée | {n} autres balises non envoyées"
+    },
+    "reason": "{reason}"
   }
 }

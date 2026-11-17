@@ -14,6 +14,7 @@ use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
 use super::logbook::{self, Qso, Start, FINALISE_SETTING};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
+use super::notify::{NotifyPrefs, NOTIFY_SETTING};
 use super::telemetry::{Telemetry, Tuning};
 use crate::macros::{self, MacroDef};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
@@ -539,6 +540,12 @@ impl App {
                     });
                 }
                 self.store.set_setting(UI_LANGUAGE_SETTING, &language).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SetNotifyPrefs { prefs } => {
+                prefs.validate().map_err(|errors| AppError::Validation { errors })?;
+                let json = serde_json::to_string(&*prefs).map_err(|e| AppError::Internal { message: e.to_string() })?;
+                self.store.set_setting(NOTIFY_SETTING, &json).map_err(storage)?;
                 Ok(CommandOk::Done)
             }
             AppCommand::Macros => self.macros_list().map(|macros| CommandOk::Macros { macros }),
@@ -1227,6 +1234,7 @@ impl App {
             current_qso: self.qso.as_ref().map(|r| Box::new(Qso::from(r))),
             finalise_on_disconnect: self.finalise_on_disconnect(),
             ui_language: self.ui_language(),
+            notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
         })
     }
 }

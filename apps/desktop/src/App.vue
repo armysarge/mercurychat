@@ -6,9 +6,10 @@ import { invoke } from "@tauri-apps/api/core";
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { call, describeError } from "./api";
 import { info, measureIpc } from "./diag";
+import { onEvent as notifyOn, startNotifier, stopNotifier } from "./notifier";
 import { t } from "./i18n";
 import {
-  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, openPeer, reloadChat, reloadDiscovery, session, snapshot,
+  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, onAppEvent, openPeer, reloadChat, reloadDiscovery, session, snapshot,
   stopTimers, type ViewName,
 } from "./store";
 import Conversations from "./views/Conversations.vue";
@@ -121,6 +122,8 @@ onMounted(async () => {
       startupError.value = info.value.startup_error;
       return;
     }
+    onAppEvent(notifyOn);
+    startNotifier();
     await mirror.start();
     const selfMeasure = await invoke<boolean>("ui_ready");
     if (selfMeasure) await measureIpc(200);
@@ -133,6 +136,7 @@ onMounted(async () => {
 onUnmounted(() => {
   mirror.stop();
   stopTimers();
+  stopNotifier();
   clearInterval(clock);
   document.removeEventListener("keydown", onKey);
 });

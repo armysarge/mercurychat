@@ -248,6 +248,10 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "stationInfo.": () => constOf("components/StationInfo.vue", "FIELDS"),
     "logbook.col.": () => constOf("views/Logbook.vue", "COLUMNS"),
     "transcript.sys.": () => unionOf("BroadcastKind.ts"),
+    // Task 12b: notification kinds, and the message and modem states notify.ts names.
+    "notifySettings.kind.": () => constOf("components/NotificationSettings.vue", "KINDS"),
+    "notify.delivery.": () => ["uncertain", "failed"],
+    "notify.fault.": () => ["faulted", "recovering"],
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
       const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";

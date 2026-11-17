@@ -361,6 +361,9 @@ fn boot_steps(app: tauri::AppHandle) {
 pub fn run() {
     STARTED.get_or_init(Instant::now);
     tauri::Builder::default()
+        // Desktop notifications (M3a Task 12b): the window may only send one,
+        // ask whether it may, and ask the operator once (capabilities/default.json).
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             windows::open_splash(app.handle())?;
             windows::arm_startup_timeout(app.handle());

@@ -30,6 +30,8 @@
 //   T10e after a restart beacons are off and the prompt asks to turn them on
 // M3a Task 12: the spectrum and waterfall are collapsed by default and, on the
 //   simulator (no telemetry), say "telemetry unavailable" and draw nothing
+// M3a Task 12b: a lab station does not notify until it is allowed; with "Any station
+//   newly heard" on, SIM1's next CQ or beacon asks for a notification (recorded by a stub)
 // M3a Task 11 (QSO card, Logbook, macros, search, About):
 //   T11a station information and a macro are saved in Settings; finalise on
 //        disconnect is off by default
@@ -438,6 +440,31 @@ try {
   const stripOff = await s.eval("document.querySelector('.strip .next-beacon').textContent.trim()");
   if (armed || prompt !== "Beacons were on last time; turn on again?" || stripOff !== "Beacons are off") throw new Error(`after restart: armed ${armed}, prompt "${prompt}", strip "${stripOff}"`);
   results.push(`PASS restart: SIM1's star kept; beacons off ("${stripOff}") with the prompt "${prompt}"`);
+
+  // ---- T12b. turning on "any station heard" (and lab notifications) makes SIM1's next CQ or beacon a notification.
+  // A stub stands in for the plugin's window.Notification: it records what the window asks to show, and nothing reaches the desktop.
+  await s.eval(`(() => {
+    window.__mcNotes = [];
+    class Stub { constructor(title, opts) { window.__mcNotes.push({ title, body: opts?.body ?? null, sound: opts?.sound ?? null }); } }
+    Stub.permission = 'granted';
+    Stub.requestPermission = () => Promise.resolve('granted');
+    window.Notification = Stub;
+  })()`);
+  await s.eval(`document.querySelector('.heard .row[data-callsign="SIM1"] .star').click()`);
+  await until(s, `document.querySelector('.heard .row[data-callsign="SIM1"] .star').getAttribute('aria-pressed') === 'false'`, "SIM1 unstarred (so the heardAny switch is what notifies)");
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, "!!document.querySelector('section.notifications')", "the notification settings");
+  const notifyDefaults = await s.eval("({ any: document.querySelector('input.notify-heardAny').checked, message: document.querySelector('input.notify-message').checked })");
+  if (notifyDefaults.any || !notifyDefaults.message) throw new Error(`notification defaults: ${JSON.stringify(notifyDefaults)}`);
+  const quietBefore = await s.eval("window.__mcNotes.length");
+  await s.eval("[...document.querySelectorAll('section.notifications label')].find(l => /Virtual Audio Lab/.test(l.textContent)).querySelector('input').click()");
+  await s.eval("document.querySelector('input.notify-heardAny').click()");
+  await until(s, "document.querySelector('input.notify-heardAny').checked", "Any station heard turned on");
+  await s.eval(`${rail("Operate")}.click()`);
+  await until(s, "window.__mcNotes.some(n => /^SIM1 heard: (CQ|Beacon)$/.test(n.title))", "a notification for SIM1's next CQ or beacon", 75000);
+  const note = await s.eval("window.__mcNotes.find(n => /^SIM1 heard/.test(n.title))");
+  if (quietBefore !== 0) throw new Error(`notified before it was turned on: ${quietBefore}`);
+  results.push(`PASS notifications: off for a lab station until turned on; with "Any station newly heard" on, SIM1's broadcast asked for "${note.title}" (sound ${note.sound})`);
 
   // ---- 11. themes: Night Red changes the window, persists, and the splash uses it themeAfter a restart
   const rgb = (hex) => { const h = hex.replace("#", ""); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };

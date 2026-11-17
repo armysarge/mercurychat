@@ -4,12 +4,14 @@
 import { computed, reactive, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
 import type { ActivityEntry } from "./bindings/ActivityEntry";
+import type { AppEvent } from "./bindings/AppEvent";
 import type { BroadcastKind } from "./bindings/BroadcastKind";
 import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
 import type { HeardStation } from "./bindings/HeardStation";
 import type { MacroDef } from "./bindings/MacroDef";
+import type { NotifyPrefs } from "./bindings/NotifyPrefs";
 import type { Qso } from "./bindings/Qso";
 import type { QsoEdit } from "./bindings/QsoEdit";
 import { applyLanguage, rememberLanguage, t } from "./i18n";
@@ -107,6 +109,12 @@ export const canCall = computed(() => modemState.value === "ready" || modemState
 export const inSession = computed(() => modemState.value === "negotiating" || modemState.value === "connected");
 export const canAbort = computed(() => inSession.value || ["calling", "draining"].includes(modemState.value));
 
+const eventListeners: ((e: AppEvent) => void)[] = [];
+/** Be told of every core event as it is applied (desktop notifications). */
+export function onAppEvent(fn: (e: AppEvent) => void) {
+  eventListeners.push(fn);
+}
+
 export const mirror = new Mirror((v) => (app.view = v), {
   message: onMessage,
   heard: onHeard,
@@ -116,6 +124,7 @@ export const mirror = new Mirror((v) => (app.view = v), {
   },
   broadcast: (kind, outcome) => (discovery.outcome[kind] = outcome),
   qso: upsertQso,
+  event: (e) => eventListeners.forEach((fn) => fn(e)),
   resynced: () => {
     void reloadChat();
     void reloadDiscovery();
@@ -214,7 +223,7 @@ export const setBeaconContent = (includeGrid: boolean) =>
   discoveryAct("beacon", async () => {
     await call({ type: "setBeaconContent", includeGrid });
     // No event carries this setting: keep the local copy in step with the core.
-    if (app.view) app.view.snapshot.beacon = { ...app.view.snapshot.beacon, includeGrid };
+    if (app.view) mirror.patch({ beacon: { ...app.view.snapshot.beacon, includeGrid } });
   });
 export const setFavourite = (callsign: string, on: boolean) => discoveryAct("star", () => call({ type: "setFavourite", callsign, on }));
 export const selectProfile = (id: string) => act(() => call({ type: "selectProfile", id }));
@@ -442,7 +451,7 @@ export async function finaliseQso(id: string): Promise<Qso | null> {
 export async function setFinaliseOnDisconnect(on: boolean) {
   await call({ type: "setFinaliseOnDisconnect", on });
   // No event carries this setting: keep the local copy in step with the core.
-  if (app.view) app.view.snapshot.finaliseOnDisconnect = on;
+  mirror.patch({ finaliseOnDisconnect: on });
 }
 
 export const macros = reactive({ list: [] as MacroDef[], error: "" });
@@ -492,3 +501,17 @@ watch(
     void loadMacros();
   },
 );
+
+/** Keep the desktop notification preferences. No event carries them, so the
+ *  local copy changes first (a second quick change builds on the first) and
+ *  goes back if the core refuses. */
+export async function setNotifyPrefs(prefs: NotifyPrefs) {
+  const before = app.view?.snapshot.notifyPrefs;
+  mirror.patch({ notifyPrefs: prefs });
+  try {
+    await call({ type: "setNotifyPrefs", prefs });
+  } catch (e) {
+    if (before && app.view?.snapshot.notifyPrefs === prefs) mirror.patch({ notifyPrefs: before });
+    throw e;
+  }
+}

@@ -9,6 +9,7 @@ mod discovery;
 mod events;
 mod logbook;
 mod modem;
+mod notify;
 mod service;
 mod telemetry;
 
@@ -26,6 +27,7 @@ pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Re
 pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
 pub use logbook::{Qso, QsoEdit, FINALISE_SETTING, OPERATOR_SOURCE};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
+pub use notify::{NotifyPrefs, NOTIFY_SETTING};
 pub use service::{spawn_app, AppHandle, AppOptions};
 pub use telemetry::{
     AudioView, TelemetryLinkView, TelemetryView, Tuning, CONTROL_SOURCE, EVENT_GAP, FREQ_FRESH_MS, OFFSET_FRESH_MS,
@@ -52,5 +54,6 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     Qso::export_all(&cfg)?;
     QsoEdit::export_all(&cfg)?;
     MacroDef::export_all(&cfg)?;
+    NotifyPrefs::export_all(&cfg)?;
     Since::export_all(&cfg)
 }
