@@ -13,14 +13,18 @@
 //
 //   M=<mercury.exe> node lab/windows/m3-discovery.mjs <mercurychat.exe> <fresh run dir>
 //
-// Checks: CQ heard with source CQ and the MONITOR SNR; a beacon heard with its
-// locator; the session gate (beacon toggle, beacon now and CQ during a
-// session: nothing on the air); exactly one beacon after the session with a
-// 5-minute interval; telemetry lost while chat keeps delivering; frequency
-// unavailable without a rig. Plus the M3a real-Mercury questions: LISTEN OFF
-// after DISCONNECTED vs the teardown frame, LISTEN OFF mid-session, CQFRAME
-// vs MONITOR order, PENDING/CANCELPENDING around our CQ, a second client on
-// the broadcast port, and the telemetry status JSON's real types.
+// Checks: every CQ heard as one row with source CQ and the MONITOR SNR,
+// whatever the CQFRAME/MONITOR order (F1); no telemetry SNR before a decode
+// (F4); beacons into a broadcast port another client holds are named and hold
+// after two (F3); a beacon heard with its locator; the session gate (beacon
+// toggle, beacon now and CQ during a session: nothing on the air); exactly
+// one beacon after the session with a 5-minute interval; telemetry lost while
+// chat keeps delivering; frequency unavailable without a rig; session ends
+// reach the peer promptly; Receive only mid-session waits for the session to
+// end (F2). Plus the M3a real-Mercury questions: LISTEN OFF after
+// DISCONNECTED vs the teardown frame, CQFRAME vs MONITOR order,
+// PENDING/CANCELPENDING around our CQ, a second client on the broadcast port,
+// and the telemetry status JSON's real types.
 // Results: <run dir>/report.md and report.json; modem logs in <run dir>/{a,b}.
 import { spawn, execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -455,6 +459,22 @@ try {
   wsB = wsCapture("b", `ws://127.0.0.1:${ST.b.ui}/websocket`);
   log("modems up; relays listening");
 
+  // F3: another program holds Mercury A's one broadcast-client slot before the
+  // app attaches. The app's connection (through a-bc) then waits in the OS
+  // backlog: it connects, its writes are taken, and nothing reaches the modem.
+  const holder = { connected: null, closed: null, bytes: 0 };
+  {
+    const t = Date.now();
+    const sock = net.connect(ST.a.bc, "127.0.0.1");
+    sock.on("connect", () => (holder.connected = Date.now()));
+    sock.on("data", (d) => (holder.bytes += d.length));
+    sock.on("close", () => (holder.closed = Date.now()));
+    sock.on("error", () => {});
+    holder.sock = sock;
+    await until(() => modemLines("a", /tcp-bcast] Client connected/, t - 50).length > 0 && holder.connected, 10000, "Mercury A to take the holder as its broadcast client");
+    log("A's broadcast port is held by a raw client");
+  }
+
   // ---- the two app instances, each on its own modem through the relays
   for (const id of ["a", "b"]) {
     const s = ST[id];
@@ -476,6 +496,17 @@ try {
 
   // ---- Q6 / frequency: telemetry JSON as written, and what the app makes of it
   await until(() => wsA.status >= 6 && wsB.status >= 6, 20000, "status frames on the raw captures");
+  // F4: before anything is decoded Mercury writes snr 0.0 (no decode yet:
+  // freq_offset_age_ms null); the app must show no SNR, not 0 dB.
+  {
+    const [sa, sb] = [await snap("a"), await snap("b")];
+    const forms = (c) => ({ snr: Object.keys(c.forms.snr ?? {}).join("/"), snr_example: Object.values(c.forms.snr ?? {})[0]?.example, age: Object.keys(c.forms.freq_offset_age_ms ?? {}).join("/") });
+    const fa = forms(wsA);
+    const fb = forms(wsB);
+    report.f4_before_decode = { wire_a: fa, wire_b: fb, app_a: sa.telemetry.snrDb, app_b: sb.telemetry.snrDb, at_s: rel(Date.now()) };
+    report.f4_ok_idle = fa.age === "null" && fb.age === "null" && sa.telemetry.snrDb === null && sb.telemetry.snrDb === null;
+    log(`F4 before any decode: wire A snr ${fa.snr} (${fa.snr_example}) age ${fa.age}; app A snrDb ${JSON.stringify(sa.telemetry.snrDb)}, B ${JSON.stringify(sb.telemetry.snrDb)}`);
+  }
   {
     const sa = await snap("a");
     const f = wsA.forms;
@@ -493,6 +524,64 @@ try {
       "frequency unavailable without a rig",
       freqNull && sa.telemetry.frequency === null && sa.telemetry.link.type === "up",
       `wire radio_frequency_hz ${JSON.stringify(f.radio_frequency_hz)}; app telemetry link ${sa.telemetry.link.type}, frequency ${JSON.stringify(sa.telemetry.frequency)} (shown as unavailable), listenMode ${sa.telemetry.listenMode}`,
+    );
+  }
+
+  // ---- F3: beacons into a held broadcast port are named, and hold after two
+  {
+    const BCA0 = relays.find((r) => r.name === "a-bc");
+    const t = Date.now();
+    const f3 = { outcomes: [], refusals: [] };
+    try {
+      await must("a", { type: "setBeacon", on: true });
+      for (let i = 0; i < 2; i++) {
+        const ti = Date.now();
+        const r = await cmd("a", { type: "sendBeaconNow" });
+        if (r.err) {
+          f3.refusals.push(JSON.stringify(r.err));
+          continue;
+        }
+        const o = await until(() => evs("a", "broadcast", ti).find((e) => e.event.kind === "beacon" && e.event.outcome.type !== "submitted"), 40000, "the beacon outcome").catch(() => null);
+        f3.outcomes.push(o ? { s: rel(o.t), after_s: +((o.t - ti) / 1000).toFixed(1), outcome: o.event.outcome } : { outcome: "none in 40 s" });
+      }
+      await sleep(1500);
+      await pull();
+      const bs = (await snap("a")).beacon;
+      f3.status_after = bs;
+      f3.app_wrote = BCA0.entries.filter((e) => e.t >= t && e.dir === "app>modem").map((e) => `${rel(e.t)} ${e.n} B`);
+      f3.modem_a_took = modemLines("a", /KISS frame decoded|Broadcast frame queued/, t).map((l) => `${rel(l.t)} ${l.text}`);
+      f3.b_heard = evs("b", "heard", t).filter((e) => e.event.station.source === "beacon").length;
+      f3.activity = evs("a", "activity", t).filter((e) => e.event.entry.kind === "broadcast").map((e) => `${rel(e.t)} ${e.event.entry.text}`);
+      const named = f3.outcomes.filter((o) => o.outcome?.type === "notConfirmed" && o.outcome.reason === "broadcastPortSilent").length;
+      const why = "the modem did not transmit; another program may be using Mercury's broadcast port";
+      const held = bs.active && bs.nextDueUtc === null && bs.suppressed === why && f3.activity.some((l) => l.includes("beacons held"));
+      check(
+        "F3: a held broadcast port is named, and beacons hold after two",
+        named === 2 && held && f3.modem_a_took.length === 0 && f3.b_heard === 0,
+        `2 Beacon now into A's held port: ${f3.outcomes.map((o) => `${o.outcome?.type}${o.outcome?.reason ? ` (${o.outcome.reason})` : ""} after ${o.after_s} s`).join(", ")}${f3.refusals.length ? `; refused ${f3.refusals.join(" ")}` : ""}; ` +
+          `app wrote ${f3.app_wrote.join(", ")} (Mercury took ${f3.modem_a_took.length}, B heard ${f3.b_heard}); beacon status: active ${bs.active}, nextDue ${bs.nextDueUtc}, suppressed "${bs.suppressed}"; activity: ${f3.activity.join(" | ")}`,
+      );
+    } catch (e) {
+      check("F3: a held broadcast port is named, and beacons hold after two", false, e.message);
+    }
+    await cmd("a", { type: "setBeacon", on: false });
+    // Free the slot: Mercury then accepts the app's waiting connection, with
+    // whatever the app wrote into it meanwhile.
+    const tr = Date.now();
+    holder.sock.destroy();
+    await sleep(20000);
+    await pull();
+    f3.released_s = rel(tr);
+    f3.modem_a_after_release = modemLines("a", /tcp-bcast|Broadcast frame queued|PTT/, tr).map((l) => `${rel(l.t)} ${l.text}`);
+    f3.b_heard_after_release = evs("b", "heard", tr).filter((e) => e.event.station.source === "beacon").map((e) => `${rel(e.t)} ${e.event.station.callsign}`);
+    f3.stale_sent = modemLines("a", /Broadcast frame queued/, tr).length;
+    report.f3 = f3;
+    log(`F3 port released: Mercury A queued ${f3.stale_sent} stale beacon frame(s); B heard ${f3.b_heard_after_release.length}`);
+    // The app said those beacons were not transmitted; they must not go out later.
+    check(
+      "beacons reported not transmitted stay off the air when the port frees",
+      f3.stale_sent === 0 && f3.b_heard_after_release.length === 0,
+      `holder closed at +${f3.released_s} s; Mercury A then: ${f3.modem_a_after_release.join(" | ") || "nothing"}; B heard ${f3.b_heard_after_release.join(", ") || "nothing"}`,
     );
   }
 
@@ -517,6 +606,7 @@ try {
     for (let i = 0; i < n; i++) {
       const Rf = relays.find((r) => r.name === `${from}-ctl`);
       const Rt = relays.find((r) => r.name === `${to}-ctl`);
+      const before = (await heard(to)).find((x) => x.callsign === ST[from].call)?.count ?? 0;
       const t = Date.now();
       const r = await cmd(from, { type: "sendCq" });
       const run = { from, to, i, refused: r.err ?? null };
@@ -530,6 +620,9 @@ try {
         const row = (await heard(to)).find((x) => x.callsign === ST[from].call);
         run.heard_after_s = h ? +((h.t - t) / 1000).toFixed(2) : null;
         run.row = row ? { source: row.source, snr: row.snr, bandwidth: row.bandwidth, freq: row.freq, offsetHz: row.offsetHz, count: row.count } : null;
+        run.rows_added = (row?.count ?? 0) - before;
+        run.heard_lines = evs(to, "activity", t).filter((e) => e.event.entry.kind === "heard").map((e) => e.event.entry.text);
+        run.heard_events = evs(to, "heard", t).filter((e) => e.event.station.callsign === ST[from].call).length;
         run.sender = show(lines(Rf, t, Date.now()).filter((e) => /^(CQFRAME|OK|WRONG|PENDING|CANCELPENDING|PTT|BUSY)/.test(e.line)));
         run.receiver = show(lines(Rt, t, Date.now()).filter((e) => /^(CQFRAME|MONITOR)/.test(e.line)));
         const cq = firstLine(Rt, /^CQFRAME /, t);
@@ -544,9 +637,19 @@ try {
   }
   report.questions.q3_q4_cq = cqRuns;
   {
-    const ab = cqRuns.filter((r) => r.from === "a");
-    const ok = ab.every((r) => r.row?.source === "cq" && r.row?.snr?.source === "modem monitor" && Number.isFinite(r.row?.snr?.value));
-    check("CQ heard with source CQ and the MONITOR SNR", ok, ab.map((r) => `#${r.i + 1}: ${r.row?.source} snr ${r.row?.snr ? `${r.row.snr.value} dB (${r.row.snr.source})` : "none"}, heard after ${r.heard_after_s} s, ${r.order}`).join("; "));
+    // F1: every CQ, both directions and whatever the line order, is one row with the MONITOR SNR.
+    const ok = cqRuns.every((r) => r.row?.source === "cq" && r.row?.snr?.source === "modem monitor" && Number.isFinite(r.row?.snr?.value) && r.rows_added === 1);
+    check("CQ heard with source CQ and the MONITOR SNR (F1: one row, either line order)", ok, cqRuns.map((r) => `${r.from}->${r.to} #${r.i + 1}: ${r.row?.source} snr ${r.row?.snr ? `${r.row.snr.value} dB (${r.row.snr.source})` : "none"}, ${r.order}, rows +${r.rows_added}, after ${r.heard_after_s} s`).join("; "));
+    // The task 13F brief also asks for one heard event per CQ, whatever the order.
+    const once = cqRuns.every((r) => r.heard_lines.length === 1 && r.heard_events === 1);
+    check("one heard activity line and one heard event per CQ, either order", once, cqRuns.map((r) => `${r.from}->${r.to} #${r.i + 1} ${r.order}: lines ${r.heard_lines.length} (${r.heard_lines.join(" / ")}), heard events ${r.heard_events}`).join("; "));
+    // F4: an SNR appears once something was decoded.
+    const [sa, sb] = [await snap("a"), await snap("b")];
+    check(
+      "F4: no telemetry SNR until a decode, then one",
+      report.f4_ok_idle && sa.telemetry.snrDb?.source === "mercury telemetry" && sb.telemetry.snrDb?.source === "mercury telemetry",
+      `before any decode (+${report.f4_before_decode.at_s} s): wire snr ${report.f4_before_decode.wire_a.snr} (${report.f4_before_decode.wire_a.snr_example}) with freq_offset_age_ms ${report.f4_before_decode.wire_a.age} on A, ${report.f4_before_decode.wire_b.age} on B; app snrDb A ${JSON.stringify(report.f4_before_decode.app_a)}, B ${JSON.stringify(report.f4_before_decode.app_b)}; after the CQs: A ${JSON.stringify(sa.telemetry.snrDb)}, B ${JSON.stringify(sb.telemetry.snrDb)}`,
+    );
     const both = cqRuns.filter((r) => r.order === "MONITOR first");
     const snrInMonFirst = both.every((r) => r.row?.snr?.source === "modem monitor");
     report.questions.q3_summary = `${cqRuns.filter((r) => r.order === "CQFRAME first").length} CQFRAME-first, ${both.length} MONITOR-first; MONITOR-first rows with the SNR: ${both.length ? snrInMonFirst : "n/a"}`;
@@ -730,45 +833,84 @@ try {
     );
   }
 
-  // ---- Q2: Receive only switched on mid-session (A answering, A called B)
+  // ---- Q2 / F2: Receive only switched on mid-session (A answering, A called B).
+  // The live link is never touched: the choice is pending until the session
+  // ends, chat keeps going both ways, and LISTEN OFF follows A's DISCONNECTED.
   {
+    const name = "Receive only mid-session waits for the session to end (F2)";
     try {
       await must("a", { type: "setReceiveOnly", on: false });
       await until(async () => (await snap("a")).listening, 15000, "A listening again");
       const s = await callUp("a", "b");
-      await chat("a", "b", "m3 lab: session 6, before LISTEN OFF");
+      await chat("a", "b", "m3 lab: session 6, before Receive only");
       const roAt = Date.now();
       await must("a", { type: "setReceiveOnly", on: true });
-      const aEnd = await until(() => firstLine(RA, /^DISCONNECTED$/, roAt, "modem>app"), 20000, "A's DISCONNECTED").catch(() => null);
-      const aIdle = await until(async () => (idle((await snap("a")).modem.type) ? Date.now() : null), 30000, "A idle").catch(() => null);
-      const bEnd = await until(() => firstLine(RB, /^DISCONNECTED$/, roAt, "modem>app"), 330000, "B's DISCONNECTED").catch(() => null);
-      await until(async () => idle((await snap("b")).modem.type), 60000, "B idle").catch(() => null);
-      await sleep(3000);
-      const noise = (e) => !/^(SN|BITRATE|BUFFER) /.test(e.line);
-      report.questions.q2_listen_off_mid_session = {
+      const pending = await until(async () => {
+        const sa = await snap("a");
+        return sa.receiveOnly && sa.receiveOnlyPending ? sa : null;
+      }, 5000, "the pending state in the snapshot").catch(() => null);
+      const header = await A.sess.eval("document.querySelector('.station-mode .mode-word')?.textContent.trim() ?? null");
+      const ev = evs("a", "receiveOnly", roAt).map((e) => `${rel(e.t)} on ${e.event.on} pending ${e.event.pending}`);
+      // Still linked a while later, and chat both ways.
+      await sleep(15000);
+      const ab = await chat("a", "b", "m3 lab: session 6, Receive only pending, A to B").catch((e) => `FAIL ${e.message}`);
+      const ba = await chat("b", "a", "m3 lab: session 6, Receive only pending, B to A").catch((e) => `FAIL ${e.message}`);
+      const [sa1, sb1] = [await snap("a"), await snap("b")];
+      const sameLink = sa1.session?.sessionId === s.sessionId && sb1.session?.sessionId === s.peerSessionId;
+      const listenWhileLinked = lines(RA, roAt, Date.now(), /^LISTEN /).filter((e) => e.dir === "app>modem");
+      const dropped = modemLines("a", /LISTEN OFF on a live link|reason=listen_off/, roAt);
+      // Now end it gracefully from A.
+      const e = await endSession("a", "b", "session 6: Receive only switched on mid-session, then A ends");
+      const aDisc = e.ender_disconnected_t;
+      const listenAfter = lines(RA, roAt, Date.now(), /^LISTEN /).filter((x) => x.dir === "app>modem");
+      const sa2 = await snap("a");
+      const q = {
         connected_after_s: +((s.up - s.t) / 1000).toFixed(1),
         set_at_s: rel(roAt),
-        a_disconnected_after_s: aEnd ? +((aEnd.t - roAt) / 1000).toFixed(3) : null,
-        a_idle_after_s: aIdle ? +((aIdle - roAt) / 1000).toFixed(1) : null,
-        b_disconnected_after_s: bEnd ? +((bEnd.t - roAt) / 1000).toFixed(1) : null,
-        a_listen_sent: show(lines(RA, roAt, Date.now(), /^LISTEN /).filter((e) => e.dir === "app>modem")),
-        a_transcript: show(lines(RA, roAt - 200, roAt + 20000).filter(noise)),
-        b_transcript: show(lines(RB, roAt - 200, (bEnd?.t ?? roAt + 20000) + 2000).filter(noise)),
-        a_modem_log: modemLines("a", /LISTEN|isten|isconnect|PTT/i, roAt - 500, roAt + 20000).map((l) => `${rel(l.t)} ${l.text}`),
-        b_modem_log: modemLines("b", /isconnect|timeout|PTT/i, roAt - 500, (bEnd?.t ?? roAt + 20000) + 2000).map((l) => `${rel(l.t)} ${l.text}`),
-        a_events: evs("a", "modemState", roAt).map((e) => `${rel(e.t)} ${e.event.state.type}${e.event.detail ? ` (${e.event.detail})` : ""}`),
-        b_events: evs("b", "modemState", roAt).map((e) => `${rel(e.t)} ${e.event.state.type}${e.event.detail ? ` (${e.event.detail})` : ""}`),
+        snapshot_pending: pending ? { receiveOnly: pending.receiveOnly, receiveOnlyPending: pending.receiveOnlyPending, listening: pending.listening, modem: pending.modem.type } : null,
+        header,
+        receive_only_events: evs("a", "receiveOnly", roAt).map((x) => `${rel(x.t)} on ${x.event.on} pending ${x.event.pending}`),
+        chat_ab_s: ab,
+        chat_ba_s: ba,
+        same_link: sameLink,
+        listen_while_linked: show(listenWhileLinked),
+        modem_dropped_link: dropped.map((l) => `${rel(l.t)} ${l.text}`),
+        end: e,
+        listen_total: show(listenAfter),
+        listen_after_disconnected_ms: listenAfter.filter((x) => x.t >= aDisc).map((x) => x.t - aDisc),
+        after: { receiveOnly: sa2.receiveOnly, receiveOnlyPending: sa2.receiveOnlyPending, listening: sa2.listening, modem: sa2.modem.type },
       };
-      const q = report.questions.q2_listen_off_mid_session;
-      log(`Q2: LISTEN OFF mid-session: A DISCONNECTED after ${q.a_disconnected_after_s} s, B after ${q.b_disconnected_after_s} s`);
+      report.questions.q2_listen_off_mid_session = q;
+      log(`Q2: pending ${!!pending}, header "${header}", LISTEN while linked ${listenWhileLinked.length}, chat ${ab}/${ba}; after DISCONNECT: LISTEN ${q.listen_total.join(" | ")}, B saw the end after ${e.peer_disconnected_after_s} s`);
+      const ok =
+        !!pending &&
+        /after this session/i.test(header ?? "") &&
+        listenWhileLinked.length === 0 &&
+        dropped.length === 0 &&
+        typeof ab === "number" &&
+        typeof ba === "number" &&
+        sameLink &&
+        listenAfter.length === 1 &&
+        /^LISTEN OFF$/.test(listenAfter[0].line) &&
+        listenAfter[0].t >= aDisc &&
+        e.peer_disconnected_after_s != null &&
+        e.peer_disconnected_after_s < 30 &&
+        sa2.receiveOnly &&
+        !sa2.receiveOnlyPending &&
+        !sa2.listening;
       check(
-        "Receive only mid-session does not end the link (or the peer is told)",
-        !aEnd || (bEnd && bEnd.t - aEnd.t < 30000),
-        `A's app sent ${q.a_listen_sent.join(" | ")}; A's modem DISCONNECTED ${q.a_disconnected_after_s} s later; B learned ${q.b_disconnected_after_s} s after the switch; A modem log: ${q.a_modem_log.filter((l) => /LISTEN OFF on a live link/.test(l)).join("") || "-"}`,
+        name,
+        ok,
+        `snapshot receiveOnly ${pending?.receiveOnly}, pending ${pending?.receiveOnlyPending} (events ${ev.join(", ") || q.receive_only_events.join(", ")}); header "${header}"; ` +
+          `no LISTEN while linked (${listenWhileLinked.length}), Mercury dropped the link: ${dropped.length ? "yes" : "no"}; chat A->B ${typeof ab === "number" ? `${ab.toFixed(1)} s` : ab}, B->A ${typeof ba === "number" ? `${ba.toFixed(1)} s` : ba}, same session ${sameLink}; ` +
+          `A's DISCONNECT, then ${q.listen_total.length} LISTEN (${q.listen_total.join(" | ")}), ${q.listen_after_disconnected_ms.map((m) => `+${m} ms`).join(", ")} after A's DISCONNECTED; B's DISCONNECTED ${e.peer_disconnected_after_s} s after DISCONNECT; then receiveOnly ${sa2.receiveOnly}, pending ${sa2.receiveOnlyPending}, listening ${sa2.listening}`,
       );
     } catch (err) {
-      check("Receive only mid-session does not end the link (or the peer is told)", false, err.message);
+      check(name, false, err.message);
     }
+    // Back to answering calls for anything after this.
+    await cmd("a", { type: "setReceiveOnly", on: false });
+    await until(async () => (await snap("a")).listening, 15000, "A answering calls again").catch(() => null);
   }
 
   // ---- QSO draft and heard rows: no frequency without a rig

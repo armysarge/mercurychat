@@ -138,4 +138,17 @@ cargo build -p mercurychat --features tauri/custom-protocol
 M=lab/bin-patched/windows-x64/mercury.exe node lab/windows/m3-discovery.mjs target/debug/mercurychat.exe lab/run/m3-disc-N
 ```
 
-It checks: a CQ heard with source CQ and the MONITOR SNR; a beacon heard with its locator; the session gate (beacon toggle, Beacon now and CQ refused during a session, and an armed beacon that falls due inside it never reaches the air); exactly one beacon one interval (5 min, `BEACON_MIN`) after the session; telemetry lost mid-session while chat keeps delivering both ways; frequency unavailable without a rig (telemetry, QSO drafts, heard rows). It also records how each side learns of a session end, with Receive only chosen while the call rings, kept throughout, and switched on mid-session; CQFRAME vs MONITOR order; PENDING/CANCELPENDING around our CQ; a second client on a broadcast port; and the status JSON's types. Results: `report.md` and `report.json` in the run directory, modem logs in `a/` and `b/`. About 21 minutes; do not touch the two windows while it runs (commands the windows send themselves are logged and fail the run).
+It checks:
+
+- every CQ is heard as one row with source CQ and the MONITOR SNR, whichever of CQFRAME and MONITOR comes first;
+- no telemetry SNR is shown before Mercury has decoded anything;
+- with Mercury A's broadcast port held by a raw client before the app attaches, two Beacon now are named "another program may be using Mercury's broadcast port" and beacons hold (the client is then released, and what Mercury does with the queued bytes is recorded);
+- a beacon is heard with its locator;
+- the session gate: beacon toggle, Beacon now and CQ are refused during a session, and an armed beacon that falls due inside it never reaches the air;
+- exactly one beacon follows one interval (5 min, `BEACON_MIN`) after the session;
+- telemetry is lost mid-session while chat keeps delivering both ways;
+- frequency is unavailable without a rig (telemetry, QSO drafts, heard rows);
+- session ends reach the other side promptly, with Receive only chosen while the call rings or kept throughout;
+- Receive only switched on mid-session is shown as pending, sends no LISTEN while linked, lets chat continue, and sends one LISTEN OFF after the graceful end.
+
+It also records the CQFRAME vs MONITOR order, PENDING/CANCELPENDING around our CQ, a second client on a broadcast port, and the status JSON's types. Results: `report.md` and `report.json` in the run directory, modem logs in `a/` and `b/`. About 22 minutes; do not touch the two windows while it runs (commands the windows send themselves are logged and fail the run).
