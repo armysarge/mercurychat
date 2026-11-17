@@ -452,6 +452,7 @@
     "profile": "Station",
     "cq": "Appel CQ",
     "beaconNow": "Balise maintenant",
+    "idleOnly": "Le CQ et les balises ne partent que lorsque le modem est inactif",
     "cqOutcome": "CQ : {what}",
     "beaconOutcome": "Balise : {what}",
     "nextBeacon": "Prochaine balise {time}",

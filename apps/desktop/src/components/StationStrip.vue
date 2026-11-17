@@ -64,7 +64,8 @@ const next = computed(() => (beacon.value?.active && beacon.value.nextDueUtc ? c
 /** A CQ or beacon outcome in words: "transmitted", never "delivered" (DSC-02). */
 function outcomeText(o: BroadcastOutcome | undefined): string {
   if (!o) return "";
-  if (o.type === "refused") return t("strip.outcome.refused", { reason: o.reason });
+  // The core's reason already starts "not sent: "; the key adds those words in the UI's language.
+  if (o.type === "refused") return t("strip.outcome.refused", { reason: o.reason.replace(/^not sent: /, "") });
   if (o.type === "notConfirmed") return t(o.reason ? `broadcast.notConfirmed.${o.reason}` : "strip.outcome.notConfirmed");
   return t(`strip.outcome.${o.type}`);
 }
@@ -99,6 +100,7 @@ const spectrumUp = computed(() => tel.value?.link.type === "up");
         <div class="row buttons">
           <button class="cq" :disabled="!activeProfile || !idle" @click="sendCq">{{ t("strip.cq") }}</button>
           <button class="beacon-now" :disabled="!activeProfile || !idle" @click="sendBeaconNow">{{ t("strip.beaconNow") }}</button>
+          <span v-if="activeProfile && !idle" class="muted small idle-only">{{ t("strip.idleOnly") }}</span>
         </div>
         <div class="row status small">
           <span v-if="cqLine" :class="['cq-outcome', discoveryError.cq ? 'warn' : tone(discovery.outcome.cq)]" role="status">{{ t("strip.cqOutcome", { what: cqLine }) }}</span>

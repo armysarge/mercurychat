@@ -452,6 +452,7 @@
     "profile": "Estação",
     "cq": "Chamar CQ",
     "beaconNow": "Beacon agora",
+    "idleOnly": "CQ e beacons só saem com o modem ocioso",
     "cqOutcome": "CQ: {what}",
     "beaconOutcome": "Beacon: {what}",
     "nextBeacon": "Próximo beacon {time}",

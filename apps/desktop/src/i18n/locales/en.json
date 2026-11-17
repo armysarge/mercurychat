@@ -451,6 +451,7 @@
     "profile": "Station",
     "cq": "Call CQ",
     "beaconNow": "Beacon now",
+    "idleOnly": "CQ and beacons go out only while the modem is idle",
     "cqOutcome": "CQ: {what}",
     "beaconOutcome": "Beacon: {what}",
     "nextBeacon": "Next beacon {time}",
