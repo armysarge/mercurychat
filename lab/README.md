@@ -4,6 +4,39 @@ Everything needed to reproduce the M0 modem-integration proof. Results and findi
 
 Requirements on the build PC: Rust (rustup, MSVC on Windows), Node.js 20+, Docker Desktop. Nothing here keys a radio: every Mercury instance runs with PTT `none`.
 
+## Mercury V2 A/B benchmark on Windows
+
+Run from the repository root in PowerShell. This example compares two Mercury builds and registered VARA HF in one command.
+
+```powershell
+python lab/windows/hf-benchmark-suite.py --output lab/run/hf-ab-01 --mercury stock=lab/bin/windows-x64/mercury.exe --mercury patched=lab/bin-patched/windows-x64/mercury.exe --vara C:/VARA
+```
+
+Use a new output directory every time. Repeat `--mercury LABEL=EXE` for each build and omit `--vara` for a Mercury-only comparison. The default sweep uses `WGN IMPULSE MPP` at +3, 0 and −3 dB over seeds 4243–4245. Supply `--profiles`, `--snr` and `--seeds` to change the matrix. Add `--directions both` to repeat in the reverse direction. For a short infrastructure smoke test append `--snr 10 --seeds 4243 --bytes 128`. The suite calibrates each binary once through the clean audio route before starting the matrix.
+
+### One-time setup
+
+- Use PowerShell 7 and Python 3.10 or newer. Install NumPy, SoundDevice and Matplotlib with `python -m pip install numpy sounddevice matplotlib`. The lab defaults to the OpenHF virtual environment for bridge audio when present. Set `--audio-python` to select a different interpreter with NumPy and SoundDevice.
+- Install VB-Audio Cable, Cable A and Cable B. Enable Windows desktop-app microphone access for the virtual capture endpoints. Both transmitters play to Cable Input, which the bridge captures per process. The bridge renders into Cable B for station A and Cable A for station B. On another PC pass `--mercury-audio TX RX_A RX_B` with the three Mercury WASAPI endpoint IDs in that order.
+- Supply Mercury Windows binaries and, for VARA trials, an existing VARA HF installation. The runner uses lab virtual COM2 and COM7 for isolated VARA instances, with RTS, DTR and radio-board keying disabled. `--vara-unregistered` uses synthetic calls and measures the unregistered modem configuration. TCP ports 19300–19301 and 19400–19401 must be free.
+- Build the two bridge executables once from a Visual Studio x64 Developer command prompt with Rust installed. Existing executables can also be supplied with `--engine` and `--capture`.
+
+```powershell
+git clone https://github.com/jesseforkum/ion-hf.git lab/run/hf-benchmark-sources/ion-hf
+git -C lab/run/hf-benchmark-sources/ion-hf switch --detach 1eb7dca01803e120eeb0924fd02d4ccc563557a4
+pwsh -NoProfile -File lab/windows/build-hf-benchmark-tools.ps1
+```
+
+### Measurement and outputs
+
+- **Matched channels.** The [ARSFI HFSimulator](https://github.com/ARSFI/HFSimulator) IONOS software port supplies 3 kHz-bandwidth white noise and the MPG, MPM, MPP and MPD HF fading profiles. `IMPULSE` uses seeded, tapered 40 ms noise bursts with a randomized position in every 400 ms interval and an average interference power corresponding to the selected SNR. Impulse-noise samples are added after the clean IONOS route. Each modem’s transmit peak is normalized to the same digital reference. SNR is referenced to a sine at that peak. The suite starts the seeded channel timeline at connection setup, measures the start offset and rotates run order. The channel series is reproducible. Different modem timing places bursts at different points in that series.
+- **Payload and timing.** Both ends must report `CONNECTED` within the connection window. The sender uses one seeded application payload, numbered in blocks of up to 128 bytes. Exact wire equality determines success. Record IDs and byte alignment identify missing, corrupted, duplicate, reordered and extra data. With damaged record headers or ambiguous edits, the counts describe the inferred alignment and any unframed bytes. The harness observes the receiver for five extra seconds after first seeing the exact stream so it can detect trailing data. Verified goodput is application bits divided by transfer time. The matching-byte rate also covers partial transfers. The suite records separate times for setup, first byte, transfer and end-to-end delivery.
+- **Retransmission telemetry.** The suite records connection retries, RF burst counts and airtime for both modems, plus Mercury’s carousel re-poll requests. Exact payload retries are available for instrumented Mercury builds. Emit `HF_BENCH_RETRANSMISSIONS unit=frames` or `HF_BENCH_RETRANSMISSIONS unit=pieces` on the sender at startup, then emit `HF_BENCH_RETRANSMIT count=N` for each actual retransmission. Stock Mercury and VARA HF results leave the payload retry count null. VARA HF’s host interface exposes buffer state and keying, and the installed build’s log reports connection attempts.
+- **Results.** `suite.json` contains the settings, all attempts, summary rows and paired comparisons. `trials.csv`, `summary.csv` and `paired.csv` contain the corresponding tables. Each profile gets a payload delivery chart and a separate timing and goodput chart. Figures use the same valid seed/direction cohort for all displayed variants. Pairwise CSV rows keep any seed/direction that is valid for the two named variants. Per-trial directories hold ARQ transcripts, hashes, modem logs, expected and observed wire streams, and audio diagnostics. Regenerate the PNGs from saved results with `python lab/windows/hf-benchmark-suite.py --replot lab/run/hf-ab-01`.
+- **Validity.** Audio faults inside the measurement window or simulator clipping invalidate an attempt. The suite saves those attempts and retries them with the same condition. The default receive gain is −18 dB for pulse headroom. Change `--rx-gain-db` to adjust signal and noise together. A valid modem timeout is a delivery failure and remains in the rate denominator. Exit 0 means the matrix collected a valid outcome for each slot. Exit 1 means at least one required slot remained invalid or lacked calibration. Raw modem logs can include station callsigns.
+
+Run the offline payload and simulator regressions with `python -B lab/windows/test-hf-benchmark.py -v`.
+
 ## 1. Build Mercury (pinned source, three targets)
 
 ```bash
