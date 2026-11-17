@@ -20,7 +20,8 @@ fn status(json: &str) -> Status {
 fn status_fixture_parses_with_nulls_as_none() {
     // WEBSOCKET_API.md §5.1, verbatim.
     let st = status(include_str!("fixtures/ws/status.json"));
-    assert_eq!(st.snr, Some(0.0), "a value Mercury sent is kept, even 0");
+    // snr 0.0 with no decode indicator: Mercury's "nothing decoded yet" (F4).
+    assert_eq!(st.snr, None, "0.0 before any decode is no reading");
     assert_eq!(st.bitrate, Some(0));
     assert_eq!(st.direction.as_deref(), Some("rx"));
     assert_eq!(st.arq_tx_mode, None, "an empty mode is unavailable");
@@ -57,6 +58,25 @@ fn status_fixture_parses_with_nulls_as_none() {
     assert_eq!(st.busy.as_deref(), Some("arq"));
     assert_eq!(st.audio_ok, Some(false));
     assert!(st.audio_error.as_deref().unwrap().starts_with("capture:"));
+
+    // Lab F4: before any decode Mercury writes snr 0.0, not null, with
+    // freq_offset_age_ms null (ui_status.c). That is no reading.
+    let before = status(
+        r#"{"type":"status","bitrate":0,"snr":0.0,"sync":false,"freq_offset_hz":null,"freq_offset_age_ms":null}"#,
+    );
+    assert_eq!(before.snr, None, "0.0 before any decode is not a 0 dB reading");
+    // Once a frame is decoded the offset's age is set, and the SNR is real,
+    // even a true 0.0.
+    let after = status(r#"{"type":"status","snr":0.0,"freq_offset_hz":-0.0,"freq_offset_age_ms":120}"#);
+    assert_eq!(after.snr, Some(0.0));
+    let after = status(r#"{"type":"status","snr":6.5,"freq_offset_hz":3.0,"freq_offset_age_ms":0}"#);
+    assert_eq!(after.snr, Some(6.5));
+    // A non-zero SNR with the indicator null is still no decode: never shown.
+    assert_eq!(status(r#"{"type":"status","snr":4.0,"freq_offset_age_ms":null}"#).snr, None);
+    // A build that does not send the indicator at all: 0.0 is taken as no
+    // decode, anything else as a reading.
+    assert_eq!(status(r#"{"type":"status","snr":0.0}"#).snr, None);
+    assert_eq!(status(r#"{"type":"status","snr":4.0}"#).snr, Some(4.0));
 
     // -1 is Mercury's "unknown" listen mode.
     assert_eq!(status(r#"{"type":"status","listen_mode":-1,"listen_mode_name":""}"#).listen_mode, None);

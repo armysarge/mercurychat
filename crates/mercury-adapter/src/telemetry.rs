@@ -50,7 +50,8 @@ pub const FFT_MAX: u16 = 8192;
 /// it is a -99.9 sentinel, never a measurement (03 §4).
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Status {
-    /// Local SNR, dB.
+    /// Local SNR, dB: only once Mercury has decoded a frame (before that it
+    /// writes 0.0, which is no reading).
     pub snr: Option<f32>,
     /// Bits per second.
     pub bitrate: Option<u32>,
@@ -118,8 +119,18 @@ pub fn parse_text(frame: &str) -> Result<Option<Status>, TelemetryError> {
         return Ok(None);
     }
     let get = |k: &str| obj.get(k).filter(|v| !v.is_null());
+    // Mercury writes `snr` as 0.0, never null, until it has decoded a frame
+    // (it is the last `SN` value, set only by a decode). The decode
+    // indicator is `freq_offset_age_ms`: null until the first frame its own
+    // decoders decode, set by that same decode. A build that does not send
+    // the indicator: 0.0 is taken as no decode. No reading is ever made up
+    // from the 0.0 (OBS-01).
+    let snr = get("snr").and_then(finite_f32).filter(|v| match obj.get("freq_offset_age_ms") {
+        Some(indicator) => indicator.as_u64().is_some(),
+        None => *v != 0.0,
+    });
     Ok(Some(Status {
-        snr: get("snr").and_then(finite_f32),
+        snr,
         bitrate: get("bitrate").and_then(|v| v.as_u64()).and_then(|n| u32::try_from(n).ok()),
         direction: get("direction").and_then(|v| token(v, false)),
         arq_tx_mode: get("arq_tx_mode").and_then(|v| token(v, false)),

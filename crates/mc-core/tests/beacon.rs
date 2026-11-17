@@ -5,7 +5,7 @@
 //! runs the app against the FakeNet modem on tokio's paused clock: setup is in
 //! real time, then the clock is paused and moved by hand.
 
-use mc_core::app::{BeaconScheduler, ModemState, Tick, BUSY_HOLD};
+use mc_core::app::{BeaconScheduler, ModemState, NotConfirmedReason, Tick, BUSY_HOLD};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -163,6 +163,56 @@ mod scheduler {
         s.set_interval(5, t0 + 12 * MIN);
         assert_eq!(s.deadline(), Some(t0 + 12 * MIN + 5 * MIN));
     }
+
+    const WINDOW: Duration = Duration::from_secs(15);
+
+    #[test]
+    fn two_silent_beacons_in_a_row_hold_the_schedule_with_the_reason() {
+        let reason = NotConfirmedReason::BroadcastPortSilent.text();
+        let t0 = Instant::now();
+        let mut s = armed(0.5, t0);
+        assert_eq!(s.tick(t0 + 10 * MIN), Tick::Send);
+        s.on_silent();
+        assert!(!s.held(), "one silent beacon is not enough");
+        assert_eq!(s.deadline(), Some(t0 + 20 * MIN));
+        assert_eq!(s.suppressed(t0 + 10 * MIN + WINDOW), None);
+        assert_eq!(s.tick(t0 + 20 * MIN), Tick::Send);
+        s.on_silent();
+        assert!(s.held());
+        assert_eq!(s.deadline(), None, "held: nothing is scheduled");
+        assert_eq!(s.suppressed(t0 + 21 * MIN).as_deref(), Some(reason));
+        assert_eq!(s.tick(t0 + 100 * MIN), Tick::Nothing);
+        // Nothing silently re-arms it: not a new interval, not idle again.
+        s.set_interval(5, t0 + 30 * MIN);
+        s.on_state(ModemState::Connected, t0 + 31 * MIN);
+        s.on_state(ModemState::Listening, t0 + 32 * MIN);
+        assert_eq!(s.deadline(), None);
+        assert_eq!(s.suppressed(t0 + 33 * MIN).as_deref(), Some(reason));
+        // A beacon that did go out (Beacon now) ends the hold.
+        let t1 = t0 + 40 * MIN;
+        s.on_transmitted(t1);
+        assert!(!s.held());
+        assert_eq!(s.deadline(), Some(t1 + 5 * MIN));
+        assert_eq!(s.suppressed(t1), None);
+    }
+
+    #[test]
+    fn rearming_ends_a_hold_and_a_transmitted_beacon_resets_the_count() {
+        let t0 = Instant::now();
+        let mut s = armed(0.5, t0);
+        s.on_silent();
+        s.on_transmitted(t0);
+        s.on_silent();
+        assert!(!s.held(), "not two in a row");
+        s.on_silent();
+        assert!(s.held());
+        s.disarm();
+        s.arm(t0 + MIN);
+        assert!(!s.held());
+        assert_eq!(s.deadline(), Some(t0 + 11 * MIN));
+        s.on_silent();
+        assert!(!s.held(), "the count starts again");
+    }
 }
 
 #[cfg(feature = "sim")]
@@ -177,6 +227,9 @@ mod service {
     use mch_protocol::beacon::{Beacon, CAP_CHAT};
     use mercury_adapter::fake::FakeNet;
     use std::path::Path;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use tokio::io::AsyncReadExt;
     use tokio::sync::broadcast::Receiver;
 
     fn opts(root: &Path) -> AppOptions {
@@ -531,6 +584,111 @@ mod service {
         let log = net.broadcast_log();
         let (a, b) = (Beacon::decode(&log[0].1).unwrap(), Beacon::decode(&log[1].1).unwrap());
         assert_eq!(b.seq, a.seq.wrapping_add(1));
+    }
+
+    /// A broadcast port that takes every write and never transmits: what
+    /// MercuryChat gets when another KISS program holds Mercury's broadcast
+    /// port (lab Q5: the connect succeeds, nothing is ever keyed). Returns
+    /// the port and the bytes written to it so far.
+    async fn dead_broadcast_port() -> (u16, Arc<AtomicUsize>) {
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let got = Arc::new(AtomicUsize::new(0));
+        let count = got.clone();
+        tokio::spawn(async move {
+            while let Ok((mut sock, _)) = l.accept().await {
+                let count = count.clone();
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 2048];
+                    while let Ok(n @ 1..) = sock.read(&mut buf).await {
+                        count.fetch_add(n, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+        (port, got)
+    }
+
+    fn beacon_outcomes(rx: &mut Receiver<EventEnvelope>) -> Vec<BroadcastOutcome> {
+        let mut out = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let AppEvent::Broadcast { kind: BroadcastKind::Beacon, outcome } = ev.event {
+                out.push(outcome);
+            }
+        }
+        out
+    }
+
+    async fn activity_texts(h: &AppHandle) -> Vec<String> {
+        match h.call(AppCommand::Activity).await.unwrap() {
+            CommandOk::Activity { entries } => entries.into_iter().map(|e| e.text).collect(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_dead_broadcast_port_is_named_and_holds_beacons_after_two() {
+        let net = FakeNet::start().await;
+        let (port, written) = dead_broadcast_port().await;
+        let mut p = profile(&net, Some("KG33"));
+        if let ModemTarget::Existing { broadcast_port, .. } = &mut p.modem {
+            *broadcast_port = Some(port);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (h, mut rx) = ready(dir.path(), p).await;
+        tokio::time::pause();
+        done(&h, AppCommand::SetBeacon { on: true }).await;
+        let silent = NotConfirmedReason::BroadcastPortSilent;
+
+        // Beacon now: the port takes it, the modem never keys.
+        done(&h, AppCommand::SendBeaconNow).await;
+        settle().await;
+        advance(Duration::from_secs(16)).await;
+        assert!(written.load(Ordering::SeqCst) > 0, "the beacon was written to the port");
+        assert_eq!(
+            beacon_outcomes(&mut rx),
+            [BroadcastOutcome::Submitted, BroadcastOutcome::NotConfirmed { reason: Some(silent) }]
+        );
+        let log = activity_texts(&h).await;
+        assert!(log.iter().any(|t| t.contains(silent.text())), "{log:?}");
+        let st = beacon(&h).await;
+        assert!(st.active && st.next_due_utc.is_some(), "one is not enough to hold: {st:?}");
+        assert_eq!(st.suppressed, None);
+
+        // The scheduled beacon is the second in a row: the schedule holds.
+        advance(12 * MIN).await;
+        assert_eq!(
+            beacon_outcomes(&mut rx),
+            [BroadcastOutcome::Submitted, BroadcastOutcome::NotConfirmed { reason: Some(silent) }]
+        );
+        let st = beacon(&h).await;
+        assert!(st.active, "still armed: the operator's choice stands");
+        assert_eq!(st.next_due_utc, None, "held, not silently re-armed");
+        assert_eq!(st.suppressed.as_deref(), Some(silent.text()));
+        let log = activity_texts(&h).await;
+        assert!(log.iter().any(|t| t.starts_with("beacons held")), "{log:?}");
+
+        // Nothing more goes to the dead port.
+        let before = written.load(Ordering::SeqCst);
+        advance(40 * MIN).await;
+        assert_eq!(written.load(Ordering::SeqCst), before);
+        assert!(beacon_outcomes(&mut rx).is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_beacon_the_modem_keyed_has_no_port_reason() {
+        let net = FakeNet::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (h, mut rx) = ready(dir.path(), profile(&net, Some("KG33"))).await;
+        tokio::time::pause();
+        done(&h, AppCommand::SendBeaconNow).await;
+        settle().await;
+        // The fake keys for 100 ms: let that happen before the window ends.
+        advance(Duration::from_secs(1)).await;
+        advance(Duration::from_secs(15)).await;
+        assert_eq!(beacon_outcomes(&mut rx), [BroadcastOutcome::Submitted, BroadcastOutcome::Transmitted]);
+        let log = activity_texts(&h).await;
+        assert!(!log.iter().any(|t| t.contains("another program")), "{log:?}");
     }
 
     #[tokio::test(flavor = "current_thread")]

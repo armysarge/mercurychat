@@ -159,7 +159,8 @@ impl ModemHandle {
     }
 
     /// Set Receive only. The shared flag is the truth; the nudge only makes an
-    /// idle or linked modem act on it at once.
+    /// idle modem act on it at once (a linked one only for LISTEN ON: LISTEN
+    /// OFF waits for the link to end).
     pub fn set_receive_only(&self, on: bool) {
         self.receive_only.store(on, Ordering::SeqCst);
         let _ = self.cmds.try_send(ModemCmd::ListenChanged);
@@ -585,9 +586,13 @@ async fn arm(st: &mut Station, r: &Reporter, listening: &mut bool) {
 
 /// Bring Mercury's LISTEN in line with the Receive only flag whenever the
 /// modem is idle again (after a call, a link, or a change made while busy).
-/// `dirty`: a LISTEN was sent mid-link and its answer was not seen, so it is
-/// sent again. A LISTEN ON that fails leaves Ready with the reason (never
-/// retried); a LISTEN OFF that fails is a fault: Mercury may still answer.
+/// This is where a Receive only chosen during a call or a session takes
+/// effect: LISTEN OFF is never sent on a live link (lab F2). Mercury reports
+/// DISCONNECTED only after its last frame is keyed, so LISTEN OFF now strands
+/// no one (lab Q1). `dirty`: a LISTEN ON was sent mid-link and its answer was
+/// not seen, so LISTEN is sent again. A LISTEN ON that fails leaves Ready
+/// with the reason (never retried); a LISTEN OFF that fails is a fault:
+/// Mercury may still answer.
 async fn reconcile(
     st: &mut Station,
     receive_only: &AtomicBool,
@@ -686,7 +691,7 @@ async fn serve(
     broadcast: &mut Broadcast,
 ) {
     let mut listening = false;
-    // A LISTEN sent mid-link whose answer was not seen.
+    // A LISTEN ON sent mid-link whose answer was not seen.
     let mut dirty = false;
     // Answering calls is the default (D18); Receive only turns it off.
     if !receive_only.load(Ordering::SeqCst) {
@@ -1055,11 +1060,17 @@ async fn link(
                         r.state(ModemState::Draining, Some("aborting".into())).await;
                     }
                     Some(ModemCmd::ListenChanged) => {
-                        // Receive only changes LISTEN, never the session; the
-                        // modem takes LISTEN mid-link. The answer is not seen
-                        // here, so the modem repeats it once idle (dirty).
-                        send_wire(Command::Listen(!receive_only.load(Ordering::SeqCst)));
-                        *dirty = true;
+                        // Receive only never touches a live link. Mercury takes
+                        // LISTEN OFF mid-link by releasing the radio with no
+                        // DISCONNECT, which strands the peer until its own
+                        // timeout (lab F2), so LISTEN OFF waits for the link to
+                        // end: `reconcile` sends it once idle. LISTEN ON is
+                        // harmless and goes now; its answer is not seen here,
+                        // so it is repeated once idle (dirty).
+                        if !receive_only.load(Ordering::SeqCst) {
+                            send_wire(Command::Listen(true));
+                            *dirty = true;
+                        }
                     }
                     Some(ModemCmd::Submit { peer, id }) => {
                         if peer == link.info.peer && !ending && !aborted {

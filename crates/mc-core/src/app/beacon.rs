@@ -3,7 +3,7 @@
 //! [`BeaconScheduler`] is a pure state machine: it is told the time and what
 //! the modem and the channel are doing, and says when the next beacon is due
 //! and whether one may go now. The actor owns the real clock and the actual
-//! send (through the same gate as a CQ). Three rules shape it:
+//! send (through the same gate as a CQ). Four rules shape it:
 //!
 //! * A beacon never transmits outside idle. A beacon that falls due while the
 //!   modem is busy, or while the channel has been busy for under
@@ -14,8 +14,13 @@
 //!   shown.
 //! * `BUSY ON` is advisory (03 §6): after [`BUSY_HOLD`] with no `BUSY OFF`, a
 //!   due beacon may go out anyway.
+//! * A dead broadcast port is not beaconed into. After [`SILENT_HOLD`]
+//!   beacons in a row that the port took but the modem never keyed, the
+//!   schedule holds, with the reason shown, until a beacon is seen to go out
+//!   or beacons are armed again (lab F3: another program may hold Mercury's
+//!   one broadcast client slot, which cannot be seen at connect time).
 
-use super::broadcast::GateRefusal;
+use super::broadcast::{GateRefusal, NotConfirmedReason};
 use super::events::ModemState;
 use mc_storage::{now_utc, StorageError, Store};
 use mch_protocol::beacon::{Beacon, CAP_CHAT};
@@ -30,6 +35,10 @@ pub const MAX_INTERVAL_MIN: u32 = 60;
 pub const DEFAULT_INTERVAL_MIN: u32 = 10;
 /// A channel that has shown `BUSY ON` this long no longer holds a beacon back.
 pub const BUSY_HOLD: Duration = Duration::from_secs(10);
+/// This many beacons in a row that the broadcast port took but the modem
+/// never keyed hold the schedule (lab F3): another program may hold
+/// Mercury's broadcast port, and beacons would go nowhere unseen.
+pub const SILENT_HOLD: u32 = 2;
 
 /// Jitter is `interval × (JITTER_LOW + JITTER_SPAN × u)` for `u` in [0, 1).
 const JITTER_LOW: f64 = 0.85;
@@ -122,6 +131,11 @@ pub struct BeaconScheduler {
     next_due: Option<Instant>,
     /// A beacon fell due while the modem was not idle: waiting for it to be.
     waiting: bool,
+    /// Beacons in a row the modem never keyed.
+    silent: u32,
+    /// Held after [`SILENT_HOLD`] of them: nothing is scheduled until a
+    /// beacon is seen to go out or the operator arms beacons again.
+    held: bool,
 }
 
 impl BeaconScheduler {
@@ -134,6 +148,34 @@ impl BeaconScheduler {
             channel: Channel::Unknown,
             next_due: None,
             waiting: false,
+            silent: 0,
+            held: false,
+        }
+    }
+
+    /// Held for a silent broadcast port.
+    pub fn held(&self) -> bool {
+        self.held
+    }
+
+    /// A beacon the broadcast port took was never keyed (the
+    /// [`NotConfirmedReason::BroadcastPortSilent`] outcome). The second in a
+    /// row holds the schedule rather than silently drawing the next one.
+    pub fn on_silent(&mut self) {
+        self.silent = self.silent.saturating_add(1);
+        if self.active && self.silent >= SILENT_HOLD {
+            self.held = true;
+            self.waiting = false;
+            self.next_due = None;
+        }
+    }
+
+    /// A beacon was seen to go out (its PTT came and went): the port works.
+    /// A hold ends, and the next beacon is one interval from `now`.
+    pub fn on_transmitted(&mut self, now: Instant) {
+        self.silent = 0;
+        if std::mem::take(&mut self.held) && self.active {
+            self.next_due = Some(now + self.jittered());
         }
     }
 
@@ -172,12 +214,16 @@ impl BeaconScheduler {
     pub fn arm(&mut self, now: Instant) {
         self.active = true;
         self.waiting = false;
+        self.silent = 0;
+        self.held = false;
         self.next_due = Some(now + self.jittered());
     }
 
     pub fn disarm(&mut self) {
         self.active = false;
         self.waiting = false;
+        self.silent = 0;
+        self.held = false;
         self.next_due = None;
     }
 
@@ -192,7 +238,7 @@ impl BeaconScheduler {
     /// A new interval; an armed schedule is redrawn from `now`.
     pub fn set_interval(&mut self, minutes: u32, now: Instant) {
         self.interval_min = minutes;
-        if self.active && !self.waiting {
+        if self.active && !self.waiting && !self.held {
             self.next_due = Some(now + self.jittered());
         }
     }
@@ -211,6 +257,9 @@ impl BeaconScheduler {
     pub fn suppressed(&self, now: Instant) -> Option<String> {
         if !self.active {
             return Some("beacons are off until you turn them on".into());
+        }
+        if self.held {
+            return Some(NotConfirmedReason::BroadcastPortSilent.text().into());
         }
         match self.block(now)? {
             Block::Modem => {

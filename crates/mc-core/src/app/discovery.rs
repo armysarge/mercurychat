@@ -14,13 +14,18 @@ use mercury_adapter::kiss::{KissFrame, CMD_DATA_STD};
 use mercury_adapter::Callsign;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
+use std::time::Instant;
 use ts_rs::TS;
 
 /// The activity ring keeps this many entries, newest last.
 pub const ACTIVITY_RING: usize = 500;
-/// A MONITOR line updates the SNR of that call's CQ row from this many
-/// seconds back; otherwise it is an observation of its own.
-pub const MONITOR_MERGE_S: i64 = 10;
+/// One CQ comes as two control lines, `CQFRAME` and `MONITOR … CQ`, in the
+/// same read and in either order (lab Q3). The second of them merges into
+/// the row the first one made if it comes within this window; otherwise it
+/// is a CQ of its own.
+pub const CQ_PAIR: std::time::Duration = std::time::Duration::from_secs(5);
+/// At most this many CQs wait for their other line (in memory only).
+const CQ_PAIRS_KEPT: usize = 64;
 /// Detailed heard observations are kept this long (02 §6).
 pub const HEARD_RETENTION_DAYS: i64 = 30;
 /// The provenance of an SNR taken from a MONITOR line (DSC-04).
@@ -258,6 +263,23 @@ pub struct Discovery {
     stats: DiscoveryStats,
     buffer: Option<u64>,
     offsets: Offsets,
+    /// CQ rows made by one line of a CQ, waiting for the other.
+    cq_halves: HashMap<String, HalfCq>,
+}
+
+/// Which of a CQ's two control lines made its row.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CqLine {
+    Frame,
+    Monitor,
+}
+
+/// A CQ row waiting for the CQ's other line (lab Q3: either order).
+struct HalfCq {
+    id: i64,
+    observed_utc: String,
+    first: CqLine,
+    at: Instant,
 }
 
 impl Default for Discovery {
@@ -267,6 +289,7 @@ impl Default for Discovery {
             stats: DiscoveryStats::default(),
             buffer: None,
             offsets: Offsets::default(),
+            cq_halves: HashMap::new(),
         }
     }
 }
@@ -290,6 +313,30 @@ impl Discovery {
     pub fn modem_changed(&mut self) {
         self.buffer = None;
         self.offsets = Offsets::default();
+        self.cq_halves.clear();
+    }
+
+    /// The row `call`'s CQ made from its `first` line within [`CQ_PAIR`], if
+    /// any: taken, because each CQ pairs once.
+    fn take_half(&mut self, call: &str, first: CqLine) -> Option<HalfCq> {
+        let now = Instant::now();
+        self.cq_halves.retain(|_, h| now.duration_since(h.at) < CQ_PAIR);
+        if self.cq_halves.get(call).is_some_and(|h| h.first == first) {
+            return self.cq_halves.remove(call);
+        }
+        None
+    }
+
+    /// Remember the row one line of `call`'s CQ made, for the other line.
+    fn keep_half(&mut self, call: &str, row: &HeardRow, first: CqLine) {
+        if self.cq_halves.len() >= CQ_PAIRS_KEPT && !self.cq_halves.contains_key(call) {
+            let oldest = self.cq_halves.iter().min_by_key(|(_, h)| h.at).map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                self.cq_halves.remove(&k);
+            }
+        }
+        let half = HalfCq { id: row.id, observed_utc: row.observed_utc.clone(), first, at: Instant::now() };
+        self.cq_halves.insert(call.to_string(), half);
     }
 
     /// Add an activity line; the returned event publishes it.
@@ -339,35 +386,75 @@ impl Discovery {
     }
 
     /// Store one observation (a single short insert), with the frequency
-    /// and offset that were fresh as it arrived, and publish it.
-    fn record(&mut self, store: Option<&mut Store>, row: HeardRow, how: &str, tuning: &Tuning) -> Vec<AppEvent> {
-        let Some(store) = store else { return Vec::new() };
+    /// and offset that were fresh as it arrived; the stored row, with its id.
+    fn insert(&mut self, store: &mut Store, row: HeardRow, tuning: &Tuning) -> Option<HeardRow> {
         let freq = tuning.freq.as_ref().and_then(|f| Some((i64::try_from(f.value).ok()?, f)));
-        let row = HeardRow {
+        let mut row = HeardRow {
             freq_hz: freq.map(|(hz, _)| hz),
             freq_source: freq.map(|_| TELEMETRY_SOURCE.to_string()),
             freq_age_ms: freq.and_then(|(_, f)| f.age_ms).and_then(|a| i64::try_from(a).ok()),
             ..row
         };
-        if let Err(e) = store.record_heard(&row) {
-            tracing::warn!("could not record a heard station: {e}");
-            return Vec::new();
+        match store.record_heard(&row) {
+            Ok(id) => row.id = id,
+            Err(e) => {
+                tracing::warn!("could not record a heard station: {e}");
+                return None;
+            }
         }
         self.offsets.set(&row.callsign, &row.observed_utc, tuning.offset.clone());
-        self.heard(store, &row.callsign, how)
+        Some(row)
+    }
+
+    /// Store one observation and publish it.
+    fn record(&mut self, store: Option<&mut Store>, row: HeardRow, how: &str, tuning: &Tuning) -> Vec<AppEvent> {
+        let Some(store) = store else { return Vec::new() };
+        match self.insert(store, row, tuning) {
+            Some(row) => self.heard(store, &row.callsign, how),
+            None => Vec::new(),
+        }
+    }
+
+    /// The heard-list update for `callsign`, with no activity line (its
+    /// observation's line has already been written).
+    fn updated(&self, store: &Store, callsign: &str) -> Vec<AppEvent> {
+        match heard_station(store, callsign, &self.offsets) {
+            Ok(station) => vec![AppEvent::Heard { station }],
+            Err(e) => {
+                tracing::warn!("could not read the heard list: {e}");
+                Vec::new()
+            }
+        }
     }
 
     /// One observation from the modem's control stream. Heard rows need the
     /// station's store; without one they are dropped.
     pub fn observation(&mut self, store: Option<&mut Store>, o: Observation, tuning: &Tuning) -> Vec<AppEvent> {
         match o {
+            // One CQ is one row, whichever of its two lines comes first (lab
+            // Q3): the second line completes the row the first one made.
             Observation::Cq { source, bw } => {
                 let call = match self.callsign(&source, "CQ") {
                     Ok(c) => c,
                     Err(evs) => return evs,
                 };
+                let Some(store) = store else { return Vec::new() };
+                if let Some(half) = self.take_half(&call, CqLine::Monitor) {
+                    // The MONITOR line's row keeps its SNR and gains the
+                    // bandwidth if it had none, and the offset of the frame
+                    // Mercury's own decoder heard. Its line is already logged.
+                    if let Some(bw) = bandwidth(&bw) {
+                        if let Err(e) = store.fill_heard_bandwidth(half.id, &bw) {
+                            tracing::warn!("could not complete a monitored CQ: {e}");
+                        }
+                    }
+                    self.offsets.set(&call, &half.observed_utc, tuning.offset.clone());
+                    return self.updated(store, &call);
+                }
                 let row = HeardRow { bandwidth: bandwidth(&bw), ..row(&call, "cq") };
-                self.record(store, row, "CQ", tuning)
+                let Some(row) = self.insert(store, row, tuning) else { return Vec::new() };
+                self.keep_half(&call, &row, CqLine::Frame);
+                self.heard(store, &call, "CQ")
             }
             Observation::MonitorCq(m) => {
                 let call = match self.callsign(&m.from, "monitored CQ") {
@@ -376,29 +463,26 @@ impl Discovery {
                 };
                 let Some(store) = store else { return Vec::new() };
                 let how = format!("CQ, SNR {:.1} dB", m.snr_db);
-                let merged = match store.latest_heard(&call, "cq", MONITOR_MERGE_S) {
-                    Ok(Some(r)) => store.set_heard_snr(r.id, m.snr_db, MONITOR_SNR).map(|_| true),
-                    Ok(None) => Ok(false),
-                    Err(e) => Err(e),
-                };
-                match merged {
-                    Ok(true) => self.heard(store, &call, &how),
-                    Ok(false) => {
-                        let row = HeardRow {
-                            bandwidth: bandwidth(&m.bw),
-                            snr_db: Some(m.snr_db),
-                            snr_source: Some(MONITOR_SNR.into()),
-                            ..row(&call, "cq")
-                        };
-                        // Mercury's offset is never a monitor decoder's.
-                        let tuning = Tuning { offset: None, ..tuning.clone() };
-                        self.record(Some(store), row, &how, &tuning)
-                    }
-                    Err(e) => {
-                        tracing::warn!("could not record a monitored CQ: {e}");
-                        Vec::new()
-                    }
+                if let Some(half) = self.take_half(&call, CqLine::Frame) {
+                    return match store.set_heard_snr(half.id, m.snr_db, MONITOR_SNR) {
+                        Ok(()) => self.heard(store, &call, &how),
+                        Err(e) => {
+                            tracing::warn!("could not record a monitored CQ: {e}");
+                            Vec::new()
+                        }
+                    };
                 }
+                let row = HeardRow {
+                    bandwidth: bandwidth(&m.bw),
+                    snr_db: Some(m.snr_db),
+                    snr_source: Some(MONITOR_SNR.into()),
+                    ..row(&call, "cq")
+                };
+                // Mercury's offset is never a monitor decoder's.
+                let tuning = Tuning { offset: None, ..tuning.clone() };
+                let Some(row) = self.insert(store, row, &tuning) else { return Vec::new() };
+                self.keep_half(&call, &row, CqLine::Monitor);
+                self.heard(store, &call, &how)
             }
             Observation::Ptt(on) => vec![self.note("ptt", if on { "PTT on" } else { "PTT off" })],
             Observation::Busy(on) => vec![self.note("busy", if on { "channel busy" } else { "channel clear" })],

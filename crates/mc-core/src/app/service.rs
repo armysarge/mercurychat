@@ -3,9 +3,10 @@
 //! refused at once rather than making the UI wait. Every state change is
 //! persisted first, then published as an event.
 
-use super::beacon::{BeaconPrefs, BeaconState, Tick, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN};
+use super::beacon::{BeaconPrefs, BeaconState, Tick, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD};
 use super::broadcast::{
-    activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, Tracker,
+    activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, NotConfirmedReason,
+    Tracker,
 };
 use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
@@ -160,6 +161,8 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         beacon: BeaconState::new(),
         telemetry: Telemetry::default(),
         qso: None,
+        mercury_listening: false,
+        receive_only_shown: (false, false),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -242,6 +245,12 @@ struct App {
     telemetry: Telemetry,
     /// The record of the latest session this run, as stored.
     qso: Option<QsoRow>,
+    /// Whether Mercury was last known to answer calls: from the idle states,
+    /// and from a LISTEN ON sent mid-link. Receive only chosen while it is,
+    /// during a call or a session, waits for the link to end (lab F2).
+    mercury_listening: bool,
+    /// Receive only as last published: (on, pending).
+    receive_only_shown: (bool, bool),
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -298,9 +307,7 @@ impl App {
                     self.pending = Some(Some(p.clone()));
                 } else if receive_only_changed {
                     // Receive only applies to the running modem now, too.
-                    if let Some(t) = &self.task {
-                        t.set_receive_only(p.receive_only);
-                    }
+                    self.receive_only_changed(p.receive_only);
                 }
                 Ok(CommandOk::Profile(p))
             }
@@ -322,9 +329,12 @@ impl App {
                 Ok(CommandOk::Done)
             }
             AppCommand::SetReceiveOnly { on } => {
-                // Always taken (a safety switch), in any state with a station:
-                // the modem task acts on it at the earliest moment, mid-link
-                // (LISTEN OFF does not end it), after a call, or after recovery.
+                // Always taken and stored at once (a safety switch), in any
+                // state with a station. The modem task acts on it when it is
+                // idle: after a call, a session or a recovery. LISTEN OFF is
+                // never sent on a live link: Mercury takes it by dropping the
+                // link with no DISCONNECT and strands the peer (lab F2), so
+                // until the link ends the snapshot shows it as pending.
                 if self.modem == ModemState::Unavailable {
                     let state = format!("{:?}", self.modem).to_lowercase();
                     return Err(conflict(format!("the modem is {state}: pick a station first")));
@@ -333,9 +343,7 @@ impl App {
                 p.receive_only = on;
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
-                if let Some(t) = &self.task {
-                    t.set_receive_only(on);
-                }
+                self.receive_only_changed(on);
                 Ok(CommandOk::Done)
             }
             AppCommand::Call { peer } => {
@@ -625,6 +633,39 @@ impl App {
         )
     }
 
+    /// Receive only was just stored as `on`: tell the modem task, and show it.
+    fn receive_only_changed(&mut self, on: bool) {
+        if let Some(t) = &self.task {
+            t.set_receive_only(on);
+        }
+        // Turning it off on a live link sends LISTEN ON at once (harmless).
+        if !on && matches!(self.modem, ModemState::Negotiating | ModemState::Connected | ModemState::Draining) {
+            self.mercury_listening = true;
+        }
+        self.sync_receive_only();
+    }
+
+    /// Receive only chosen, but waiting for the call or session to end
+    /// before the modem stops answering calls (lab F2).
+    fn receive_only_pending(&self, on: bool) -> bool {
+        on && self.mercury_listening && self.in_call()
+    }
+
+    /// Read the active profile's choice: after it changed, or a new profile.
+    fn sync_receive_only(&mut self) {
+        let on = self.active_profile().is_some_and(|p| p.receive_only);
+        self.show_receive_only(on);
+    }
+
+    /// Publish Receive only (`on`, pending) if it changed.
+    fn show_receive_only(&mut self, on: bool) {
+        let now = (on, self.receive_only_pending(on));
+        if now != self.receive_only_shown {
+            self.receive_only_shown = now;
+            self.emit(AppEvent::ReceiveOnly { on: now.0, pending: now.1 });
+        }
+    }
+
     /// Send a CQ (payload unused) or a beacon, if the gate allows it now
     /// (DSC-02). A refusal is answered, published and logged, never queued.
     fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
@@ -727,9 +768,37 @@ impl App {
                 self.beacon.submitted();
             }
             let line = self.discovery.note("broadcast", activity_text(kind, &outcome));
+            let held = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
             self.emit(AppEvent::Broadcast { kind, outcome });
             self.emit(line);
+            if held {
+                let why = NotConfirmedReason::BroadcastPortSilent.text();
+                let line = self.discovery.note(
+                    "broadcast",
+                    format!(
+                        "beacons held: {why} ({SILENT_HOLD} beacons in a row); turn beacons off and on to try again"
+                    ),
+                );
+                self.emit(line);
+            }
         }
+    }
+
+    /// What a beacon's outcome tells the schedule (lab F3): a beacon that
+    /// went out shows the broadcast port works; one the port took that was
+    /// never keyed counts towards a hold. True when this one began a hold.
+    fn beacon_outcome(&mut self, outcome: &BroadcastOutcome) -> bool {
+        let sched = &mut self.beacon.sched;
+        match outcome {
+            BroadcastOutcome::Transmitted => sched.on_transmitted(tokio::time::Instant::now()),
+            BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) } => {
+                let was = sched.held();
+                sched.on_silent();
+                return !was && sched.held();
+            }
+            _ => {}
+        }
+        false
     }
 
     fn state_word(&self) -> String {
@@ -844,6 +913,17 @@ impl App {
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {
         self.modem = state;
         self.modem_detail = detail.clone();
+        // What Mercury does about calls is known only while idle; a call or a
+        // session leaves it as it was.
+        match state {
+            ModemState::Listening => self.mercury_listening = true,
+            ModemState::Ready
+            | ModemState::Unavailable
+            | ModemState::Attaching
+            | ModemState::Recovering
+            | ModemState::Faulted => self.mercury_listening = false,
+            ModemState::Calling | ModemState::Negotiating | ModemState::Connected | ModemState::Draining => {}
+        }
         let line = self.discovery.state(state, detail.as_deref());
         self.emit(AppEvent::ModemState { state, detail });
         self.emit(line);
@@ -854,6 +934,9 @@ impl App {
             // Also re-syncs the gate's live listen mode (ruling P2).
             self.telemetry.modem_faulted(&mut self.listen_mode);
         }
+        // The stored choice is cached (it changes only through the paths that
+        // re-read it): a state change costs no store read.
+        self.show_receive_only(self.receive_only_shown.0);
     }
 
     /// Stop whatever modem task runs, then start the selected one. Never
@@ -874,6 +957,8 @@ impl App {
         self.chat = None;
         self.qso = None;
         self.discovery.modem_changed();
+        // A new active profile (or none): its stored Receive only choice.
+        self.sync_receive_only();
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
@@ -1091,6 +1176,7 @@ impl App {
             modem_detail: self.modem_detail.clone(),
             profiles,
             receive_only,
+            receive_only_pending: self.receive_only_pending(receive_only),
             listening: self.modem == ModemState::Listening,
             beacon: self.beacon.status(tokio::time::Instant::now()),
             session: self.session.clone(),

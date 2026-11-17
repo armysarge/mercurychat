@@ -147,15 +147,15 @@ async fn peer_station(net: &FakeNet, dir: &Path) -> Station {
     st
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn receive_only_mid_session_sends_listen_off_and_keeps_the_session() {
-    let dir = tempfile::tempdir().unwrap();
-    let net = FakeNet::start().await;
-    let mut peer = peer_station(&net, &dir.path().join("peer")).await;
-    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
-    let mut rx = select(&h, existing(net.a_base)).await;
-    until(&mut rx, ModemState::Listening).await;
-
+/// A session with SIM1 calling us, up and Connected. The peer task is the
+/// test's to abort.
+async fn connected(
+    net: &FakeNet,
+    dir: &Path,
+    h: &AppHandle,
+    rx: &mut Receiver<EventEnvelope>,
+) -> tokio::task::JoinHandle<mc_core::session::SessionEnd> {
+    let mut peer = peer_station(net, &dir.join("peer")).await;
     let peer_task = tokio::spawn(async move {
         let info = peer.call(&Callsign::parse("ZS6ABC").unwrap(), Duration::from_secs(10)).await.unwrap();
         let (_cmd_tx, mut cmd_rx) = mpsc::channel(8);
@@ -163,30 +163,89 @@ async fn receive_only_mid_session_sends_listen_off_and_keeps_the_session() {
         let (ev_tx, _ev_rx) = mpsc::unbounded_channel();
         peer.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await
     });
-    until(&mut rx, ModemState::Connected).await;
-    assert!(snapshot(&h).await.session.is_some());
+    until(rx, ModemState::Connected).await;
+    // The session is reported just after the Connected state.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while snapshot(h).await.session.is_none() {
+        assert!(tokio::time::Instant::now() < deadline, "no session after Connected");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    peer_task
+}
+
+/// The next ReceiveOnly event, within 10 s.
+async fn receive_only_event(rx: &mut Receiver<EventEnvelope>) -> (bool, bool) {
+    loop {
+        let ev = tokio::time::timeout(Duration::from_secs(10), rx.recv()).await.expect("a ReceiveOnly event").unwrap();
+        if let AppEvent::ReceiveOnly { on, pending } = ev.event {
+            return (on, pending);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn receive_only_mid_session_waits_for_the_session_to_end() {
+    // Lab F2: Mercury takes LISTEN OFF on a live link by dropping it without a
+    // DISCONNECT, stranding the peer. So the live link is never touched.
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    let peer_task = connected(&net, dir.path(), &h, &mut rx).await;
     let offs = listen_offs(&net);
 
     assert_eq!(h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap(), CommandOk::Done);
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while listen_offs(&net) == offs {
-        assert!(tokio::time::Instant::now() < deadline, "LISTEN OFF never reached the modem");
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(!net.listening(0));
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(receive_only_event(&mut rx).await, (true, true), "stored at once, pending");
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(listen_offs(&net), offs, "LISTEN OFF reached the modem mid-session");
+    assert!(net.listening(0));
     let s = snapshot(&h).await;
     assert!(s.session.is_some(), "the session continues");
     assert_eq!(s.modem, ModemState::Connected);
-    assert!(s.receive_only);
+    assert!(s.receive_only, "the preference is stored at once");
+    assert!(s.receive_only_pending, "the snapshot shows it waiting for the session");
     assert!(net.session_up());
 
-    // After the session the modem is Ready, not Listening.
+    // The session ends: exactly one LISTEN OFF, and nothing pending.
     h.call(AppCommand::Disconnect).await.unwrap();
     until(&mut rx, ModemState::Ready).await;
+    assert_eq!(receive_only_event(&mut rx).await, (true, false));
     tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(listen_offs(&net), offs + 1, "one LISTEN OFF after the session");
+    assert!(!net.listening(0));
     let s = snapshot(&h).await;
     assert_eq!((s.modem, s.listening, s.session), (ModemState::Ready, false, None));
+    assert!(s.receive_only && !s.receive_only_pending);
+    peer_task.abort();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn receive_only_while_draining_waits_for_the_link_to_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    let peer_task = connected(&net, dir.path(), &h, &mut rx).await;
+    let offs = listen_offs(&net);
+
+    // Mercury is slow to end the link: the modem stays Draining.
+    net.set_hold_disconnect(true);
+    h.call(AppCommand::Disconnect).await.unwrap();
+    until(&mut rx, ModemState::Draining).await;
+    h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(listen_offs(&net), offs, "LISTEN OFF reached the modem while draining");
+    assert!(snapshot(&h).await.receive_only_pending);
+
+    net.set_hold_disconnect(false);
+    net.drop_link();
+    until(&mut rx, ModemState::Ready).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(listen_offs(&net), offs + 1, "one LISTEN OFF after the link");
+    assert!(!net.listening(0));
+    assert!(!snapshot(&h).await.receive_only_pending);
     peer_task.abort();
 }
 
@@ -352,39 +411,34 @@ async fn receive_only_set_mid_session_survives_an_abrupt_link_end() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn refused_listen_off_mid_session_is_reconciled_when_idle() {
+async fn receive_only_off_mid_session_listens_at_once_and_nothing_is_left_pending() {
     let dir = tempfile::tempdir().unwrap();
     let net = FakeNet::start().await;
-    let mut peer = peer_station(&net, &dir.path().join("peer")).await;
     let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
     let mut rx = select(&h, existing(net.a_base)).await;
     until(&mut rx, ModemState::Listening).await;
-    let peer_task = tokio::spawn(async move {
-        let info = peer.call(&Callsign::parse("ZS6ABC").unwrap(), Duration::from_secs(10)).await.unwrap();
-        let (_cmd_tx, mut cmd_rx) = mpsc::channel(8);
-        let (_req_tx, mut req_rx) = mpsc::channel(1);
-        let (ev_tx, _ev_rx) = mpsc::unbounded_channel();
-        peer.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await
-    });
-    until(&mut rx, ModemState::Connected).await;
+    let peer_task = connected(&net, dir.path(), &h, &mut rx).await;
+    let (offs, ons) = (listen_offs(&net), listen_ons(&net));
 
-    net.set_listen_off_wrong(0, true);
-    let offs = listen_offs(&net);
+    // On (waits for the session), then off again: LISTEN ON is harmless
+    // mid-link and goes at once; the deferred LISTEN OFF is forgotten.
     h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    assert!(snapshot(&h).await.receive_only_pending);
+    h.call(AppCommand::SetReceiveOnly { on: false }).await.unwrap();
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while listen_offs(&net) == offs {
-        assert!(tokio::time::Instant::now() < deadline, "LISTEN OFF never reached the modem");
+    while listen_ons(&net) == ons {
+        assert!(tokio::time::Instant::now() < deadline, "LISTEN ON never reached the modem mid-session");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
-    assert!(net.listening(0), "the fake refused LISTEN OFF");
-    net.set_listen_off_wrong(0, false);
+    let s = snapshot(&h).await;
+    assert_eq!((s.modem, s.receive_only, s.receive_only_pending), (ModemState::Connected, false, false));
+    assert!(net.session_up());
 
     h.call(AppCommand::Disconnect).await.unwrap();
-    until(&mut rx, ModemState::Ready).await;
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert!(!net.listening(0), "the refused LISTEN OFF was not retried when the session ended");
-    let s = snapshot(&h).await;
-    assert_eq!((s.modem, s.listening, s.receive_only), (ModemState::Ready, false, true));
+    until(&mut rx, ModemState::Listening).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(listen_offs(&net), offs, "no LISTEN OFF for a choice taken back");
+    assert!(net.listening(0));
     peer_task.abort();
 }
 

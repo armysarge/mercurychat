@@ -56,6 +56,15 @@ impl Store {
         Ok(())
     }
 
+    /// Give an observation the bandwidth `bw` if it has none.
+    pub fn fill_heard_bandwidth(&mut self, id: i64, bw: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE heard_observations SET bandwidth = ?1 WHERE id = ?2 AND bandwidth IS NULL",
+            params![bw, id],
+        )?;
+        Ok(())
+    }
+
     /// The newest observation of `kind` for `callsign` within the last `within_s` seconds.
     pub fn latest_heard(&self, callsign: &str, kind: &str, within_s: i64) -> Result<Option<HeardRow>> {
         let since = (chrono::Utc::now() - chrono::Duration::seconds(within_s.max(0)))

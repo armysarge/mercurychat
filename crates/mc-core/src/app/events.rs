@@ -75,6 +75,13 @@ pub enum AppEvent {
         message: ChatMessage,
     },
     ProfilesChanged,
+    /// Receive only (D18) as the snapshot shows it changed: the active
+    /// profile's choice, and whether it waits for a call or a session to
+    /// end before the modem stops answering calls (lab F2).
+    ReceiveOnly {
+        on: bool,
+        pending: bool,
+    },
     ActiveProfileChanged {
         id: Option<String>,
     },

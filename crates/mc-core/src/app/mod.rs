@@ -15,9 +15,11 @@ mod telemetry;
 pub use crate::macros::{expand, Expanded, MacroContext, MacroDef};
 pub use beacon::{
     BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus, ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN,
-    MAX_INTERVAL_MIN, MIN_INTERVAL_MIN,
+    MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD,
 };
-pub use broadcast::{broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, TRANSMIT_WINDOW};
+pub use broadcast::{
+    broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, NotConfirmedReason, TRANSMIT_WINDOW,
+};
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};

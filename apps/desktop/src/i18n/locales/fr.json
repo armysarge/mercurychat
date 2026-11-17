@@ -31,6 +31,7 @@
     "notAttached": "Non connecté",
     "attaching": "Connexion au modem",
     "receiveOnly": "Réception seule",
+    "receiveOnlyPending": "Réception seule — après cette session",
     "notAnswering": "Appels non pris",
     "answering": "Appels pris",
     "calling": "Appel de {peer}",
@@ -59,6 +60,11 @@
     "otherSession": "Session avec {peer} ({direction}).",
     "open": "Ouvrir",
     "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}"
+  },
+  "broadcast": {
+    "notConfirmed": {
+      "broadcastPortSilent": "Le modem n'a pas émis ; un autre programme utilise peut-être le port de diffusion de Mercury."
+    }
   },
   "direction": {
     "outgoing": "Nous avons appelé",

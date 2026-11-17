@@ -196,6 +196,92 @@ async fn cq_from_peer_appears_in_heard_with_monitor_snr() {
     assert!(log.iter().any(|e| e.kind == "heard" && e.text.contains(PEER)), "{log:?}");
 }
 
+/// Send `lines` as Mercury's control stream, then a marker CQ, and wait
+/// until A has heard the marker: control lines are handled in order, so
+/// everything before it has been handled too.
+async fn control_lines(net: &FakeNet, rx: &mut Receiver<EventEnvelope>, lines: &[String]) {
+    for l in lines {
+        net.send_control(0, l);
+    }
+    net.send_control(0, "CQFRAME ZS9END 500");
+    heard_event(rx, "ZS9END", 10).await;
+}
+
+fn monitor(call: &str, snr: f32) -> String {
+    format!("MONITOR DATAC16 CQ FROM={call} BW=500 SNR={snr:.1}")
+}
+
+fn cqframe(call: &str) -> String {
+    format!("CQFRAME {call} 500")
+}
+
+/// The heard row of `call`: one observation, from a CQ.
+async fn one_cq(h: &AppHandle, call: &str) -> HeardStation {
+    let list = heard(h).await;
+    let row = list.into_iter().find(|s| s.callsign == call).expect("heard");
+    assert_eq!(row.count, 1, "one CQ is one observation: {row:?}");
+    assert_eq!(row.source, Some(HeardSource::Cq));
+    assert_eq!(row.bandwidth.as_deref(), Some("500"));
+    row
+}
+
+fn monitor_snr(row: &HeardStation) -> f32 {
+    let snr = row.snr.clone().unwrap_or_else(|| panic!("the MONITOR SNR was lost: {row:?}"));
+    assert_eq!(snr.source, "modem monitor");
+    snr.value
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn monitor_before_cqframe_is_one_cq_with_the_monitor_snr() {
+    // Lab Q3: both lines come in one read, MONITOR first in up to 4 of 5 CQs.
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    control_lines(&net, &mut rx, &[monitor(PEER, 25.0), cqframe(PEER)]).await;
+    let row = one_cq(&h, PEER).await;
+    assert!((monitor_snr(&row) - 25.0).abs() < 0.01, "{row:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cqframe_before_monitor_is_one_cq_with_the_monitor_snr() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    control_lines(&net, &mut rx, &[cqframe(PEER), monitor(PEER, 25.0)]).await;
+    let row = one_cq(&h, PEER).await;
+    assert!((monitor_snr(&row) - 25.0).abs() < 0.01, "{row:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cqframe_without_monitor_has_no_snr_never_zero() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    control_lines(&net, &mut rx, &[cqframe(PEER)]).await;
+    let row = one_cq(&h, PEER).await;
+    assert_eq!(row.snr, None, "no MONITOR line, no SNR: {row:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn two_callsigns_interleaved_keep_their_own_snr() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    let lines = [monitor(PEER, 25.0), monitor("ZS1TWO", 12.0), cqframe("ZS1TWO"), cqframe(PEER)];
+    control_lines(&net, &mut rx, &lines).await;
+    assert!((monitor_snr(&one_cq(&h, PEER).await) - 25.0).abs() < 0.01);
+    assert!((monitor_snr(&one_cq(&h, "ZS1TWO").await) - 12.0).abs() < 0.01);
+    // And the other way round, each CQ still one row more.
+    let lines = [cqframe(PEER), cqframe("ZS1TWO"), monitor("ZS1TWO", 9.0), monitor(PEER, 3.0)];
+    control_lines(&net, &mut rx, &lines).await;
+    let list = heard(&h).await;
+    for (call, snr) in [(PEER, 3.0), ("ZS1TWO", 9.0)] {
+        let row = list.iter().find(|s| s.callsign == call).unwrap();
+        assert_eq!(row.count, 2, "{row:?}");
+        assert!((monitor_snr(row) - snr).abs() < 0.01, "{row:?}");
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn beacon_from_peer_appears_with_grid_and_caps() {
     let net = FakeNet::start().await;

@@ -144,6 +144,10 @@ export class Mirror {
       case "activeProfileChanged":
         v.snapshot.activeProfileId = ev.id;
         break;
+      case "receiveOnly":
+        v.snapshot.receiveOnly = ev.on;
+        v.snapshot.receiveOnlyPending = ev.pending;
+        break;
       case "fault":
         v.lastFault = ev.message;
         break;

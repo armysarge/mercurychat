@@ -60,6 +60,9 @@ const banner = computed(() => {
 });
 /** The station's mode, as the core reports it (D18): never ahead of the core. */
 const receiveOnly = computed(() => snapshot.value?.receiveOnly ?? false);
+/** Chosen during a call or session: it takes effect when the link ends (the live link is never touched). */
+const receiveOnlyPending = computed(() => snapshot.value?.receiveOnlyPending ?? false);
+const modeWordKey = computed(() => (receiveOnlyPending.value ? "mode.receiveOnlyPending" : receiveOnly.value ? "mode.receiveOnly" : "mode.answering"));
 const showLinkMode = computed(() => !["ready", "listening"].includes(modemState.value));
 const rxError = ref("");
 
@@ -148,7 +151,7 @@ onUnmounted(() => {
         <span class="muted small">{{ where }}</span>
       </div>
       <span v-if="activeProfile" class="station-mode" role="status" aria-live="polite">
-        <span :class="['mode-word', { rx: receiveOnly }]">{{ receiveOnly ? t("mode.receiveOnly") : t("mode.answering") }}</span>
+        <span :class="['mode-word', { rx: receiveOnly }]">{{ t(modeWordKey) }}</span>
         <label class="switch" :title="receiveOnly ? t('mode.receiveOnlyTitle') : t('mode.answeringTitle')">
           <input type="checkbox" role="switch" :checked="receiveOnly" :disabled="modemState === 'unavailable'" :aria-label="t('mode.receiveOnly')" @change="toggleReceiveOnly" />
           <span class="track" aria-hidden="true"></span>

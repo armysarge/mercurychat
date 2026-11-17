@@ -29,6 +29,10 @@ pub struct AppSnapshot {
     /// The active profile is Receive only (D18): it never answers calls by
     /// itself. Stored on the profile; the default is to answer calls.
     pub receive_only: bool,
+    /// Receive only was chosen during a call or a session while the modem
+    /// was answering calls: it takes effect when the link ends, because
+    /// Mercury drops a live link unannounced on LISTEN OFF (lab F2).
+    pub receive_only_pending: bool,
     /// The modem is listening for calls right now (actual state, not the
     /// setting): false while attaching, receive-only, or after a LISTEN ON
     /// failure.
@@ -70,8 +74,9 @@ pub enum AppCommand {
         id: Option<String>,
     },
     /// Receive only on: the station stops answering calls (LISTEN OFF, at
-    /// once, even mid-session). Off: it answers calls again. Stored on the
-    /// active profile (D18).
+    /// once when idle; during a call or a session, once it ends, never on
+    /// the live link). Off: it answers calls again, at once. Stored on the
+    /// active profile at once (D18).
     SetReceiveOnly {
         on: bool,
     },

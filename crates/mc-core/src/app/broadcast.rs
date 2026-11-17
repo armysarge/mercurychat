@@ -50,9 +50,46 @@ pub enum BroadcastOutcome {
     /// The sender's evidence followed within 15 s while idle.
     Transmitted,
     /// No such evidence within 15 s, or the modem left idle first.
-    NotConfirmed,
+    /// `reason`, when there is more to say than that.
+    NotConfirmed { reason: Option<NotConfirmedReason> },
     /// Not sent, and not queued: `reason` says why, for the operator.
     Refused { reason: String },
+}
+
+impl BroadcastOutcome {
+    /// Not confirmed, with nothing more to say.
+    pub const NOT_CONFIRMED: BroadcastOutcome = BroadcastOutcome::NotConfirmed { reason: None };
+}
+
+/// Why a broadcast was not confirmed, beyond "no evidence".
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum NotConfirmedReason {
+    /// The broadcast port took a beacon but the modem never keyed (no PTT
+    /// at all in the window, while idle). Mercury serves one broadcast
+    /// client: a second one connects into the OS backlog and its writes go
+    /// nowhere (lab Q5), so another program may hold the port. This cannot
+    /// be seen at connect time, only from the outcome.
+    BroadcastPortSilent,
+}
+
+impl NotConfirmedReason {
+    /// The message key the UI translates.
+    pub fn key(self) -> &'static str {
+        match self {
+            NotConfirmedReason::BroadcastPortSilent => "broadcast.notConfirmed.broadcastPortSilent",
+        }
+    }
+
+    /// The reason in plain English, for the activity log and the beacon status.
+    pub fn text(self) -> &'static str {
+        match self {
+            NotConfirmedReason::BroadcastPortSilent => {
+                "the modem did not transmit; another program may be using Mercury's broadcast port"
+            }
+        }
+    }
 }
 
 /// Why the gate refused a broadcast.
@@ -212,7 +249,7 @@ impl Tracker {
         let left = f.left_idle;
         let mut out = vec![(kind, BroadcastOutcome::Submitted)];
         if left {
-            out.extend(self.finish(BroadcastOutcome::NotConfirmed));
+            out.extend(self.finish(BroadcastOutcome::NOT_CONFIRMED));
         }
         out
     }
@@ -231,7 +268,7 @@ impl Tracker {
         if !self.in_flight.is_some_and(|f| f.kind == kind && !f.submitted) {
             return Vec::new();
         }
-        self.finish(BroadcastOutcome::NotConfirmed)
+        self.finish(BroadcastOutcome::NOT_CONFIRMED)
     }
 
     /// An observation from the modem's control stream.
@@ -257,23 +294,25 @@ impl Tracker {
         }
         let Some(f) = self.in_flight.as_mut() else { return Vec::new() };
         if f.submitted {
-            return self.finish(BroadcastOutcome::NotConfirmed);
+            return self.finish(BroadcastOutcome::NOT_CONFIRMED);
         }
         f.left_idle = true;
         Vec::new()
     }
 
-    /// The window closed at `now` without the evidence.
+    /// The window closed at `now` without the evidence. A beacon the
+    /// broadcast port took (so it was connected) with no PTT at all while
+    /// idle is named: the modem never transmitted it.
     pub fn expired(&mut self, now: Instant) -> Outcomes {
-        if self.in_flight.is_some_and(|f| now >= f.deadline) {
-            return self.finish(BroadcastOutcome::NotConfirmed);
-        }
-        Vec::new()
+        let Some(f) = self.in_flight.filter(|f| now >= f.deadline) else { return Vec::new() };
+        let silent = f.kind == BroadcastKind::Beacon && f.submitted && !f.started && !f.left_idle;
+        let reason = silent.then_some(NotConfirmedReason::BroadcastPortSilent);
+        self.finish(BroadcastOutcome::NotConfirmed { reason })
     }
 
     /// The modem task is being replaced: its answer will never come.
     pub fn abandon(&mut self) -> Outcomes {
-        self.finish(BroadcastOutcome::NotConfirmed)
+        self.finish(BroadcastOutcome::NOT_CONFIRMED)
     }
 }
 
@@ -283,9 +322,10 @@ pub fn activity_text(kind: BroadcastKind, outcome: &BroadcastOutcome) -> String 
     match outcome {
         BroadcastOutcome::Submitted => format!("{what} submitted to the modem"),
         BroadcastOutcome::Transmitted => format!("{what} transmitted (no receipt: nobody acknowledges a broadcast)"),
-        BroadcastOutcome::NotConfirmed => {
+        BroadcastOutcome::NotConfirmed { reason: None } => {
             format!("{what} not confirmed: no transmission seen while idle within {} s", TRANSMIT_WINDOW.as_secs())
         }
+        BroadcastOutcome::NotConfirmed { reason: Some(r) } => format!("{what} not confirmed: {}", r.text()),
         BroadcastOutcome::Refused { reason } => format!("{what} {reason}"),
     }
 }
@@ -343,7 +383,7 @@ mod tests {
         t.observe(&Observation::Pending);
         assert!(t.expired(t0 + Duration::from_secs(14)).is_empty());
         assert_eq!(t.deadline(), Some(t0 + TRANSMIT_WINDOW));
-        assert_eq!(kinds(&t.expired(t0 + TRANSMIT_WINDOW)), [BroadcastOutcome::NotConfirmed]);
+        assert_eq!(kinds(&t.expired(t0 + TRANSMIT_WINDOW)), [BroadcastOutcome::NOT_CONFIRMED]);
         assert!(!t.busy());
         assert!(t.observe(&Observation::CancelPending).is_empty());
     }
@@ -355,7 +395,7 @@ mod tests {
         t.submitted(BroadcastKind::Cq);
         t.observe(&Observation::Pending);
         assert!(t.state(ModemState::Listening).is_empty(), "still idle");
-        assert_eq!(kinds(&t.state(ModemState::Negotiating)), [BroadcastOutcome::NotConfirmed]);
+        assert_eq!(kinds(&t.state(ModemState::Negotiating)), [BroadcastOutcome::NOT_CONFIRMED]);
     }
 
     #[test]
@@ -372,7 +412,7 @@ mod tests {
         t.start(BroadcastKind::Cq, Instant::now());
         t.state(ModemState::Recovering);
         let out = kinds(&t.submitted(BroadcastKind::Cq));
-        assert_eq!(out, [BroadcastOutcome::Submitted, BroadcastOutcome::NotConfirmed]);
+        assert_eq!(out, [BroadcastOutcome::Submitted, BroadcastOutcome::NOT_CONFIRMED]);
     }
 
     #[test]
@@ -381,7 +421,7 @@ mod tests {
         assert!(t.unconfirmed(BroadcastKind::Cq).is_empty());
         t.start(BroadcastKind::Cq, Instant::now());
         assert!(t.unconfirmed(BroadcastKind::Beacon).is_empty(), "another kind's answer");
-        assert_eq!(kinds(&t.unconfirmed(BroadcastKind::Cq)), [BroadcastOutcome::NotConfirmed]);
+        assert_eq!(kinds(&t.unconfirmed(BroadcastKind::Cq)), [BroadcastOutcome::NOT_CONFIRMED]);
         assert!(!t.busy());
     }
 
@@ -390,7 +430,7 @@ mod tests {
         let mut t = Tracker::default();
         assert!(t.abandon().is_empty());
         t.start(BroadcastKind::Beacon, Instant::now());
-        assert_eq!(kinds(&t.abandon()), [BroadcastOutcome::NotConfirmed]);
+        assert_eq!(kinds(&t.abandon()), [BroadcastOutcome::NOT_CONFIRMED]);
         assert!(!t.busy());
     }
 
@@ -413,11 +453,46 @@ mod tests {
             for o in [
                 BroadcastOutcome::Submitted,
                 BroadcastOutcome::Transmitted,
-                BroadcastOutcome::NotConfirmed,
+                BroadcastOutcome::NOT_CONFIRMED,
+                BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) },
                 BroadcastOutcome::Refused { reason: "not sent: x".into() },
             ] {
                 assert!(!activity_text(kind, &o).to_lowercase().contains("deliver"));
             }
         }
+    }
+
+    const SILENT: BroadcastOutcome =
+        BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) };
+
+    #[test]
+    fn a_beacon_taken_but_never_keyed_names_the_broadcast_port() {
+        let mut t = Tracker::default();
+        let t0 = Instant::now();
+        t.start(BroadcastKind::Beacon, t0);
+        t.submitted(BroadcastKind::Beacon);
+        assert_eq!(kinds(&t.expired(t0 + TRANSMIT_WINDOW)), [SILENT]);
+        let line = activity_text(BroadcastKind::Beacon, &SILENT);
+        assert!(line.contains("another program may be using Mercury's broadcast port"), "{line}");
+        assert_eq!(NotConfirmedReason::BroadcastPortSilent.key(), "broadcast.notConfirmed.broadcastPortSilent");
+    }
+
+    #[test]
+    fn only_a_silent_idle_beacon_the_port_took_names_the_port() {
+        let t0 = Instant::now();
+        let end = t0 + TRANSMIT_WINDOW;
+        // Keyed but never unkeyed: it did transmit something.
+        let mut t = Tracker::default();
+        t.start(BroadcastKind::Beacon, t0);
+        t.submitted(BroadcastKind::Beacon);
+        t.observe(&Observation::Ptt(true));
+        assert_eq!(kinds(&t.expired(end)), [BroadcastOutcome::NOT_CONFIRMED]);
+        // Never taken: the modem did not answer, the port is not in question.
+        t.start(BroadcastKind::Beacon, t0);
+        assert_eq!(kinds(&t.expired(end)), [BroadcastOutcome::NOT_CONFIRMED]);
+        // A CQ is not sent on the broadcast port.
+        t.start(BroadcastKind::Cq, t0);
+        t.submitted(BroadcastKind::Cq);
+        assert_eq!(kinds(&t.expired(end)), [BroadcastOutcome::NOT_CONFIRMED]);
     }
 }

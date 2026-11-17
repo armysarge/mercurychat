@@ -18,6 +18,12 @@ modemDetail: string | null, profiles: Array<StationProfile>, activeProfileId: st
  */
 receiveOnly: boolean, 
 /**
+ * Receive only was chosen during a call or a session while the modem
+ * was answering calls: it takes effect when the link ends, because
+ * Mercury drops a live link unannounced on LISTEN OFF (lab F2).
+ */
+receiveOnlyPending: boolean, 
+/**
  * The modem is listening for calls right now (actual state, not the
  * setting): false while attaching, receive-only, or after a LISTEN ON
  * failure.

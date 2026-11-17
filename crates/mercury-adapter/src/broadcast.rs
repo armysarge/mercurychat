@@ -24,6 +24,11 @@ pub struct BroadcastPort {
 }
 
 impl BroadcastPort {
+    /// Connect to the broadcast port. Success does not prove Mercury serves
+    /// this client: it serves one broadcast client at a time, and a second
+    /// one's connect succeeds into the OS backlog, never accepted, never
+    /// closed, its writes going nowhere (lab Q5). The core tells that from
+    /// the outcome instead (a beacon taken but never keyed).
     pub async fn connect(
         host: &str,
         port: u16,

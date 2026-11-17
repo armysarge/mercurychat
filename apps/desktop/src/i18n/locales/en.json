@@ -30,6 +30,7 @@
     "notAttached": "Not attached",
     "attaching": "Attaching",
     "receiveOnly": "Receive only",
+    "receiveOnlyPending": "Receive only — after this session",
     "notAnswering": "Not answering calls",
     "answering": "Answering calls",
     "calling": "Calling {peer}",
@@ -58,6 +59,11 @@
     "otherSession": "Session with {peer} ({direction}).",
     "open": "Open",
     "receiveOnlyFailed": "Could not change Receive only: {reason}"
+  },
+  "broadcast": {
+    "notConfirmed": {
+      "broadcastPortSilent": "The modem did not transmit; another program may be using Mercury's broadcast port."
+    }
   },
   "direction": {
     "outgoing": "We called",

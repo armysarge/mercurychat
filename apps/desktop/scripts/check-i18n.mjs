@@ -6,7 +6,8 @@
 //  3. No .vue template has bare text, and no user-visible attribute
 //     (placeholder, title, aria-label, alt) or string literal in an
 //     interpolation, outside t(). <script> and <style> are not scanned.
-//  4. Every errors.* key the Rust contract can emit exists in en.json.
+//  4. Every errors.* key the Rust contract can emit, and every broadcast.*
+//     reason key broadcast.rs names, exists in en.json.
 //  5. Plural rules follow CLDR per locale (0 is singular in fr and pt-BR), and every
 //     key used anywhere in src/ (t(), keypath, key-shaped literals, dynamic prefixes) is in en.json.
 //  6. The keys Operate.vue uses resolve to French strings that differ from
@@ -179,6 +180,11 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
   const keys = [...new Set([...rs.matchAll(/"(errors\.[A-Za-z0-9.]+)"/g)].map((m) => m[1]))];
   if (keys.length === 0) bad("contract.rs: no errors.* keys found");
   for (const k of keys) if (!(k in flat.en)) bad(`en.json: missing ${k}, which contract.rs emits`);
+  // The reasons a broadcast outcome carries (NotConfirmedReason::key).
+  const brs = readFileSync(join(root, "..", "..", "crates", "mc-core", "src", "app", "broadcast.rs"), "utf8");
+  const reasons = [...new Set([...brs.matchAll(/"(broadcast\.[A-Za-z0-9.]+)"/g)].map((m) => m[1]))];
+  if (reasons.length === 0) bad("broadcast.rs: no broadcast.* keys found");
+  for (const k of reasons) if (!(k in flat.en)) bad(`en.json: missing ${k}, which broadcast.rs emits`);
 }
 
 // ------------------------------------------------------------ plural rules
