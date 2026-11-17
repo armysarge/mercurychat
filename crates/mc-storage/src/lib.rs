@@ -24,8 +24,15 @@ pub enum StorageError {
     Backup { path: PathBuf, reason: String },
     #[error("upgrading the database to version {to} failed: {source}; the database was left at version {from}; a copy taken before the upgrade is at {}", backup.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "(none: the database was new)".into()))]
     Migration { from: i64, to: i64, backup: Option<PathBuf>, source: rusqlite::Error },
+    #[error("QSO record {0} is final and cannot be edited")]
+    QsoFinal(String),
+    #[error("QSO record {0} does not exist")]
+    QsoNotFound(String),
 }
 
+mod heard;
+mod logbook;
+mod macros;
 mod migrate;
 pub use migrate::{Migration, MIGRATIONS};
 
@@ -104,6 +111,96 @@ pub struct SessionRow {
     pub ended_utc: Option<String>,
     pub peer_app: Option<String>,
     pub outcome: Option<String>,
+}
+
+/// One heard-station observation (`heard_observations`). `id` is ignored on insert.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeardRow {
+    pub id: i64,
+    pub callsign: String,
+    pub observed_utc: String,
+    /// `cq`, `beacon` or `session`.
+    pub kind: String,
+    pub bandwidth: Option<String>,
+    pub grid: Option<String>,
+    pub caps: Option<i64>,
+    pub snr_db: Option<f32>,
+    pub snr_source: Option<String>,
+    pub freq_hz: Option<i64>,
+    pub freq_source: Option<String>,
+    pub freq_age_ms: Option<i64>,
+}
+
+/// One callsign's latest observation plus its count and favourite flag.
+#[derive(Debug, Clone, PartialEq)]
+pub struct HeardSummaryRow {
+    pub callsign: String,
+    pub last_utc: String,
+    pub kind: String,
+    pub bandwidth: Option<String>,
+    pub grid: Option<String>,
+    pub caps: Option<i64>,
+    pub snr_db: Option<f32>,
+    pub snr_source: Option<String>,
+    pub freq_hz: Option<i64>,
+    pub freq_source: Option<String>,
+    pub freq_age_ms: Option<i64>,
+    pub count: i64,
+    pub favourite: bool,
+}
+
+/// One `qso_records` row. `state` is `draft` or `final`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct QsoRow {
+    pub id: String,
+    pub session_id: Option<String>,
+    pub peer: String,
+    pub start_utc: String,
+    pub end_utc: Option<String>,
+    pub grid: Option<String>,
+    pub band: Option<String>,
+    pub freq_hz: Option<i64>,
+    pub freq_source: Option<String>,
+    pub freq_age_ms: Option<i64>,
+    pub bandwidth: Option<String>,
+    pub tx_modes: Option<String>,
+    pub rx_modes: Option<String>,
+    pub rst_sent: Option<String>,
+    pub rst_rcvd: Option<String>,
+    pub name: Option<String>,
+    pub qth: Option<String>,
+    pub my_power: Option<String>,
+    pub notes: Option<String>,
+    pub state: String,
+}
+
+/// A partial QSO edit: only `Some` fields are written.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct QsoEdit {
+    pub grid: Option<String>,
+    pub band: Option<String>,
+    pub freq_hz: Option<i64>,
+    pub freq_source: Option<String>,
+    pub freq_age_ms: Option<i64>,
+    pub bandwidth: Option<String>,
+    pub tx_modes: Option<String>,
+    pub rx_modes: Option<String>,
+    pub rst_sent: Option<String>,
+    pub rst_rcvd: Option<String>,
+    pub name: Option<String>,
+    pub qth: Option<String>,
+    pub my_power: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// One text macro of a station profile.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MacroRow {
+    pub id: String,
+    pub profile_id: String,
+    pub name: String,
+    pub body: String,
+    pub sort: i64,
 }
 
 const MESSAGE_COLUMNS: &str =
@@ -437,7 +534,13 @@ pub struct ProfileRow {
     pub broadcast_port: Option<u16>,
     pub telemetry_url: Option<String>,
     pub lab: bool,
-    pub listen_preferred: bool,
+    pub receive_only: bool,
+    pub qth: Option<String>,
+    pub rig: Option<String>,
+    pub power: Option<String>,
+    pub antenna: Option<String>,
+    pub email: Option<String>,
+    pub about: Option<String>,
 }
 
 impl Store {
@@ -446,13 +549,16 @@ impl Store {
         let now = now_utc();
         self.conn.execute(
             "INSERT INTO station_profiles (id, callsign, name, grid, modem_kind, host, control_port, data_port,
-               broadcast_port, telemetry_url, lab, listen_preferred, created_utc, updated_utc)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13)
+               broadcast_port, telemetry_url, lab, receive_only, created_utc, updated_utc,
+               qth, rig, power, antenna, email, about)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
              ON CONFLICT (id) DO UPDATE SET callsign = excluded.callsign, name = excluded.name,
                grid = excluded.grid, modem_kind = excluded.modem_kind, host = excluded.host,
                control_port = excluded.control_port, data_port = excluded.data_port,
                broadcast_port = excluded.broadcast_port, telemetry_url = excluded.telemetry_url,
-               lab = excluded.lab, listen_preferred = excluded.listen_preferred, updated_utc = excluded.updated_utc",
+               lab = excluded.lab, receive_only = excluded.receive_only, updated_utc = excluded.updated_utc,
+               qth = excluded.qth, rig = excluded.rig, power = excluded.power, antenna = excluded.antenna,
+               email = excluded.email, about = excluded.about",
             params![
                 r.id,
                 r.callsign,
@@ -465,8 +571,14 @@ impl Store {
                 r.broadcast_port,
                 r.telemetry_url,
                 r.lab,
-                r.listen_preferred,
-                now
+                r.receive_only,
+                now,
+                r.qth,
+                r.rig,
+                r.power,
+                r.antenna,
+                r.email,
+                r.about
             ],
         )?;
         Ok(())
@@ -476,7 +588,7 @@ impl Store {
     pub fn profiles(&self) -> Result<Vec<ProfileRow>> {
         let mut st = self.conn.prepare(
             "SELECT id, callsign, name, grid, modem_kind, host, control_port, data_port, broadcast_port,
-                    telemetry_url, lab, listen_preferred
+                    telemetry_url, lab, receive_only, qth, rig, power, antenna, email, about
              FROM station_profiles ORDER BY created_utc, rowid",
         )?;
         let rows = st.query_map([], |r| {
@@ -492,7 +604,13 @@ impl Store {
                 broadcast_port: r.get(8)?,
                 telemetry_url: r.get(9)?,
                 lab: r.get(10)?,
-                listen_preferred: r.get(11)?,
+                receive_only: r.get(11)?,
+                qth: r.get(12)?,
+                rig: r.get(13)?,
+                power: r.get(14)?,
+                antenna: r.get(15)?,
+                email: r.get(16)?,
+                about: r.get(17)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
@@ -500,7 +618,12 @@ impl Store {
 
     /// True if a profile was removed.
     pub fn delete_profile(&mut self, id: &str) -> Result<bool> {
-        Ok(self.conn.execute("DELETE FROM station_profiles WHERE id = ?1", [id])? > 0)
+        // The profile's macros go with it, in one transaction.
+        let tx = self.conn.transaction()?;
+        tx.execute("DELETE FROM macros WHERE profile_id = ?1", [id])?;
+        let removed = tx.execute("DELETE FROM station_profiles WHERE id = ?1", [id])? > 0;
+        tx.commit()?;
+        Ok(removed)
     }
 
     pub fn set_setting(&mut self, key: &str, value: &str) -> Result<()> {

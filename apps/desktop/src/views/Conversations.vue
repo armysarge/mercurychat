@@ -1,11 +1,12 @@
 <script setup lang="ts">
-// Conversations (docs/04 §4): callsign list with search and the chosen
-// peer's history, readable whether or not a link is up. Ctrl+F searches it.
+// Conversations (docs/04 §4): the chosen peer's history (the callsign list is
+// the app's sidebar), readable whether or not a link is up. Ctrl+F searches it.
 import { onMounted, onUnmounted, ref } from "vue";
-import ConversationList from "../components/ConversationList.vue";
+import { useI18n } from "vue-i18n";
 import Transcript from "../components/Transcript.vue";
 import { chat } from "../store";
 
+const { t } = useI18n();
 const search = ref("");
 const box = ref<HTMLInputElement | null>(null);
 
@@ -21,12 +22,11 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 
 <template>
   <div class="conversations">
-    <aside class="list-pane"><ConversationList /></aside>
-    <section class="history" aria-label="History">
+    <section class="history" :aria-label="t('conversations.history')">
       <div class="row head">
-        <h1 class="mono">{{ chat.open || "History" }}</h1>
+        <h1 class="mono">{{ chat.open || t("conversations.history") }}</h1>
         <span class="grow"></span>
-        <input ref="box" v-model="search" type="search" class="history-search" aria-label="Search this history (Ctrl+F)" placeholder="Search history (Ctrl+F)" />
+        <input ref="box" v-model="search" type="search" class="history-search" :aria-label="t('conversations.historySearchAria')" :placeholder="t('conversations.historySearchPlaceholder')" />
       </div>
       <Transcript class="fill" :filter="search" />
     </section>
@@ -34,14 +34,9 @@ onUnmounted(() => document.removeEventListener("keydown", onKey));
 </template>
 
 <style scoped>
-.conversations { display: grid; grid-template-columns: 280px minmax(0, 1fr); height: 100%; min-height: 0; }
-.list-pane { border-right: 1px solid var(--border); min-height: 0; }
+.conversations { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; min-height: 0; }
 .history { display: flex; flex-direction: column; min-height: 0; }
 .head { padding: calc(var(--space) * 1.5) calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
-.head h1 { font-size: 18px; }
+.head h1 { font-size: calc(18px * var(--font-scale)); }
 .fill { flex: 1; }
-@media (max-width: 900px) {
-  .conversations { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto minmax(0, 1fr); }
-  .list-pane { border-right: 0; border-bottom: 1px solid var(--border); max-height: 40vh; }
-}
 </style>

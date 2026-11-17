@@ -1,21 +1,33 @@
 // Shared window state: the core's mirrored snapshot, the open conversation
 // and the layout. Views read it; every change to the core goes through a
 // typed command (api.ts) and comes back as an event.
-import { computed, reactive } from "vue";
+import { computed, reactive, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
+import type { ActivityEntry } from "./bindings/ActivityEntry";
+import type { AppEvent } from "./bindings/AppEvent";
+import type { BroadcastKind } from "./bindings/BroadcastKind";
+import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
+import type { HeardStation } from "./bindings/HeardStation";
+import type { MacroDef } from "./bindings/MacroDef";
+import type { NotifyPrefs } from "./bindings/NotifyPrefs";
+import type { Qso } from "./bindings/Qso";
+import type { QsoEdit } from "./bindings/QsoEdit";
+import { applyLanguage, rememberLanguage, t } from "./i18n";
 
 export const MAX_BYTES = 4096; // CHT-01
 export const PAGE = 50; // messages per history page
 
-export type ViewName = "operate" | "conversations" | "settings" | "diagnostics";
+export type ViewName = "operate" | "conversations" | "logbook" | "settings" | "diagnostics";
 export type Drawer = "peers" | "session" | null;
 
 export const app = reactive({
   view: null as View | null,
   page: "operate" as ViewName,
   drawer: null as Drawer,
+  /** The sidebar tab: the conversation list or the heard stations. */
+  sideTab: "chats" as "chats" | "heard",
 });
 
 export const chat = reactive({
@@ -38,6 +50,19 @@ export const activeProfile = computed(() => {
 });
 export const session = computed(() => snapshot.value?.session ?? null);
 
+// The language chosen in Settings is kept by the core: show it as soon as the
+// snapshot says which it is, and whenever it changes.
+watch(
+  () => snapshot.value?.uiLanguage,
+  (language) => {
+    if (language) {
+      applyLanguage(language);
+      rememberLanguage(language);
+    }
+  },
+  { immediate: true },
+);
+
 /** The peer a call or session in progress is with, if any. */
 export const linkPeer = computed(() => {
   switch (modemState.value) {
@@ -54,28 +79,29 @@ export const linkPeer = computed(() => {
 
 /** The header's mode, in words (docs/04 §2: never confuse app-online with reachable). */
 export const modeWord = computed(() => {
-  if (!activeProfile.value) return "No station";
+  if (!activeProfile.value) return t("mode.noStation");
+  const peer = detail.value ?? "";
   switch (modemState.value) {
     case "unavailable":
-      return "Not attached";
+      return t("mode.notAttached");
     case "attaching":
-      return "Attaching";
+      return t("mode.attaching");
     case "ready":
-      return "Receive-only";
+      return snapshot.value?.receiveOnly ? t("mode.receiveOnly") : t("mode.notAnswering");
     case "listening":
-      return "Listening";
+      return t("mode.answering");
     case "calling":
-      return `Calling ${detail.value ?? ""}`.trim();
+      return t("mode.calling", { peer }).trim();
     case "negotiating":
-      return `Negotiating with ${detail.value ?? ""}`.trim();
+      return t("mode.negotiating", { peer }).trim();
     case "connected":
-      return `Connected to ${session.value?.peer ?? detail.value ?? ""}`.trim();
+      return t("mode.connected", { peer: session.value?.peer ?? peer }).trim();
     case "draining":
-      return detail.value === "aborting" ? "Aborting" : "Finishing queued traffic";
+      return detail.value === "aborting" ? t("mode.aborting") : t("mode.finishing");
     case "recovering":
-      return "Recovering";
+      return t("mode.recovering");
     case "faulted":
-      return "Modem fault";
+      return t("mode.fault");
   }
 });
 
@@ -83,10 +109,124 @@ export const canCall = computed(() => modemState.value === "ready" || modemState
 export const inSession = computed(() => modemState.value === "negotiating" || modemState.value === "connected");
 export const canAbort = computed(() => inSession.value || ["calling", "draining"].includes(modemState.value));
 
+const eventListeners: ((e: AppEvent) => void)[] = [];
+/** Be told of every core event as it is applied (desktop notifications). */
+export function onAppEvent(fn: (e: AppEvent) => void) {
+  eventListeners.push(fn);
+}
+
 export const mirror = new Mirror((v) => (app.view = v), {
   message: onMessage,
-  resynced: () => void reloadChat(),
+  heard: onHeard,
+  activity: (e) => {
+    discovery.activity.unshift(e);
+    if (discovery.activity.length > ACTIVITY_MAX) discovery.activity.length = ACTIVITY_MAX;
+  },
+  broadcast: (kind, outcome) => (discovery.outcome[kind] = outcome),
+  qso: upsertQso,
+  event: (e) => eventListeners.forEach((fn) => fn(e)),
+  resynced: () => {
+    void reloadChat();
+    void reloadDiscovery();
+    void reloadLogbook();
+  },
 });
+
+// ---- discovery: the heard list, the activity log, CQ and beacon outcomes (M3a Task 10)
+
+/** Lines the activity drawer keeps (the core's ring holds more; it is re-read on resync). */
+const ACTIVITY_MAX = 500;
+/** How long a newly heard row stays highlighted (04 §2, owner request: about 3 s). */
+export const HIGHLIGHT_MS = 3000;
+
+export const discovery = reactive({
+  /** The heard list, newest first; favourites with nothing heard sort last. */
+  heard: [] as HeardStation[],
+  /** The activity log, newest first. */
+  activity: [] as ActivityEntry[],
+  /** The latest outcome of each kind of broadcast this run. */
+  outcome: {} as Partial<Record<BroadcastKind, BroadcastOutcome>>,
+  /** Stations heard since the Heard tab was last shown. */
+  unseen: 0,
+  /** Rows heard just now, by callsign: the time they were heard (for the highlight). */
+  fresh: {} as Record<string, number>,
+  /** The latest polite announcement: "{callsign} heard: {Beacon|CQ}". */
+  announce: "",
+});
+
+/** Newest heard first; never-heard favourites last, by callsign. */
+function heardOrder(a: HeardStation, b: HeardStation): number {
+  if (a.lastHeardUtc && b.lastHeardUtc) return b.lastHeardUtc.localeCompare(a.lastHeardUtc);
+  if (a.lastHeardUtc || b.lastHeardUtc) return a.lastHeardUtc ? -1 : 1;
+  return a.callsign.localeCompare(b.callsign);
+}
+
+/** A heard-list row from the core: new, heard again, or changed (SNR, star). */
+function onHeard(st: HeardStation) {
+  const i = discovery.heard.findIndex((h) => h.callsign === st.callsign);
+  const before = i >= 0 ? discovery.heard[i] : null;
+  // A new observation is a newer last-heard time; a star or a completed SNR is not.
+  const heardAgain = !!st.lastHeardUtc && st.lastHeardUtc !== before?.lastHeardUtc;
+  if (i >= 0) discovery.heard.splice(i, 1, st);
+  else discovery.heard.push(st);
+  discovery.heard.sort(heardOrder);
+  if (!heardAgain || !st.source) return;
+  discovery.fresh[st.callsign] = Date.now();
+  setTimeout(() => {
+    if (Date.now() - (discovery.fresh[st.callsign] ?? 0) >= HIGHLIGHT_MS) delete discovery.fresh[st.callsign];
+  }, HIGHLIGHT_MS + 50);
+  if (app.sideTab !== "heard") discovery.unseen++;
+  if (st.source !== "session") discovery.announce = t("heard.announce", { callsign: st.callsign, source: t(`heard.source.${st.source}`) });
+}
+
+/** Re-read the heard list and the activity log (start-up, resync, a new station). */
+export async function reloadDiscovery() {
+  if (!activeProfile.value) {
+    discovery.heard = [];
+    discovery.activity = [];
+    return;
+  }
+  try {
+    const [h, a] = await Promise.all([call({ type: "heard" }), call({ type: "activity" })]);
+    if (h.type === "heard") discovery.heard = [...h.stations].sort(heardOrder);
+    if (a.type === "activity") discovery.activity = [...a.entries].reverse().slice(0, ACTIVITY_MAX);
+  } catch {
+    // Shown as an empty list; the next event or resync fills it.
+  }
+}
+
+// Opening the Heard tab clears its count.
+watch(
+  () => app.sideTab,
+  (tab) => {
+    if (tab === "heard") discovery.unseen = 0;
+  },
+);
+
+/** A discovery command's refusal, shown inline beside the control that sent it. */
+export const discoveryError = reactive({ cq: "", beacon: "", star: "" });
+
+async function discoveryAct(slot: keyof typeof discoveryError, step: () => Promise<unknown>) {
+  discoveryError[slot] = "";
+  try {
+    await step();
+  } catch (e) {
+    discoveryError[slot] = describeError(e);
+  }
+}
+
+export const sendCq = () => discoveryAct("cq", () => call({ type: "sendCq" }));
+export const sendBeaconNow = () => discoveryAct("beacon", () => call({ type: "sendBeaconNow" }));
+export const setBeacon = (on: boolean) => discoveryAct("beacon", () => call({ type: "setBeacon", on }));
+export const setBeaconInterval = (minutes: number) => discoveryAct("beacon", () => call({ type: "setBeaconInterval", minutes }));
+export const setBeaconContent = (includeGrid: boolean) =>
+  discoveryAct("beacon", async () => {
+    await call({ type: "setBeaconContent", includeGrid });
+    // No event carries this setting: keep the local copy in step with the core.
+    if (app.view) mirror.patch({ beacon: { ...app.view.snapshot.beacon, includeGrid } });
+  });
+export const setFavourite = (callsign: string, on: boolean) => discoveryAct("star", () => call({ type: "setFavourite", callsign, on }));
+export const selectProfile = (id: string) => act(() => call({ type: "selectProfile", id }));
 
 let convTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -237,7 +377,7 @@ export function saveDraft(text: string) {
 }
 
 export const retry = (m: ChatMessage) => act(() => call({ type: "retryChat", peer: m.peer, id: m.id }));
-export const setListen = (on: boolean) => act(() => call({ type: "setListen", on }));
+export const setReceiveOnly = (on: boolean) => act(() => call({ type: "setReceiveOnly", on }));
 export const placeCall = () => act(() => call({ type: "call", peer: chat.open }));
 export const cancelCall = () => act(() => call({ type: "cancelCall" }));
 export const disconnect = () => act(() => call({ type: "disconnect" }));
@@ -253,4 +393,125 @@ export const queuedBytes = computed(() =>
 export function stopTimers() {
   clearTimeout(convTimer);
   for (const peer of [...draftTimers.values()].map((d) => d.peer)) flushDraft(peer);
+}
+
+/** The modem's state as a word in the current language (the pill and the Link panel). */
+export const modemLabel = computed(() => t(`modem.${modemState.value}`));
+
+// ---- the logbook, macros and history search (M3a Task 11)
+
+/** Records the Logbook reads (the core keeps at most 500 newest). */
+const LOGBOOK_MAX = 500;
+/** CQs and beacons transmitted, oldest first, from the core's activity log (it
+ *  outlives a window reload): the transcript's inline rows (docs/04 §8.1). The
+ *  core pins this wording (broadcast.rs, transmitted_lines_keep_the_wording_the_transcript_reads). */
+export const transmitted = computed(() =>
+  discovery.activity
+    .filter((e) => e.kind === "broadcast" && /^(cq|beacon) transmitted/i.test(e.text))
+    .map((e) => ({ kind: (e.text.toLowerCase().startsWith("cq") ? "cq" : "beacon") as BroadcastKind, utc: e.atUtc }))
+    .reverse(),
+);
+
+export const logbook = reactive({ qsos: [] as Qso[], error: "" });
+
+function upsertQso(q: Qso) {
+  const i = logbook.qsos.findIndex((x) => x.id === q.id);
+  if (i >= 0) logbook.qsos.splice(i, 1, q);
+  else logbook.qsos.unshift(q);
+}
+
+export async function reloadLogbook() {
+  if (!activeProfile.value) {
+    logbook.qsos = [];
+    return;
+  }
+  try {
+    const r = await call({ type: "qsos", limit: LOGBOOK_MAX });
+    if (r.type === "qsos") logbook.qsos = r.qsos;
+  } catch (e) {
+    logbook.error = describeError(e);
+  }
+}
+
+/** Save a draft's edits; the core answers with the record (and a qso event). */
+export async function updateQso(id: string, edit: QsoEdit): Promise<Qso | null> {
+  const r = await call({ type: "updateQso", id, edit });
+  if (r.type !== "qso") return null;
+  upsertQso(r);
+  return r;
+}
+
+export async function finaliseQso(id: string): Promise<Qso | null> {
+  const r = await call({ type: "finaliseQso", id });
+  if (r.type !== "qso") return null;
+  upsertQso(r);
+  return r;
+}
+
+export async function setFinaliseOnDisconnect(on: boolean) {
+  await call({ type: "setFinaliseOnDisconnect", on });
+  // No event carries this setting: keep the local copy in step with the core.
+  mirror.patch({ finaliseOnDisconnect: on });
+}
+
+export const macros = reactive({ list: [] as MacroDef[], error: "" });
+
+export async function loadMacros() {
+  macros.error = "";
+  if (!activeProfile.value) {
+    macros.list = [];
+    return;
+  }
+  try {
+    const r = await call({ type: "macros" });
+    if (r.type === "macros") macros.list = r.macros;
+  } catch (e) {
+    macros.error = describeError(e);
+  }
+}
+
+/** Add (empty id) or change a macro; the error is the core's, field by field. */
+export async function saveMacro(def: MacroDef) {
+  await call({ type: "saveMacro", macro: def });
+  await loadMacros();
+}
+
+export async function deleteMacro(id: string) {
+  await call({ type: "deleteMacro", id });
+  await loadMacros();
+}
+
+/** A macro's text for the draft, with the tags that had no value. Nothing is sent. */
+export async function expandMacro(id: string): Promise<{ text: string; missing: string[] }> {
+  const r = await call({ type: "expandMacro", id, peer: chat.open || null, allowEmail: false });
+  if (r.type !== "expanded") throw new Error(r.type);
+  return { text: r.text, missing: r.missing };
+}
+
+/** Messages to or from anyone whose text or callsign holds `query`, newest first. */
+export async function searchHistory(query: string): Promise<ChatMessage[]> {
+  const r = await call({ type: "searchHistory", query, limit: 20 });
+  return r.type === "history" ? r.messages : [];
+}
+
+watch(
+  () => activeProfile.value?.id,
+  () => {
+    void reloadLogbook();
+    void loadMacros();
+  },
+);
+
+/** Keep the desktop notification preferences. No event carries them, so the
+ *  local copy changes first (a second quick change builds on the first) and
+ *  goes back if the core refuses. */
+export async function setNotifyPrefs(prefs: NotifyPrefs) {
+  const before = app.view?.snapshot.notifyPrefs;
+  mirror.patch({ notifyPrefs: prefs });
+  try {
+    await call({ type: "setNotifyPrefs", prefs });
+  } catch (e) {
+    if (before && app.view?.snapshot.notifyPrefs === prefs) mirror.patch({ notifyPrefs: before });
+    throw e;
+  }
 }

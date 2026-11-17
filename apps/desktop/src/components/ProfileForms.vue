@@ -3,12 +3,16 @@
 // at host:port. The core validates every field (profile.rs); its errors are
 // shown next to the fields they name.
 import { ref } from "vue";
-import { call } from "../api";
+import { useI18n } from "vue-i18n";
+import { call, describeError } from "../api";
 import type { AppError } from "../bindings/AppError";
 import type { StationProfile } from "../bindings/StationProfile";
 import { snapshot } from "../store";
 
+const { t } = useI18n();
 const emit = defineEmits<{ done: [] }>();
+// A new station starts in Receive only when first-use setup says so (D18).
+const props = defineProps<{ receiveOnly?: boolean }>();
 
 const simCall = ref("");
 const ex = ref({ callsign: "", host: "127.0.0.1", controlPort: 8300, dataPort: 8301 });
@@ -22,7 +26,7 @@ async function use(draft: StationProfile, prefix: string) {
   formError.value = "";
   try {
     const saved = await call({ type: "saveProfile", profile: draft });
-    if (saved.type !== "profile") throw new Error(`unexpected reply ${saved.type}`);
+    if (saved.type !== "profile") throw new Error(t("profile.unexpectedReply", { type: saved.type }));
     await call({ type: "selectProfile", id: saved.id });
     emit("done");
   } catch (e) {
@@ -30,7 +34,7 @@ async function use(draft: StationProfile, prefix: string) {
     if (err && typeof err === "object" && err.code === "validation") {
       for (const f of err.errors) errors.value[`${prefix}.${f.field}`] = f.message;
     } else {
-      formError.value = err && typeof err === "object" && "message" in err ? String(err.message) : String(e);
+      formError.value = describeError(e);
     }
   } finally {
     busy.value = false;
@@ -41,7 +45,7 @@ function useSimulator() {
   const wanted = simCall.value.trim().toUpperCase();
   const existing = snapshot.value?.profiles.find((p) => p.modem.kind === "simulator" && p.callsign === wanted);
   const draft: StationProfile = existing ?? {
-    id: "", callsign: simCall.value, name: null, grid: null, modem: { kind: "simulator" }, lab: true, listenPreferred: false,
+    id: "", callsign: simCall.value, name: null, grid: null, modem: { kind: "simulator" }, lab: true, receiveOnly: props.receiveOnly ?? false,
   };
   return use(draft, "sim");
 }
@@ -72,7 +76,7 @@ function useExisting() {
       telemetryUrl: null,
     },
     lab: false,
-    listenPreferred: false,
+    receiveOnly: props.receiveOnly ?? false,
   };
   return use(draft, "ex");
 }
@@ -81,27 +85,27 @@ function useExisting() {
 <template>
   <div class="forms">
     <form class="card stack simulator" @submit.prevent="useSimulator">
-      <h2>Simulator</h2>
-      <p class="muted small">A simulated Mercury in this app, with a station SIM1 that answers and echoes. No radio, no audio.</p>
-      <label>Your callsign <input v-model="simCall" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
+      <h2>{{ t("profile.simulatorTitle") }}</h2>
+      <p class="muted small">{{ t("profile.simulatorBody") }}</p>
+      <label>{{ t("profile.callsign") }} <input v-model="simCall" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
       <span v-if="errors['sim.callsign']" class="field-error">{{ errors["sim.callsign"] }}</span>
-      <div><button type="submit" class="primary" :disabled="busy">Use simulator</button></div>
+      <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useSimulator") }}</button></div>
     </form>
 
     <form class="card stack existing" @submit.prevent="useExisting">
-      <h2>Existing Mercury</h2>
-      <p class="muted small">A Mercury modem already running, on this computer or one you name. MercuryChat attaches to its control and data ports; listening stays off until you turn it on.</p>
-      <label>Your callsign <input v-model="ex.callsign" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
+      <h2>{{ t("profile.existingTitle") }}</h2>
+      <p class="muted small">{{ t("profile.existingBody") }}</p>
+      <label>{{ t("profile.callsign") }} <input v-model="ex.callsign" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
       <span v-if="errors['ex.callsign']" class="field-error">{{ errors["ex.callsign"] }}</span>
       <div class="row">
-        <label>Host <input v-model="ex.host" name="host" class="mono" size="16" autocomplete="off" spellcheck="false" /></label>
-        <label>Control port <input v-model.number="ex.controlPort" name="controlPort" class="mono" type="number" min="1" max="65534" /></label>
-        <label>Data port <input v-model.number="ex.dataPort" name="dataPort" class="mono" type="number" min="1" max="65535" /></label>
+        <label>{{ t("profile.host") }} <input v-model="ex.host" name="host" class="mono" size="16" autocomplete="off" spellcheck="false" /></label>
+        <label>{{ t("profile.controlPort") }} <input v-model.number="ex.controlPort" name="controlPort" class="mono" type="number" min="1" max="65534" /></label>
+        <label>{{ t("profile.dataPort") }} <input v-model.number="ex.dataPort" name="dataPort" class="mono" type="number" min="1" max="65535" /></label>
       </div>
       <span v-for="f in ['host', 'controlPort', 'dataPort', 'modemKind']" :key="f">
         <span v-if="errors['ex.' + f]" class="field-error">{{ errors["ex." + f] }}</span>
       </span>
-      <div><button type="submit" class="primary" :disabled="busy">Use this Mercury</button></div>
+      <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useExisting") }}</button></div>
     </form>
     <p v-if="formError" class="err" role="alert">{{ formError }}</p>
   </div>

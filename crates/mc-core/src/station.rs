@@ -8,6 +8,7 @@
 use crate::session::{ModemSignal, Session, SessionCommand, SessionConfig, SessionEnd, SessionEvent};
 use mc_storage::Store;
 use mercury_adapter::{
+    monitor::{parse_cq, MonitorCq},
     Ack, AdapterEvent, Attachment, Bandwidth, Callsign, Command, ControlEvent, Endpoint, MercuryClient, Timeouts,
 };
 use std::path::PathBuf;
@@ -105,6 +106,64 @@ pub struct TranscriptLine {
     pub line: String,
 }
 
+/// What the modem reports about the channel, tapped off the control stream
+/// for the heard list, beacon gate and activity log. Observations are
+/// advisory: the tap never blocks and never affects a session.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Observation {
+    /// `CQFRAME` as received by this modem.
+    Cq {
+        source: String,
+        bw: String,
+    },
+    /// A CQ heard through MONITOR, with its SNR.
+    MonitorCq(MonitorCq),
+    Ptt(bool),
+    Busy(bool),
+    Snr(f32),
+    Buffer(u64),
+    Pending,
+    CancelPending,
+    /// A line that is observable but not understood; the full line.
+    Unknown(String),
+}
+
+/// Map a modem event to an observation (`None`: not an observation).
+fn observation_of(ev: &AdapterEvent) -> Option<Observation> {
+    let AdapterEvent::Control(c) = ev else { return None };
+    Some(match c {
+        ControlEvent::CqFrame { source, bandwidth } => {
+            Observation::Cq { source: source.clone(), bw: bandwidth.clone() }
+        }
+        ControlEvent::Monitor(rest) => match parse_cq(rest) {
+            Some(cq) => Observation::MonitorCq(cq),
+            None => Observation::Unknown(format!("MONITOR {rest}")),
+        },
+        ControlEvent::Ptt(b) => Observation::Ptt(*b),
+        ControlEvent::Busy(b) => Observation::Busy(*b),
+        ControlEvent::Sn(v) => match v.trim().parse::<f32>() {
+            Ok(x) if x.is_finite() => Observation::Snr(x),
+            _ => Observation::Unknown(format!("SN {v}")),
+        },
+        ControlEvent::Buffer(n) => Observation::Buffer(*n),
+        ControlEvent::Pending => Observation::Pending,
+        ControlEvent::CancelPending => Observation::CancelPending,
+        ControlEvent::Unknown(l) => Observation::Unknown(l.clone()),
+        _ => return None,
+    })
+}
+
+/// Forward `ev` to the observer without ever waiting: a full or closed
+/// channel counts a drop.
+fn forward(observer: &Option<mpsc::Sender<Observation>>, dropped: &mut u64, ev: &AdapterEvent) {
+    let Some(tx) = observer else { return };
+    if let Some(o) = observation_of(ev) {
+        if tx.try_send(o).is_err() {
+            *dropped += 1;
+        }
+    }
+}
+
 pub struct Station {
     pub cfg: StationConfig,
     pub store: Store,
@@ -112,6 +171,10 @@ pub struct Station {
     started: std::time::Instant,
     pub transcript: Vec<TranscriptLine>,
     pub ptt_events: u64,
+    /// Observations lost because the observer channel was full or closed.
+    pub observations_dropped: u64,
+    observer: Option<mpsc::Sender<Observation>>,
+    listen_mode: Option<u8>,
     pub stale_bytes_discarded: u64,
     pub stale_tx_purged: u64,
     _lock: crate::lock::LockFile,
@@ -138,6 +201,9 @@ impl Station {
             started: std::time::Instant::now(),
             transcript: Vec::new(),
             ptt_events: 0,
+            observations_dropped: 0,
+            observer: None,
+            listen_mode: None,
             stale_bytes_discarded: 0,
             stale_tx_purged: 0,
             _lock: lock,
@@ -156,7 +222,20 @@ impl Station {
         self.att.as_ref().map(|a| a.client.generation()).unwrap_or(0)
     }
 
+    /// Tap the modem's control stream (CQ, PTT, BUSY, SN, ...). Observations
+    /// are sent with `try_send`; a full channel drops and counts them.
+    pub fn set_observer(&mut self, tx: mpsc::Sender<Observation>) {
+        self.observer = Some(tx);
+    }
+
+    /// The DATAC listen mode the modem accepted at attach (`Some(1)`), or
+    /// `None` when it refused MODE (or has not been attached).
+    pub fn listen_mode(&self) -> Option<u8> {
+        self.listen_mode
+    }
+
     fn note(&mut self, ev: &AdapterEvent) {
+        forward(&self.observer, &mut self.observations_dropped, ev);
         if let AdapterEvent::RawLine(l) = ev {
             let generation = self.generation();
             self.transcript.push(TranscriptLine {
@@ -232,6 +311,17 @@ impl Station {
         self.cmd(Command::Public(false)).await?;
         self.cmd(Command::Listen(false)).await?;
         self.cmd(Command::Bw(self.cfg.bandwidth)).await?;
+        // DATAC3 listen mode and CQ monitoring are best effort: a modem that
+        // refuses either still attaches.
+        self.listen_mode = match self.cmd(Command::Mode(1)).await {
+            Ok(()) => Some(1),
+            Err(StationError::Wrong(_)) => None,
+            Err(e) => return Err(e),
+        };
+        match self.cmd(Command::Monitor(true)).await {
+            Ok(()) | Err(StationError::Wrong(_)) => {}
+            Err(e) => return Err(e),
+        }
         self.purge_stale_tx().await?;
         self.store.log_event("modem", &format!("attached gen {}", self.generation()))?;
         Ok(())
@@ -314,6 +404,13 @@ impl Station {
             delay = (delay * 2.0).min(15.0);
         }
         Err(last.unwrap_or(StationError::Detached))
+    }
+
+    /// Send one CQ frame and return on the modem's OK. Does not wait for
+    /// PENDING or the end of the transmission, so an incoming CONNECTED is
+    /// never consumed here.
+    pub async fn cq(&mut self) -> Result<(), StationError> {
+        self.cmd(Command::CqFrame { source: self.cfg.callsign.clone(), bw: self.cfg.bandwidth }).await
     }
 
     pub async fn set_listen(&mut self, on: bool) -> Result<(), StationError> {
@@ -469,6 +566,8 @@ impl Station {
         let started = self.started;
         let transcript = &mut self.transcript;
         let ptt = &mut self.ptt_events;
+        let observer = &self.observer;
+        let dropped = &mut self.observations_dropped;
         let events_rx = &mut att.events;
         let data = &mut att.data;
         let client = &att.client;
@@ -481,6 +580,7 @@ impl Station {
                 tokio::select! {
                     ev = events_rx.recv() => {
                         let Some(ev) = ev else { let _ = sig_tx.send(ModemSignal::ControlLost).await; break };
+                        forward(observer, dropped, &ev);
                         match &ev {
                             AdapterEvent::RawLine(l) => {
                                 transcript.push(TranscriptLine { t_ms: started.elapsed().as_millis(), generation, line: l.clone() });

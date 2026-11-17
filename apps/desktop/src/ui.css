@@ -2,14 +2,14 @@
    restrained borders). Component layout lives with each component. */
 html, body, #app { height: 100%; overflow: hidden; }
 h1, h2, h3, p { margin: 0; }
-h2 { font-size: 15px; }
+h2 { font-size: calc(15px * var(--font-scale)); }
 .muted { color: var(--text-2); }
-.small { font-size: 12px; }
+.small { font-size: calc(12px * var(--font-scale)); }
 .err { color: var(--danger); }
 .ok { color: var(--success); }
 .warn { color: var(--warning); }
 .label {
-  text-transform: uppercase; letter-spacing: 1.2px; font-size: 10px; font-weight: 700; color: var(--text-2);
+  text-transform: uppercase; letter-spacing: 1.2px; font-size: calc(10px * var(--font-scale)); font-weight: 700; color: var(--text-2);
 }
 .card {
   background: var(--surface); border: 1px solid var(--border);
@@ -18,30 +18,101 @@ h2 { font-size: 15px; }
 .stack { display: grid; gap: var(--space); }
 .row { display: flex; flex-wrap: wrap; gap: var(--space); align-items: center; }
 .grow { flex: 1; }
-label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); font-size: 12px; }
+label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 input, textarea, select {
-  background: var(--raised); color: var(--text); border: 1px solid var(--border);
+  background: var(--raised); color: var(--text); border: 1px solid var(--border-strong);
   border-radius: 8px; padding: 6px 8px; font: inherit;
 }
 input[type="checkbox"] { width: auto; accent-color: var(--accent); }
+/* Every button has one shape: 32 px tall, 9 px radius, the same weight and
+   padding; `small` is the one compact size (26 px), for dense bars such as the
+   station strip. Variants change colour only, never size (owner, 17 Nov). */
 button {
-  background: var(--raised); color: var(--text); border: 1px solid var(--border); border-radius: 9px;
-  padding: 6px 12px; font: inherit; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 32px; padding: 0 14px; box-sizing: border-box;
+  background: var(--raised); color: var(--text); border: 1px solid var(--border-strong); border-radius: 9px;
+  font: inherit; line-height: 1.2; white-space: nowrap; cursor: pointer;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease, opacity 120ms ease;
 }
+button.small { min-height: 26px; padding: 0 10px; font-size: calc(12px * var(--font-scale)); border-radius: 8px; }
 button:hover:not(:disabled) { border-color: var(--accent); }
+button:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 button:disabled { opacity: 0.55; cursor: default; }
-button.primary { background: var(--accent); color: var(--canvas); border-color: var(--accent); font-weight: 600; }
+button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
 button.quiet { background: transparent; color: var(--text-2); }
+button.quiet:hover:not(:disabled) { color: var(--text); }
 /* Abort is destructive and must not look like Disconnect (docs/04 §5). */
 button.danger { background: transparent; color: var(--danger); border-color: var(--danger); font-weight: 600; }
+@media (prefers-reduced-motion: reduce) { button { transition: none; } }
+
+/* An on/off switch (Switch.vue): a 36x20 track with a sliding knob. Checked
+   is the accent colour; `.warn` (Receive only) uses the warning colour. */
+.switch { display: inline-flex; flex-direction: row; align-items: center; position: relative; cursor: pointer; flex: none; }
+.switch input { position: absolute; opacity: 0; inset: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+.switch .track {
+  width: 36px; height: 20px; border-radius: 999px; box-sizing: border-box; position: relative;
+  background: var(--raised); border: 1px solid var(--border-strong);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+.switch .track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--text-2); box-shadow: 0 1px 2px color-mix(in srgb, var(--canvas) 60%, transparent);
+  transition: transform 160ms cubic-bezier(0.3, 0.7, 0.4, 1.2), background-color 160ms ease;
+}
+.switch input:checked + .track { background: color-mix(in srgb, var(--accent) 35%, var(--raised)); border-color: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(16px); background: var(--accent); }
+.switch.warn input:checked + .track { background: color-mix(in srgb, var(--warning) 35%, var(--raised)); border-color: var(--warning); }
+.switch.warn input:checked + .track::after { background: var(--warning); }
+.switch:hover input:not(:disabled) + .track { border-color: var(--accent); }
+.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
+.switch input:disabled + .track { opacity: 0.5; }
+.switch input:disabled { cursor: default; }
+@media (prefers-reduced-motion: reduce) { .switch .track, .switch .track::after { transition: none; } }
+
+/* A settings row with a switch: the words on the left, the switch lined up on
+   the right; a hint, when there is one, under the words. */
+.switch-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: calc(var(--space) * 2);
+  padding: 8px 0; color: var(--text); font-size: inherit; cursor: pointer;
+}
+.switch-row + .switch-row { border-top: 1px solid var(--border); }
+.switch-row .hint { grid-column: 1; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 .pill {
   display: inline-block; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor;
-  color: var(--text-2); font-family: var(--font-mono); font-size: 12px; white-space: nowrap;
+  color: var(--text-2); font-family: var(--font-mono); font-size: calc(12px * var(--font-scale)); white-space: nowrap;
 }
 .pill.ready, .pill.listening, .pill.connected { color: var(--success); }
 .pill.attaching, .pill.calling, .pill.negotiating, .pill.draining, .pill.recovering { color: var(--warning); }
 .pill.faulted { color: var(--danger); }
-.field-error { color: var(--danger); font-size: 12px; }
+.field-error { color: var(--danger); font-size: calc(12px * var(--font-scale)); }
+
+/* The frequency read-out's seven-segment digits: DSEG7 Classic, bundled
+   (SIL OFL 1.1, assets/fonts/DSEG-LICENSE.txt); never fetched from the web.
+   Without it, a tabular monospace stands in. */
+@font-face {
+  font-family: "DSEG7 Classic";
+  src: url("./assets/fonts/DSEG7Classic-Regular.woff2") format("woff2");
+  font-display: swap;
+}
+.freq-digits {
+  font-family: "DSEG7 Classic", var(--font-mono);
+  font-variant-numeric: tabular-nums; color: var(--freq-display); letter-spacing: 1px;
+}
+
+/* How a station was heard, as a word (never colour alone): CQ, Beacon, Session. */
+.badge {
+  display: inline-block; padding: 0 6px; border-radius: 6px; border: 1px solid currentColor;
+  font-size: calc(10px * var(--font-scale)); font-weight: 700; letter-spacing: 0.4px; line-height: 1.5; white-space: nowrap;
+}
+.badge.cq { color: var(--badge-cq); }
+.badge.beacon { color: var(--badge-beacon); }
+.badge.session { color: var(--badge-session); }
+
+/* Visually hidden but read by screen readers (live regions). */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap; border: 0;
+}
 
 /* Thin scrollbars in the theme's colours, everywhere (WebView2 and WebKitGTK
    both take the -webkit- pseudo-elements; no arrow buttons). */

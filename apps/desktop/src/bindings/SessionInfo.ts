@@ -4,4 +4,12 @@ import type { SessionDirection } from "./SessionDirection";
 /**
  * The negotiated MCH/1 session in progress.
  */
-export type SessionInfo = { peer: string, direction: SessionDirection, sinceUtc: string, peerApp: string | null, };
+export type SessionInfo = { peer: string, direction: SessionDirection, sinceUtc: string, peerApp: string | null, 
+/**
+ * One id per session; a new id is a new session (and a new QSO draft).
+ */
+sessionId: string, 
+/**
+ * The negotiated bandwidth token the modem reported.
+ */
+bandwidth: string, };

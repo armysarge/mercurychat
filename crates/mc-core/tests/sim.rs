@@ -8,8 +8,15 @@ use mc_storage::Store;
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 
+/// The next event other than an activity line (those are covered in
+/// tests/discovery.rs; these tests pin the state and profile sequence).
 async fn next(rx: &mut Receiver<EventEnvelope>) -> EventEnvelope {
-    tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("event within 5 s").unwrap()
+    loop {
+        let env = tokio::time::timeout(Duration::from_secs(5), rx.recv()).await.expect("event within 5 s").unwrap();
+        if !matches!(env.event, AppEvent::Activity { .. }) {
+            return env;
+        }
+    }
 }
 
 async fn sim_app(root: &std::path::Path) -> (AppHandle, String) {
@@ -45,7 +52,10 @@ async fn simulator_profile_reaches_ready() {
     let c = next(&mut rx).await;
     assert_eq!(c.event, AppEvent::ModemState { state: ModemState::Ready, detail: Some("simulator".into()) });
     assert!(a.generation >= 1 && b.generation == a.generation && c.generation == a.generation);
-    assert_eq!(modem(&h).await, ModemState::Ready);
+    // Listening is on by default (D18): it follows Ready at once.
+    let d = next(&mut rx).await;
+    assert_eq!(d.event, AppEvent::ModemState { state: ModemState::Listening, detail: None });
+    assert_eq!(modem(&h).await, ModemState::Listening);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -116,7 +126,7 @@ async fn restart_reattaches_the_selected_simulator() {
         AppOptions { sim_root: Some(dir.path().to_path_buf()), ..AppOptions::default() },
     );
     let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-    while modem(&h).await != ModemState::Ready {
+    while modem(&h).await != ModemState::Listening {
         assert!(tokio::time::Instant::now() < deadline, "the selected simulator was not re-attached on start");
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
@@ -137,9 +147,9 @@ async fn the_snapshot_carries_the_modem_detail() {
     let (h, id) = sim_app(dir.path()).await;
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
-    while !matches!(next(&mut rx).await.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {}
+    while !matches!(next(&mut rx).await.event, AppEvent::ModemState { state: ModemState::Listening, .. }) {}
     let s = snap(&h).await;
-    assert_eq!((s.modem, s.modem_detail.as_deref()), (ModemState::Ready, Some("simulator")));
+    assert_eq!((s.modem, s.modem_detail.as_deref()), (ModemState::Listening, None));
 
     let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions::default());
     let id = match h.call(AppCommand::SaveProfile { profile: StationProfile::new_simulator("ZS6ABC") }).await.unwrap() {
@@ -161,7 +171,7 @@ async fn editing_the_active_profile_reattaches_its_modem() {
     h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
     let ready = loop {
         let e = next(&mut rx).await;
-        if matches!(e.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {
+        if matches!(e.event, AppEvent::ModemState { state: ModemState::Listening, .. }) {
             break e;
         }
     };
@@ -172,7 +182,7 @@ async fn editing_the_active_profile_reattaches_its_modem() {
     loop {
         let e = next(&mut rx).await;
         seen.push(e.event.clone());
-        if matches!(e.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {
+        if matches!(e.event, AppEvent::ModemState { state: ModemState::Listening, .. }) {
             assert!(e.generation > ready.generation, "a re-attach starts a new generation");
             break;
         }

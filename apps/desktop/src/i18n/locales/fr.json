@@ -1,0 +1,647 @@
+{
+  "_status": "machine draft — needs native review",
+  "app": {
+    "alpha": "alpha précoce",
+    "loading": "Chargement…",
+    "utcAria": "Heure UTC",
+    "startFailed": "MercuryChat ne peut pas démarrer",
+    "closeToExit": "Fermez cette fenêtre pour quitter."
+  },
+  "nav": {
+    "label": "Sections",
+    "operate": "Opérer",
+    "conversations": "Discussions",
+    "settings": "Réglages",
+    "diagnostics": "Diagnostic",
+    "logbook": "Carnet de trafic"
+  },
+  "modem": {
+    "unavailable": "indisponible",
+    "attaching": "connexion",
+    "ready": "prêt",
+    "listening": "à l'écoute",
+    "calling": "appel",
+    "negotiating": "négociation",
+    "connected": "connecté",
+    "draining": "fin d'envoi",
+    "recovering": "reprise",
+    "faulted": "en panne"
+  },
+  "mode": {
+    "noStation": "Aucune station",
+    "notAttached": "Non connecté",
+    "attaching": "Connexion au modem",
+    "receiveOnly": "Réception seule",
+    "receiveOnlyPending": "Réception seule — après cette session",
+    "notAnswering": "Appels non pris",
+    "answering": "Appels pris",
+    "calling": "Appel de {peer}",
+    "negotiating": "Négociation avec {peer}",
+    "connected": "Connecté à {peer}",
+    "aborting": "Interruption",
+    "finishing": "Fin de l'envoi en attente",
+    "recovering": "Reprise",
+    "fault": "Panne du modem",
+    "receiveOnlyTitle": "Réception seule : cette station écoute mais ne répond jamais aux appels en émettant. Désactivez-la pour répondre aux appels.",
+    "answeringTitle": "Cette station répond automatiquement aux appels entrants, ce qui signifie émettre. Activez Réception seule pour simplement écouter.",
+    "receiveOnlyPendingTitle": "Réception seule choisie : cette session continue et les appels ne seront plus pris à sa fin. Désactivez pour continuer à répondre."
+  },
+  "where": {
+    "simulator": "Simulateur · sans radio",
+    "mercury": "Mercury {host}:{port}"
+  },
+  "banner": {
+    "recovering": "Reconnexion au modem après une perte de connexion. Rien n'est renvoyé automatiquement.",
+    "fault": "Panne du modem : {detail}. Utilisez de nouveau la station dans Réglages pour réessayer.",
+    "faultUnknown": "inconnue",
+    "aborting": "Interruption en cours. L'émission radio peut continuer un court instant.",
+    "finishing": "Fin de l'envoi en attente, puis déconnexion. Interrompre arrête tout de suite.",
+    "aborted": "Session interrompue : {reason}. Vérifiez les messages marqués incertains.",
+    "callFailed": "Échec de l'appel : {reason}",
+    "dismiss": "Fermer",
+    "otherSession": "Session avec {peer} ({direction}).",
+    "open": "Ouvrir",
+    "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}"
+  },
+  "broadcast": {
+    "notConfirmed": {
+      "broadcastPortSilent": "Le modem n'a pas émis ; un autre programme utilise peut-être le port de diffusion de Mercury."
+    }
+  },
+  "direction": {
+    "outgoing": "Nous avons appelé",
+    "incoming": "Ils ont appelé",
+    "outgoingInline": "nous avons appelé",
+    "incomingInline": "ils ont appelé"
+  },
+  "operate": {
+    "conversationsAria": "Discussions",
+    "conversationAria": "Discussion",
+    "sessionAria": "Session et liaison",
+    "noConversation": "Aucune discussion",
+    "typeCallsign": "Saisissez un indicatif dans Discussions",
+    "unknownApp": "Application inconnue",
+    "subtitle": "{app} · MCH/1 · {direction}",
+    "settingUp": "Établissement de la liaison",
+    "historyOnly": "Hors liaison · historique seulement",
+    "peers": "Contacts",
+    "call": "Appeler",
+    "cancel": "Annuler",
+    "disconnect": "Déconnecter",
+    "abort": "Interrompre (livraison incertaine)",
+    "session": "Session",
+    "progressAria": "Progression de la connexion",
+    "steps": {
+      "calling": "Appel",
+      "negotiating": "Négociation",
+      "connected": "Connecté"
+    },
+    "otherSession": "Session avec {peer} en cours."
+  },
+  "composer": {
+    "placeholder": "Message à {peer}",
+    "openFirst": "Ouvrez d'abord une discussion",
+    "aria": "Message",
+    "bytes": "{used} / {max} octets",
+    "hint": "Ctrl+Entrée envoie · Entrée ajoute une ligne",
+    "send": "Envoyer",
+    "tooLong": "Un message ne peut pas dépasser {max} octets."
+  },
+  "conversations": {
+    "title": "Discussions",
+    "history": "Historique",
+    "callsign": "Indicatif",
+    "callsignExample": "p. ex. ZS1ABC",
+    "searchAria": "Rechercher dans les discussions",
+    "searchPlaceholder": "Chercher indicatifs et messages",
+    "listAria": "Discussions",
+    "onLink": "en liaison",
+    "newCount": "{n} nouveau | {n} nouveaux",
+    "messageCount": "{n} message | {n} messages",
+    "uncertain": "{n} incertain | {n} incertains",
+    "draft": "brouillon",
+    "noMatch": "Aucun indicatif ne correspond.",
+    "none": "Aucune discussion pour l'instant. Saisissez un indicatif pour en commencer une.",
+    "note": "Les stations entendues sur l'air sont dans l'onglet Entendues. Une discussion ici ne veut pas dire que la station est joignable maintenant.",
+    "historySearchAria": "Rechercher dans cet historique (Ctrl+F)",
+    "historySearchPlaceholder": "Rechercher dans l'historique (Ctrl+F)",
+    "hitsAria": "Messages correspondants",
+    "hitsTitle": "{n} message trouvé | {n} messages trouvés"
+  },
+  "transcript": {
+    "loadOlder": "Charger les messages plus anciens",
+    "noneOpen": "Aucune discussion ouverte.",
+    "nothingMatches": "Aucun résultat.",
+    "noMessages": "Aucun message avec {peer} pour l'instant.",
+    "messagesAria": "Messages",
+    "you": "Vous",
+    "retry": "Réessayer",
+    "whyUncertain": "Pourquoi incertain ?",
+    "whyBody": "La liaison s'est interrompue après que ce message a atteint le modem et avant que l'application distante ne le confirme. Il est peut-être arrivé, peut-être pas. Réessayer le renvoie avec le même identifiant ; s'il est déjà arrivé, l'autre station n'en garde qu'un exemplaire.",
+    "status": {
+      "queued": "En attente",
+      "submitting": "Envoi au modem",
+      "awaiting_receipt": "Accusé de réception attendu",
+      "delivered": "Remis à l'application distante",
+      "failed": "Échec",
+      "uncertain": "Livraison incertaine",
+      "received": "Reçu"
+    },
+    "sys": {
+      "seconds": "{n} s",
+      "minutes": "{m} min {s} s",
+      "freq": "{mhz} MHz ({source})",
+      "freqNone": "Fréquence indisponible",
+      "bytes": "{n} octet | {n} octets",
+      "sessionEnd": "Session terminée · {freq} · {duration} · {bytes}",
+      "cq": "CQ émis {time} UTC",
+      "beacon": "Balise émise {time} UTC"
+    }
+  },
+  "session": {
+    "incomingCalls": "Appels entrants",
+    "receiveOnlyNote": "Réception seule : les appels entrants ne sont pas pris.",
+    "answeredAuto": "Appels entrants pris automatiquement",
+    "notAnswering": "Les appels ne sont pas pris pour le moment.",
+    "title": "Session",
+    "peer": "Correspondant",
+    "direction": "Sens",
+    "application": "Application",
+    "unknownApp": "inconnue",
+    "since": "Depuis",
+    "none": "Aucune session.",
+    "queuedFor": "En attente pour {peer}",
+    "bytesShort": "{n} o",
+    "link": "Liaison",
+    "modem": "Modem",
+    "state": "État",
+    "simulator": "Simulateur (sans radio)",
+    "mercuryAt": "Mercury à {host}:{port}",
+    "chooseStation": "Choisissez une station dans Réglages."
+  },
+  "window": {
+    "minimise": "Réduire",
+    "maximise": "Agrandir",
+    "restore": "Restaurer",
+    "close": "Fermer"
+  },
+  "welcome": {
+    "title": "Configurez votre station",
+    "intro": "Choisissez comment MercuryChat se connecte à un modem. Vous pourrez ajouter d'autres stations plus tard dans Réglages.",
+    "answersAuto": "Une fois le modem connecté, cette station répond automatiquement aux appels entrants, et répondre signifie émettre.",
+    "startReceiveOnly": "Démarrer en Réception seule",
+    "startReceiveOnlyNote": "Réception seule écoute sans jamais répondre. Vous pouvez la changer à tout moment depuis l'en-tête."
+  },
+  "profile": {
+    "simulatorTitle": "Simulateur",
+    "simulatorBody": "Un Mercury simulé dans cette application, avec une station SIM1 qui répond et renvoie vos messages. Sans radio, sans audio.",
+    "callsign": "Votre indicatif",
+    "useSimulator": "Utiliser le simulateur",
+    "existingTitle": "Mercury existant",
+    "existingBody": "Un modem Mercury déjà lancé, sur cet ordinateur ou un autre que vous indiquez. MercuryChat se connecte à ses ports de contrôle et de données ; il répond aux appels entrants sauf si vous activez Réception seule.",
+    "host": "Hôte",
+    "controlPort": "Port de contrôle",
+    "dataPort": "Port de données",
+    "useExisting": "Utiliser ce Mercury",
+    "unexpectedReply": "Réponse inattendue : {type}"
+  },
+  "settings": {
+    "title": "Réglages",
+    "stationProfiles": "Profils de station",
+    "inUse": "utilisé",
+    "noProfile": "Aucun profil de station pour l'instant.",
+    "simulator": "simulateur",
+    "deleteQuestion": "Supprimer {callsign} ?",
+    "deleteInUse": "Il est utilisé : toute session s'arrête aussitôt.",
+    "deleteKeeps": "Son historique de messages reste sur cet ordinateur mais n'est plus affiché.",
+    "deleteConfirm": "Supprimer {callsign}",
+    "deleteAria": "Supprimer {callsign}",
+    "delete": "Supprimer",
+    "cancel": "Annuler",
+    "stopUsing": "Ne plus utiliser",
+    "use": "Utiliser",
+    "addStation": "Ajouter une station"
+  },
+  "appearance": {
+    "title": "Apparence",
+    "language": "Langue",
+    "hint": "La langue de l'application. Par défaut du système suit la langue de votre ordinateur.",
+    "system": "Par défaut du système",
+    "draft": "(brouillon)",
+    "saveFailed": "Impossible d'enregistrer la langue"
+  },
+  "theme": {
+    "title": "Thème",
+    "pickerAria": "Thème",
+    "system": "Système",
+    "systemHint": "Suit le mode clair ou sombre de votre ordinateur.",
+    "saveFailed": "Impossible d'enregistrer le thème",
+    "name": {
+      "midnight": "Minuit",
+      "daylight": "Lumière du jour",
+      "night-red": "Rouge nocturne",
+      "high-contrast-dark": "Contraste élevé (sombre)",
+      "high-contrast-light": "Contraste élevé (clair)",
+      "ocean": "Océan",
+      "slate": "Ardoise",
+      "amber-terminal": "Terminal ambre"
+    },
+    "density": {
+      "label": "Densité",
+      "normal": "Normale",
+      "compact": "Compacte"
+    },
+    "fontScale": {
+      "label": "Taille du texte",
+      "value": "{percent} %",
+      "reset": "Réinitialiser"
+    },
+    "custom": {
+      "create": "Personnaliser ce thème",
+      "edit": "Modifier votre thème",
+      "delete": "Supprimer",
+      "deleteConfirm": "Supprimer {name}",
+      "editing": "Personnalisation (à partir de {base})",
+      "name": "Nom du thème",
+      "more": "Plus de couleurs",
+      "save": "Enregistrer le thème",
+      "tooMany": "Vous avez atteint le nombre maximal de thèmes personnalisés. Supprimez-en un d'abord."
+    },
+    "token": {
+      "canvas": "Arrière-plan",
+      "surface": "Panneaux",
+      "raised": "Panneaux surélevés",
+      "text": "Texte",
+      "text-2": "Texte secondaire",
+      "accent": "Accent",
+      "accent-text": "Texte sur l'accent",
+      "success": "Succès",
+      "warning": "Avertissement",
+      "danger": "Erreur",
+      "border": "Lignes de séparation",
+      "border-strong": "Bordures des contrôles",
+      "focus": "Anneau de focus",
+      "bubble-in": "Message reçu",
+      "bubble-out": "Message envoyé",
+      "badge-beacon": "Pastille balise",
+      "badge-cq": "Pastille CQ",
+      "badge-session": "Pastille session",
+      "waterfall-low": "Cascade, discrète",
+      "waterfall-high": "Cascade, forte",
+      "freq-display": "Afficheur de fréquence"
+    },
+    "contrast": {
+      "ok": "Respecte le contraste WCAG AA : le texte se lit facilement.",
+      "warn": "{count} paires de couleurs sont trop pâles pour une lecture confortable (sous WCAG AA).",
+      "autoFix": "Corriger automatiquement",
+      "fixed": "{count} couleurs ajustées pour que le thème soit conforme.",
+      "cannotFix": "Correction incomplète. Essayez aussi de changer les couleurs de fond."
+    },
+    "file": {
+      "title": "Partager un fichier de thème",
+      "hint": "Exporter copie le thème sélectionné sous forme d'un petit fichier texte à garder ou à partager. Pour importer, collez-le ici ou choisissez un fichier.",
+      "export": "Exporter",
+      "import": "Importer",
+      "choose": "Choisir un fichier…",
+      "exported": "Exporté dans la zone ci-dessus.",
+      "exportedCopied": "Exporté dans la zone ci-dessus et copié.",
+      "imported": "« {name} » importé.",
+      "tooLarge": "Ce fichier est trop volumineux pour être un thème.",
+      "notJson": "Ce fichier de thème est illisible.",
+      "notTheme": "Ce fichier n'est pas un thème MercuryChat.",
+      "version": "Ce fichier de thème vient d'une version que l'application ne comprend pas.",
+      "badColour": "La couleur de « {token} » n'est pas valide."
+    }
+  },
+  "diag": {
+    "title": "Diagnostic",
+    "loading": "Chargement…",
+    "buildTitle": "Version et stockage",
+    "app": "Application",
+    "protocol": "Protocole",
+    "platform": "Plateforme",
+    "sqlite": "SQLite",
+    "schema": "schéma v{n}",
+    "data": "Données",
+    "locks": "Verrous",
+    "coreReady": "Cœur prêt",
+    "afterLaunch": "{ms} ms après le lancement",
+    "probeTitle": "Sonde du modem (lecture seule)",
+    "probeBody": "Se connecte au contrôle et aux données, demande VERSION et BUFFER, lit 3 s de lignes d'état, puis se déconnecte. Ne modifie aucun réglage du modem. Seulement cet ordinateur ou un modem nommé dans un profil de station.",
+    "host": "Hôte",
+    "controlPort": "Port de contrôle",
+    "probe": "Sonder",
+    "probing": "Sondage…",
+    "perfTitle": "Réactivité",
+    "measure": "Mesurer l'aller-retour IPC (50×)",
+    "latency": "p50 {p50} ms · p95 {p95} ms · max {max} ms"
+  },
+  "errors": {
+    "validation": "Certains champs demandent votre attention.",
+    "busy": "L'application est occupée. Réessayez dans un instant.",
+    "notFound": "Rien trouvé avec l'identifiant {id}.",
+    "storage": "La base de données locale a signalé un problème : {message}",
+    "internal": "Un problème est survenu dans l'application : {message}",
+    "conflict": "Impossible pour le moment : {message}"
+  },
+  "splash": {
+    "opening": "Ouverture des données de la station…",
+    "modem": "Démarrage du modem…",
+    "close": "Fermer",
+    "progressAria": "Démarrage de MercuryChat",
+    "timedOut": "Le démarrage prend trop de temps. Fermez cette fenêtre et réessayez."
+  },
+  "menu": {
+    "cut": "Couper",
+    "copy": "Copier",
+    "paste": "Coller",
+    "selectAll": "Tout sélectionner",
+    "label": "Modifier"
+  },
+  "sidebar": {
+    "label": "Discussions et stations entendues",
+    "chats": "Discussions",
+    "heard": "Entendues",
+    "heardEmpty": "Aucune station entendue pour l'instant. Les stations entendues sur l'air apparaîtront ici.",
+    "toggle": "Discussions",
+    "close": "Fermer",
+    "heardNew": "{n} station entendue depuis la dernière fois | {n} stations entendues depuis la dernière fois"
+  },
+  "heard": {
+    "searchAria": "Rechercher les stations entendues",
+    "searchPlaceholder": "Rechercher indicatif ou locator",
+    "filterAria": "Afficher les stations entendues par",
+    "filter": {
+      "all": "Toutes",
+      "cq": "CQ",
+      "beacon": "Balise",
+      "session": "Session",
+      "favourite": "Favorites"
+    },
+    "listAria": "Stations entendues",
+    "source": {
+      "cq": "CQ",
+      "beacon": "Balise",
+      "session": "Session"
+    },
+    "age": {
+      "s": "il y a {n} s",
+      "min": "il y a {n} min",
+      "h": "il y a {n} h",
+      "d": "il y a {n} j"
+    },
+    "notHeard": "pas entendue récemment",
+    "gridTitle": "Locator envoyé par la station",
+    "snr": "{db} dB",
+    "mhz": "{mhz} MHz",
+    "offset": "écart de {hz} Hz",
+    "count": "entendue {n} fois | entendue {n} fois",
+    "from": "{source}, {at}",
+    "fromAged": "{source}, {at}, il y a {age} s",
+    "star": "Ajouter {callsign} aux favoris",
+    "unstar": "Retirer {callsign} des favoris",
+    "noMatch": "Aucune station entendue ne correspond.",
+    "notReachable": "Entendue ne veut pas dire joignable : une station entendue ici peut ne pas répondre à un appel.",
+    "announce": "{callsign} entendue : {source}"
+  },
+  "beacon": {
+    "title": "Balises",
+    "periodic": "Envoyer des balises périodiques",
+    "prompt": "Les balises étaient actives la dernière fois ; les réactiver ?",
+    "interval": "Toutes les",
+    "minutes": "{n} min",
+    "jitter": "variation ±15 %",
+    "includeGrid": "Inclure mon locator",
+    "noGrid": "Cette station n'a pas de locator, les balises n'en portent donc pas.",
+    "next": "Prochaine balise",
+    "off": "Balises désactivées",
+    "suppressed": "suspendues : {reason}",
+    "channelLabel": "Canal",
+    "channel": {
+      "unknown": "Occupation du canal inconnue",
+      "clear": "Libre",
+      "busy": "Occupé"
+    }
+  },
+  "telemetry": {
+    "title": "Télémesure",
+    "linkLabel": "Liaison de télémesure",
+    "link": {
+      "unconfigured": "Non configurée",
+      "connecting": "Connexion",
+      "up": "Active",
+      "lost": "Perdue"
+    },
+    "lostInSession": "La télémesure est perdue ; le chat continue sans elle.",
+    "snr": "SNR",
+    "mode": "Mode TX / RX",
+    "txRx": "{tx} / {rx}",
+    "queued": "En file dans le modem",
+    "throughput": "Débit",
+    "throughputTitle": "Octets confirmés par l'autre station dans cette session, par seconde",
+    "bps": "{n} o/s",
+    "audio": "Audio",
+    "audioOk": "Correct",
+    "audioFault": "Défaut",
+    "frequency": "Fréquence",
+    "mhz": "{mhz} MHz",
+    "ageS": "il y a {s} s",
+    "unavailable": "indisponible"
+  },
+  "activity": {
+    "title": "Activité",
+    "count": "{n} ligne | {n} lignes",
+    "listAria": "Activité, la plus récente en premier",
+    "empty": "Rien pour l'instant."
+  },
+  "strip": {
+    "aria": "Station",
+    "collapse": "Replier la barre de station",
+    "expand": "Déplier la barre de station",
+    "freqAria": "{mhz} MHz",
+    "freqNone": "Fréquence indisponible",
+    "noBand": "bande inconnue",
+    "noMode": "mode inconnu",
+    "profile": "Station",
+    "cq": "Appel CQ",
+    "beaconNow": "Balise maintenant",
+    "idleOnly": "Le CQ et les balises ne partent que lorsque le modem est inactif",
+    "cqOutcome": "CQ : {what}",
+    "beaconOutcome": "Balise : {what}",
+    "nextBeacon": "Prochaine balise {time}",
+    "outcome": {
+      "submitted": "remis au modem",
+      "transmitted": "émis",
+      "notConfirmed": "non confirmé",
+      "refused": "non envoyé : {reason}"
+    },
+    "spectrum": "Spectre",
+    "telemetryUnavailable": "télémesure indisponible"
+  },
+  "qso": {
+    "title": "Fiche du QSO",
+    "state": {
+      "draft": "Brouillon",
+      "final": "Final"
+    },
+    "peer": "Station",
+    "bandwidth": "Bande passante",
+    "bandwidthUnknown": "inconnue",
+    "start": "Début",
+    "rstSent": "RST envoyé",
+    "rstRcvd": "RST reçu",
+    "name": "Nom",
+    "qth": "QTH",
+    "myPower": "Ma puissance",
+    "freqMhz": "Fréquence (MHz)",
+    "notes": "Notes",
+    "save": "Enregistrer la fiche",
+    "finalise": "Finaliser",
+    "saved": "Enregistré",
+    "finalNote": "Finalisée : cette fiche ne peut plus être modifiée.",
+    "freqNone": "Fréquence indisponible",
+    "freqInvalid": "Saisissez la fréquence en MHz, par exemple 7.105"
+  },
+  "logbook": {
+    "title": "Carnet de trafic",
+    "intro": "La fiche de chaque session. Les brouillons restent modifiables jusqu'à leur finalisation.",
+    "empty": "Aucune fiche pour l'instant. Une fiche commence quand une session est établie.",
+    "open": "Ouvrir la fiche avec {peer}",
+    "editAria": "Fiche avec {peer}",
+    "editTitle": "{peer}, {start} UTC",
+    "col": {
+      "start": "Début (UTC)",
+      "peer": "Station",
+      "band": "Bande",
+      "freq": "MHz",
+      "bandwidth": "BP",
+      "rstSent": "Env.",
+      "rstRcvd": "Reçu",
+      "state": "État"
+    },
+    "finaliseOnDisconnect": "Finaliser la fiche d'une session à sa fin",
+    "finaliseNote": "Désactivé : les fiches restent des brouillons jusqu'à ce que vous les finalisiez."
+  },
+  "macros": {
+    "button": "Macros",
+    "menuAria": "Insérer une macro",
+    "none": "Aucune macro.",
+    "noEmail": "Cette station n'a pas d'adresse e-mail",
+    "insertEmail": "Insérer l'e-mail",
+    "insertedBytes": "{n} octet inséré. | {n} octets insérés.",
+    "missing": "Aucune valeur pour {tags} : complétez-les dans Réglages, Informations de la station.",
+    "title": "Macros",
+    "intro": "Du texte inséré depuis le menu Macros de la zone de saisie. Ces balises sont remplies pour vous :",
+    "edit": "Modifier",
+    "editAria": "Modifier {name}",
+    "delete": "Supprimer",
+    "deleteAria": "Supprimer {name}",
+    "deleteConfirm": "Supprimer {name}",
+    "name": "Nom",
+    "body": "Texte",
+    "save": "Enregistrer la macro",
+    "add": "Ajouter une macro"
+  },
+  "stationInfo": {
+    "title": "Informations de la station {callsign}",
+    "intro": "Les macros insèrent ces données dans vos brouillons. Rien ici n'est envoyé tout seul.",
+    "name": "Votre nom",
+    "grid": "Locator",
+    "qth": "QTH",
+    "rig": "Équipement",
+    "power": "Puissance",
+    "antenna": "Antenne",
+    "email": "E-mail",
+    "about": "À propos de la station",
+    "emailNote": "Votre e-mail n'entre dans un brouillon que si vous choisissez Insérer l'e-mail dans le menu Macros.",
+    "save": "Enregistrer les informations de la station",
+    "saved": "Enregistré"
+  },
+  "about": {
+    "title": "À propos",
+    "founded": "Fondé par ZS6SHZ",
+    "licence": "Logiciel libre sous la licence publique générale GNU, version 3 ou ultérieure (GPL-3.0-or-later).",
+    "link": {
+      "project": "Page du projet",
+      "changelog": "Journal des modifications",
+      "issues": "Signaler un problème",
+      "releases": "Rechercher des mises à jour"
+    },
+    "updatesNote": "Rechercher des mises à jour ouvre la page des versions dans votre navigateur. MercuryChat ne consulte jamais internet de lui-même.",
+    "credits": "Construit avec",
+    "credit": {
+      "mercury": "Mercury, le modem HF, par Rhizomatica (GPL-3.0-or-later)",
+      "hamlib": "Hamlib, contrôle radio (LGPL-2.1-or-later)",
+      "dseg": "Police DSEG7 Classic par keshikan (SIL Open Font License 1.1)"
+    },
+    "openFailed": "Le navigateur n'a pas pu être ouvert : {reason}"
+  },
+  "waterfall": {
+    "show": "Afficher",
+    "hide": "Masquer",
+    "closed": "Le spectre et la cascade sont masqués.",
+    "unavailable": "Spectre indisponible : télémétrie {link}.",
+    "spectrumAria": "Spectre : niveau du signal selon la fréquence audio",
+    "waterfallAria": "Cascade : le spectre dans le temps, le plus récent en haut",
+    "spectrumAxis": "dB selon les Hz audio",
+    "waterfallAxis": "Hz audio, le plus récent en haut"
+  },
+  "notifySettings": {
+    "title": "Notifications",
+    "enabled": "Afficher des notifications sur le bureau",
+    "kindsLegend": "Me prévenir de",
+    "kind": {
+      "message": "Nouveaux messages, sauf si cette conversation est ouverte devant vous",
+      "incoming": "Appels et sessions entrants",
+      "callFailed": "Un appel qui n'a pas abouti",
+      "delivery": "Un message à la remise incertaine ou en échec",
+      "heardFavourite": "Une station favorite entendue",
+      "heardAny": "Toute station nouvellement entendue (CQ ou balise)",
+      "fault": "Pannes et reprise du modem (aussi pendant les heures calmes)",
+      "beaconRefused": "Une balise non envoyée"
+    },
+    "howLegend": "Comment",
+    "sound": "Jouer le son de notification du système",
+    "hideText": "Masquer le texte des messages dans les notifications",
+    "quiet": "Heures calmes (les pannes s'affichent quand même)",
+    "quietFrom": "De",
+    "quietTo": "À",
+    "lab": "Aussi pour les stations du laboratoire audio virtuel",
+    "note": "Votre système d'exploitation demande une fois, quand vous activez une notification. Les sons ne vont jamais vers les périphériques audio de la radio.",
+    "denied": "Le système d'exploitation n'autorise pas les notifications de MercuryChat ; autorisez-les dans ses réglages."
+  },
+  "notify": {
+    "message": {
+      "title": "Nouveau message de {callsign}",
+      "body": "{text}",
+      "more": "{n} autre nouveau message | {n} autres nouveaux messages"
+    },
+    "incoming": {
+      "title": "{callsign} appelle",
+      "more": "{n} autre appel entrant | {n} autres appels entrants"
+    },
+    "callFailed": {
+      "title": "L'appel vers {callsign} n'a pas abouti",
+      "more": "{n} autre appel n'a pas abouti | {n} autres appels n'ont pas abouti"
+    },
+    "delivery": {
+      "uncertain": "Un message pour {callsign} n'est peut-être pas arrivé",
+      "failed": "Un message pour {callsign} n'a pas été remis",
+      "more": "{n} autre message demande attention | {n} autres messages demandent attention"
+    },
+    "heard": {
+      "title": "{callsign} entendue : {source}",
+      "more": "{n} autre station entendue | {n} autres stations entendues"
+    },
+    "fault": {
+      "faulted": "Le modem est en panne",
+      "recovering": "La connexion au modem est perdue ; reconnexion",
+      "more": "{n} autre alerte du modem | {n} autres alertes du modem"
+    },
+    "beaconRefused": {
+      "title": "Une balise n'a pas été envoyée",
+      "more": "{n} autre balise non envoyée | {n} autres balises non envoyées"
+    },
+    "reason": "{reason}"
+  }
+}

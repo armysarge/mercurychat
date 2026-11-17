@@ -92,7 +92,7 @@ async fn ready_with(
     };
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
-    until(&mut rx, ModemState::Ready, 15).await;
+    until(&mut rx, ModemState::Listening, 15).await;
     (h, rx, id)
 }
 
@@ -180,7 +180,7 @@ async fn cancel_call_returns_to_ready() {
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert_eq!(snapshot(&h).await.modem, ModemState::Calling, "still calling while nobody answers");
     assert_eq!(h.call(AppCommand::CancelCall).await.unwrap(), CommandOk::Done);
-    assert_eq!(states_until(&mut rx, ModemState::Ready, 10).await, [ModemState::Ready]);
+    assert_eq!(states_until(&mut rx, ModemState::Listening, 10).await, [ModemState::Listening]);
     assert!(net.log().iter().any(|l| l == "A> ABORT"), "the call attempt was stopped at the modem");
     assert_eq!(snapshot(&h).await.session, None);
 }
@@ -194,14 +194,14 @@ async fn disconnect_drains_then_ready() {
     assert_eq!(h.call(AppCommand::Disconnect).await.unwrap(), CommandOk::Done);
     let mut ended = false;
     let mut states = Vec::new();
-    while states.last() != Some(&ModemState::Ready) || !ended {
+    while states.last() != Some(&ModemState::Listening) || !ended {
         match next(&mut rx, 15).await {
             AppEvent::ModemState { state, .. } => states.push(state),
             AppEvent::Session { session: None } => ended = true,
             _ => {}
         }
     }
-    assert_eq!(states, [ModemState::Draining, ModemState::Ready]);
+    assert_eq!(states, [ModemState::Draining, ModemState::Listening]);
     assert_eq!(snapshot(&h).await.session, None);
 }
 
@@ -213,22 +213,20 @@ async fn abort_marks_in_flight_uncertain() {
     until(&mut rx, ModemState::Connected, 15).await;
     let wire = in_flight(dir.path(), &id, "SIM1");
     assert_eq!(h.call(AppCommand::Abort).await.unwrap(), CommandOk::Done);
-    let detail = until(&mut rx, ModemState::Ready, 30).await.unwrap_or_default();
+    let detail = until(&mut rx, ModemState::Listening, 30).await.unwrap_or_default();
     assert!(detail.contains("uncertain"), "{detail}");
     assert!(!detail.to_lowercase().contains("ptt"), "no label may claim the transmitter state: {detail}");
     assert_eq!(out_state(dir.path(), &id, "SIM1", &wire), Some(OutState::Uncertain));
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn control_loss_recovers_unarmed() {
+async fn control_loss_recovers_and_resumes_listening() {
     let dir = tempfile::tempdir().unwrap();
     let net: Arc<FakeNet> = FakeNet::start().await;
     let mut peer = peer_station(&net, &dir.path().join("peer")).await;
     let (h, mut rx, id) = ready(dir.path(), existing(net.a_base)).await;
-    h.call(AppCommand::SetListen { on: true }).await.unwrap();
-    until(&mut rx, ModemState::Listening, 5).await;
 
-    // SIM1 calls us; we answer because listening is armed.
+    // SIM1 calls us; we answer because we are listening.
     let peer_task = tokio::spawn(async move {
         let info = peer.call(&Callsign::parse("ZS6ABC").unwrap(), Duration::from_secs(10)).await.unwrap();
         let (_cmd_tx, mut cmd_rx) = mpsc::channel(8);
@@ -238,18 +236,28 @@ async fn control_loss_recovers_unarmed() {
     });
     let states = states_until(&mut rx, ModemState::Connected, 15).await;
     assert_eq!(states, [ModemState::Negotiating, ModemState::Connected]);
-    let s = snapshot(&h).await.session.expect("a session");
+    // The session is reported just after the Connected state (as in listen.rs).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let s = loop {
+        if let Some(s) = snapshot(&h).await.session {
+            break s;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no session after Connected");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     assert_eq!((s.peer.as_str(), s.direction), ("SIM1", SessionDirection::Incoming));
 
     let wire = in_flight(dir.path(), &id, "SIM1");
     let listen_ons = net.log().iter().filter(|l| *l == "A> LISTEN ON").count();
     net.kill_client(0); // Mercury closes our sockets mid-session
     until(&mut rx, ModemState::Recovering, 10).await;
-    let detail = until(&mut rx, ModemState::Ready, 60).await;
-    assert_eq!(detail.as_deref(), Some("listening is off until you turn it on"));
-    assert_eq!(snapshot(&h).await.modem, ModemState::Ready, "recovery never re-arms listening");
-    tokio::time::sleep(Duration::from_millis(500)).await;
-    assert_eq!(net.log().iter().filter(|l| *l == "A> LISTEN ON").count(), listen_ons, "LISTEN ON after recovery");
+    until(&mut rx, ModemState::Listening, 60).await;
+    assert_eq!(snapshot(&h).await.modem, ModemState::Listening, "recovery resumes listening (D18)");
+    assert_eq!(
+        net.log().iter().filter(|l| *l == "A> LISTEN ON").count(),
+        listen_ons + 1,
+        "one LISTEN ON after recovery"
+    );
     assert_eq!(out_state(dir.path(), &id, "SIM1", &wire), Some(OutState::Uncertain));
     assert_eq!(snapshot(&h).await.session, None);
     peer_task.abort();
@@ -274,14 +282,14 @@ async fn reselect_while_recovering_hands_over() {
     };
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
-    until(&mut rx, ModemState::Ready, 15).await;
+    until(&mut rx, ModemState::Listening, 15).await;
 
     net.kill_client(0); // idle: recovery waits ~20 s for a teardown frame that never keys
     until(&mut rx, ModemState::Recovering, 10).await;
     h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
-    until(&mut rx, ModemState::Ready, 15).await;
-    assert_eq!(snapshot(&h).await.modem, ModemState::Ready);
+    until(&mut rx, ModemState::Listening, 15).await;
+    assert_eq!(snapshot(&h).await.modem, ModemState::Listening);
 }
 
 /// Deterministic form of the above: a task stopped while calling ends the call
@@ -303,13 +311,13 @@ async fn reselect_while_a_call_is_cancelled_hands_over() {
     };
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
-    until(&mut rx, ModemState::Ready, 15).await;
+    until(&mut rx, ModemState::Listening, 15).await;
     call(&h, "SIM1").await.unwrap();
     until(&mut rx, ModemState::Calling, 5).await;
 
     h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
-    until(&mut rx, ModemState::Ready, 15).await;
+    until(&mut rx, ModemState::Listening, 15).await;
     assert!(net.log().iter().any(|l| l == "A> ABORT"), "the stopped task ended the call at the modem");
 }
 
@@ -349,7 +357,7 @@ async fn invalid_peer_is_validation() {
             other => panic!("{bad:?}: expected Validation, got {other:?}"),
         }
     }
-    assert_eq!(snapshot(&h).await.modem, ModemState::Ready);
+    assert_eq!(snapshot(&h).await.modem, ModemState::Listening);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -375,7 +383,7 @@ async fn non_mercurychat_peer_is_explained() {
     };
     assert_eq!(peer, "SIM1");
     assert_eq!(reason, "the station answered but is not running MercuryChat (no HELLO)");
-    until(&mut rx, ModemState::Ready, 15).await;
+    until(&mut rx, ModemState::Listening, 15).await;
     assert_eq!(snapshot(&h).await.session, None);
     assert!(Store::open(&station_db(dir.path(), &id)).unwrap().conversations().unwrap().is_empty());
     assert!(!net.session_up(), "the link was taken down");

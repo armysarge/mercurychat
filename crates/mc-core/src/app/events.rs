@@ -3,7 +3,12 @@
 //! to. A bounded ring keeps the recent ones; a client asking for events older
 //! than the ring holds is told to take a snapshot, never handed a gap.
 
+use super::beacon::BeaconStatus;
+use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
+use super::discovery::{ActivityEntry, HeardStation};
+use super::logbook::Qso;
+use super::telemetry::TelemetryView;
 use serde::Serialize;
 use std::collections::VecDeque;
 use ts_rs::TS;
@@ -42,6 +47,10 @@ pub struct SessionInfo {
     pub direction: SessionDirection,
     pub since_utc: String,
     pub peer_app: Option<String>,
+    /// One id per session; a new id is a new session (and a new QSO draft).
+    pub session_id: String,
+    /// The negotiated bandwidth token the modem reported.
+    pub bandwidth: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -66,12 +75,50 @@ pub enum AppEvent {
         message: ChatMessage,
     },
     ProfilesChanged,
+    /// Receive only (D18) as the snapshot shows it changed: the active
+    /// profile's choice, and whether it waits for a call or a session to
+    /// end before the modem stops answering calls (lab F2).
+    ReceiveOnly {
+        on: bool,
+        pending: bool,
+    },
     ActiveProfileChanged {
         id: Option<String>,
     },
     Fault {
         code: String,
         message: String,
+    },
+    /// A station was heard, or its favourite mark changed (DSC-01).
+    Heard {
+        station: HeardStation,
+    },
+    /// New details for an observation that was already reported.
+    HeardUpdated {
+        station: HeardStation,
+    },
+    /// A line was added to the activity log.
+    Activity {
+        entry: ActivityEntry,
+    },
+    /// What became of a CQ or beacon: submitted, transmitted, not confirmed
+    /// or refused. Never delivered (DSC-02).
+    Broadcast {
+        kind: BroadcastKind,
+        outcome: BroadcastOutcome,
+    },
+    /// The beacon schedule, its suppression or the channel state changed.
+    Beacon {
+        status: BeaconStatus,
+    },
+    /// The telemetry view changed (OBS-01); at most 2 a second, and the
+    /// snapshot always has the latest.
+    Telemetry {
+        telemetry: TelemetryView,
+    },
+    /// A QSO record was drafted, edited, ended or finalised.
+    Qso {
+        qso: Qso,
     },
 }
 

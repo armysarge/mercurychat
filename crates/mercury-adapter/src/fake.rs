@@ -19,6 +19,21 @@ struct Station {
     listen: bool,
     ctrl_tx: Option<mpsc::UnboundedSender<String>>,
     data_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    bcast_tx: Option<mpsc::UnboundedSender<Vec<u8>>>,
+    /// Listen mode set by `MODE n` (None: Mercury's default, 1).
+    mode: Option<u8>,
+    monitor: bool,
+    mode_wrong: bool,
+    /// Answer `LISTEN ON` with WRONG (fault injection).
+    listen_wrong: bool,
+    /// Answer `LISTEN OFF` with WRONG (fault injection); the setting stays.
+    listen_off_wrong: bool,
+}
+
+impl Station {
+    fn listen_mode(&self) -> u8 {
+        self.mode.unwrap_or(1)
+    }
 }
 
 #[derive(Default)]
@@ -30,15 +45,22 @@ struct Shared {
     hold_from: [bool; 2],
     /// A CONNECT nobody answers stays pending (Mercury keeps retrying).
     unanswered_calls: bool,
+    /// DISCONNECT is acknowledged but the link stays up until `drop_link`.
+    hold_disconnect: bool,
     held: Vec<(usize, Vec<u8>)>,
     /// Bytes delivered to the far data socket, per direction (0: A->B, 1: B->A).
     delivered: [u64; 2],
     log: Vec<String>,
+    /// Broadcasts put on the air, as (sender, payload after truncation).
+    bcast_log: Vec<(usize, Vec<u8>)>,
 }
 
 pub struct FakeNet {
     pub a_base: u16,
     pub b_base: u16,
+    /// Broadcast (KISS) ports, one client each, as Mercury.
+    pub a_bcast: u16,
+    pub b_bcast: u16,
     shared: Arc<Mutex<Shared>>,
     kick: [Arc<Notify>; 2],
     connect_delay: Duration,
@@ -62,9 +84,13 @@ impl FakeNet {
     pub async fn start() -> Arc<FakeNet> {
         let (ac, ad, a_base) = bind_pair().await;
         let (bc, bd, b_base) = bind_pair().await;
+        let (a_bl, b_bl) =
+            (TcpListener::bind(("127.0.0.1", 0)).await.unwrap(), TcpListener::bind(("127.0.0.1", 0)).await.unwrap());
         let net = Arc::new(FakeNet {
             a_base,
             b_base,
+            a_bcast: a_bl.local_addr().unwrap().port(),
+            b_bcast: b_bl.local_addr().unwrap().port(),
             shared: Arc::default(),
             kick: [Arc::new(Notify::new()), Arc::new(Notify::new())],
             connect_delay: Duration::from_millis(50),
@@ -73,6 +99,8 @@ impl FakeNet {
             tokio::spawn(control_accept(net.clone(), i, c));
             tokio::spawn(data_accept(net.clone(), i, d));
         }
+        tokio::spawn(bcast_accept(net.clone(), 0, a_bl));
+        tokio::spawn(bcast_accept(net.clone(), 1, b_bl));
         net
     }
 
@@ -119,6 +147,11 @@ impl FakeNet {
         self.shared.lock().unwrap().unanswered_calls = on;
     }
 
+    /// A DISCONNECT is answered OK but does not end the link (until `drop_link`).
+    pub fn set_hold_disconnect(&self, on: bool) {
+        self.shared.lock().unwrap().hold_disconnect = on;
+    }
+
     /// Deliver held bytes (to whichever far data socket is attached now).
     pub fn release_held(&self) {
         let mut s = self.shared.lock().unwrap();
@@ -147,8 +180,74 @@ impl FakeNet {
             let mut s = self.shared.lock().unwrap();
             s.st[i].ctrl_tx = None;
             s.st[i].data_tx = None;
+            s.st[i].bcast_tx = None;
         }
         self.kick[i].notify_waiters();
+    }
+
+    /// Make station `i` answer `MODE n` with WRONG (an unsupported mode).
+    pub fn set_mode_wrong(&self, i: usize, wrong: bool) {
+        self.shared.lock().unwrap().st[i].mode_wrong = wrong;
+    }
+
+    /// Make station `i` answer `LISTEN ON` with WRONG.
+    pub fn set_listen_wrong(&self, i: usize, wrong: bool) {
+        self.shared.lock().unwrap().st[i].listen_wrong = wrong;
+    }
+
+    /// Make station `i` answer `LISTEN OFF` with WRONG (and stay listening).
+    pub fn set_listen_off_wrong(&self, i: usize, wrong: bool) {
+        self.shared.lock().unwrap().st[i].listen_off_wrong = wrong;
+    }
+
+    /// Whether station `i` is listening now, as the fake modem sees it.
+    pub fn listening(&self, i: usize) -> bool {
+        self.shared.lock().unwrap().st[i].listen
+    }
+
+    /// Station `from` calls CQ with no host of its own driving it (the
+    /// simulator's peer): station `to` hears it as a real Mercury reports it,
+    /// CQFRAME then (with MONITOR on) the MONITOR line. Nothing goes out while
+    /// a session is up, as on the air.
+    pub fn air_cq(&self, from: usize, call: &str, bw: &str) {
+        let s = self.shared.lock().unwrap();
+        if s.session.is_some() {
+            return;
+        }
+        let to = 1 - from;
+        send_line(&s, to, &format!("CQFRAME {call} {bw}"));
+        if s.st[to].monitor {
+            send_line(&s, to, &format!("MONITOR DATAC16 CQ FROM={call} BW={bw} SNR=7.5"));
+        }
+    }
+
+    /// Station `from` broadcasts `payload` on its listen mode with no host of
+    /// its own (the simulator's peer). Same rules as a KISS frame from a host:
+    /// dropped while a session is up, cut to the wrapped capacity, heard only
+    /// on the same listen mode. Returns whether it went on the air.
+    pub fn air_broadcast(&self, from: usize, mut payload: Vec<u8>) -> bool {
+        let mut s = self.shared.lock().unwrap();
+        if s.session.is_some() {
+            return false;
+        }
+        let mode = s.st[from].listen_mode();
+        if let Some(cap) = crate::kiss::wrapped_capacity(mode) {
+            payload.truncate(cap);
+        }
+        s.bcast_log.push((from, payload.clone()));
+        let to = 1 - from;
+        if s.st[to].listen_mode() == mode {
+            if let Some(tx) = &s.st[to].bcast_tx {
+                let _ = tx.send(crate::kiss::encode(crate::kiss::CMD_DATA_STD, &payload));
+            }
+        }
+        true
+    }
+
+    /// Broadcasts put on the air, as (sender, payload as transmitted). Dropped
+    /// ones (session up) are not listed; over-capacity ones are truncated.
+    pub fn broadcast_log(&self) -> Vec<(usize, Vec<u8>)> {
+        self.shared.lock().unwrap().bcast_log.clone()
     }
 
     pub fn session_up(&self) -> bool {
@@ -243,8 +342,32 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             send_line(&s, i, &format!("REGISTERED {c}"));
         }
         ["LISTEN", v] => {
-            s.st[i].listen = *v != "OFF";
+            if (*v != "OFF" && s.st[i].listen_wrong) || (*v == "OFF" && s.st[i].listen_off_wrong) {
+                send_line(&s, i, "WRONG");
+            } else {
+                s.st[i].listen = *v != "OFF";
+                send_line(&s, i, "OK");
+            }
+        }
+        ["MODE", n] => {
+            let n = n.parse::<u8>();
+            if s.session.is_some() {
+                send_line(&s, i, "BUSY");
+            } else if s.st[i].mode_wrong || n.is_err() {
+                send_line(&s, i, "WRONG");
+            } else {
+                s.st[i].mode = n.ok();
+                send_line(&s, i, "OK");
+            }
+        }
+        ["MONITOR", v @ ("ON" | "OFF")] => {
+            s.st[i].monitor = *v == "ON";
             send_line(&s, i, "OK");
+        }
+        ["CQFRAME", c, bw] => {
+            send_line(&s, i, "OK");
+            let (c, bw) = ((*c).to_string(), (*bw).to_string());
+            tokio::spawn(transmit_cq(net.clone(), i, c, bw));
         }
         ["PUBLIC", _] | ["CHAT", _] | ["COMPRESSION", _] => send_line(&s, i, "OK"),
         [bw] if bw.starts_with("BW") => send_line(&s, i, "OK"),
@@ -274,7 +397,9 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             if words[0] == "ABORT" {
                 s.held.clear();
             }
-            if s.session.take().is_some() {
+            if words[0] == "DISCONNECT" && s.hold_disconnect {
+                // Fault injection: the link stays up until `drop_link`.
+            } else if s.session.take().is_some() {
                 for k in 0..2 {
                     send_line(&s, k, "DISCONNECTED");
                 }
@@ -336,4 +461,94 @@ async fn data_conn(net: Arc<FakeNet>, i: usize, sock: TcpStream, mut rx: mpsc::U
     }
     writer.abort();
     net.shared.lock().unwrap().st[i].data_tx = None;
+}
+
+/// One CQ on the air: PENDING, PTT window, delivery to the other side.
+async fn transmit_cq(net: Arc<FakeNet>, i: usize, call: String, bw: String) {
+    let gap = || tokio::time::sleep(Duration::from_millis(50));
+    gap().await;
+    send_line(&net.shared.lock().unwrap(), i, "PENDING");
+    gap().await;
+    send_line(&net.shared.lock().unwrap(), i, "PTT ON");
+    gap().await;
+    gap().await;
+    {
+        let s = net.shared.lock().unwrap();
+        let j = 1 - i;
+        send_line(&s, j, &format!("CQFRAME {call} {bw}"));
+        if s.st[j].monitor {
+            send_line(&s, j, &format!("MONITOR DATAC16 CQ FROM={call} BW={bw} SNR=7.5"));
+        }
+        send_line(&s, i, "PTT OFF");
+    }
+    gap().await;
+    send_line(&net.shared.lock().unwrap(), i, "CANCELPENDING");
+}
+
+/// A KISS frame from station `i`'s host. Mercury's measured behaviour: dropped
+/// while a session is up; silently cut to the mode's wrapped capacity;
+/// heard only by a station on the same listen mode.
+async fn transmit_broadcast(net: Arc<FakeNet>, i: usize, mut payload: Vec<u8>) {
+    let mode = {
+        let mut s = net.shared.lock().unwrap();
+        if s.session.is_some() {
+            return;
+        }
+        let mode = s.st[i].listen_mode();
+        if let Some(cap) = crate::kiss::wrapped_capacity(mode) {
+            payload.truncate(cap);
+        }
+        s.bcast_log.push((i, payload.clone()));
+        send_line(&s, i, "PTT ON");
+        mode
+    };
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    let s = net.shared.lock().unwrap();
+    let j = 1 - i;
+    if s.st[j].listen_mode() == mode {
+        if let Some(tx) = &s.st[j].bcast_tx {
+            let _ = tx.send(crate::kiss::encode(crate::kiss::CMD_DATA_STD, &payload));
+        }
+    }
+    send_line(&s, i, "PTT OFF");
+}
+
+async fn bcast_accept(net: Arc<FakeNet>, i: usize, l: TcpListener) {
+    loop {
+        let Ok((sock, _)) = l.accept().await else { return };
+        if net.shared.lock().unwrap().st[i].bcast_tx.is_some() {
+            drop(sock); // one-client rule: newcomer closed at once
+            continue;
+        }
+        let (tx, rx) = mpsc::unbounded_channel();
+        net.shared.lock().unwrap().st[i].bcast_tx = Some(tx);
+        tokio::spawn(bcast_conn(net.clone(), i, sock, rx));
+    }
+}
+
+async fn bcast_conn(net: Arc<FakeNet>, i: usize, sock: TcpStream, mut rx: mpsc::UnboundedReceiver<Vec<u8>>) {
+    let (mut r, mut w) = sock.into_split();
+    let kick = net.kick[i].clone();
+    let writer = tokio::spawn(async move {
+        while let Some(b) = rx.recv().await {
+            if w.write_all(&b).await.is_err() {
+                break;
+            }
+        }
+    });
+    let mut dec = crate::kiss::Decoder::new();
+    let mut buf = [0u8; 2048];
+    loop {
+        let n = tokio::select! {
+            r = r.read(&mut buf) => match r { Ok(0) | Err(_) => break, Ok(n) => n },
+            _ = kick.notified() => break,
+        };
+        for f in dec.push(&buf[..n]) {
+            if f.cmd == crate::kiss::CMD_DATA_STD {
+                tokio::spawn(transmit_broadcast(net.clone(), i, f.payload));
+            }
+        }
+    }
+    writer.abort();
+    net.shared.lock().unwrap().st[i].bcast_tx = None;
 }

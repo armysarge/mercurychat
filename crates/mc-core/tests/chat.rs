@@ -103,7 +103,7 @@ async fn start(db: &Path, root: &Path, profile: Option<StationProfile>) -> App {
             other => panic!("{other:?}"),
         },
     };
-    until(&mut rx, ModemState::Ready, 15).await;
+    until(&mut rx, ModemState::Listening, 15).await;
     App { h, rx, id }
 }
 
@@ -316,7 +316,7 @@ async fn drop_then_late_receipt_is_delivered() {
     net.set_hold_from(1, false);
     net.kill_client(0); // our sockets drop before the receipt arrives
     states_of(&mut app.rx, &m.id, "uncertain", 15).await;
-    until(&mut app.rx, ModemState::Ready, 60).await;
+    until(&mut app.rx, ModemState::Listening, 60).await;
 
     connect(&mut app).await;
     for (from, bytes) in receipt {
@@ -358,7 +358,7 @@ async fn no_receipt_without_a_durable_store() {
         .unwrap();
     assert_eq!(keys, 0, "the dedup key was kept without the message");
     assert!(received_by(&peer_db).is_empty());
-    until(&mut app.rx, ModemState::Ready, 60).await;
+    until(&mut app.rx, ModemState::Listening, 60).await;
 
     broken.execute_batch("DROP TRIGGER refuse_in;").unwrap();
     connect(&mut app).await;
@@ -395,7 +395,7 @@ async fn disconnect_waits_for_outstanding_receipts() {
         net.inject(from, bytes);
     }
     assert_eq!(message(&mut app.rx, Some(&m.id), 10).await.state, "delivered");
-    until(&mut app.rx, ModemState::Ready, 15).await;
+    until(&mut app.rx, ModemState::Listening, 15).await;
     assert!(net.log().iter().any(|l| l == "A> DISCONNECT"), "the link was ended once drained");
 }
 
@@ -413,7 +413,7 @@ async fn uncertain_is_not_resent_on_reconnect() {
     net.set_hold_from(0, false);
     net.kill_client(0);
     states_of(&mut app.rx, &m.id, "uncertain", 15).await;
-    until(&mut app.rx, ModemState::Ready, 60).await;
+    until(&mut app.rx, ModemState::Listening, 60).await;
     connect(&mut app).await;
     tokio::time::sleep(Duration::from_secs(2)).await;
     assert!(received_by(&dir.path().join("peer").join("station.db")).is_empty(), "an uncertain message was resent");
@@ -435,7 +435,7 @@ async fn retry_uses_the_same_id_and_appears_once_remotely() {
     net.set_hold_from(1, false);
     net.kill_client(0);
     states_of(&mut app.rx, &m.id, "uncertain", 15).await;
-    until(&mut app.rx, ModemState::Ready, 60).await;
+    until(&mut app.rx, ModemState::Listening, 60).await;
     connect(&mut app).await;
 
     let r = app.h.call(AppCommand::RetryChat { peer: PEER.into(), id: m.id.clone() }).await.unwrap();

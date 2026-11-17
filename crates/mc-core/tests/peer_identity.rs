@@ -96,11 +96,10 @@ async fn bad_peer_link_is_aborted_and_explained() {
     h.call(AppCommand::SelectProfile { id: Some(id.clone()) }).await.unwrap();
     loop {
         let env = next(&mut rx).await;
-        if let AppEvent::ModemState { state: ModemState::Ready, .. } = env.event {
+        if let AppEvent::ModemState { state: ModemState::Listening, .. } = env.event {
             break;
         }
     }
-    h.call(AppCommand::SetListen { on: true }).await.unwrap();
 
     net.raw_connected(0, "CONNECTED ZS6ABC; ZS6ABC 2300");
     let mut back_to_listening = false;

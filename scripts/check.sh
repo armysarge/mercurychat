@@ -5,11 +5,24 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 cargo fmt --all --check
+# Test hooks must never reach a shipped crate (they carry an arbitrary-payload path).
+if grep -rn "test-hooks" src-tauri/Cargo.toml tools/*/Cargo.toml; then
+  echo "test-hooks must not be enabled outside mc-core's own dev-dependencies" >&2
+  exit 1
+fi
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace --features mc-core/sim
 # The workspace build turns the simulator on (src-tauri enables it); check the
 # core without it too, so the cfg(not(feature = "sim")) path keeps compiling.
 cargo clippy -p mc-core --all-targets -- -D warnings
+node apps/desktop/scripts/check-i18n.mjs
+# Themes: contrast (WCAG AA/AAA), no colour literals outside the theme files, apply.ts unit tests.
+node apps/desktop/scripts/check-contrast.mjs
+node apps/desktop/scripts/check-colours.mjs --self-test
+node apps/desktop/scripts/check-colours.mjs
+node --test apps/desktop/scripts/apply.test.mjs
+# Desktop notifications: the pure decision (notify.ts).
+node --test apps/desktop/scripts/notify.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

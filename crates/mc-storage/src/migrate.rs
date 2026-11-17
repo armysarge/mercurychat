@@ -20,6 +20,8 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 1, sql: MIGRATION_1 },
     Migration { to: 2, sql: MIGRATION_2 },
     Migration { to: 3, sql: MIGRATION_3 },
+    Migration { to: 4, sql: MIGRATION_4 },
+    Migration { to: 5, sql: MIGRATION_5 },
 ];
 
 const MIGRATION_1: &str = r#"
@@ -107,6 +109,68 @@ CREATE TABLE sessions (
 );
 "#;
 
+/// Discovery, logbook and macros (M3a).
+const MIGRATION_4: &str = r#"
+CREATE TABLE heard_observations (
+  id           INTEGER PRIMARY KEY,
+  callsign     TEXT NOT NULL,
+  observed_utc TEXT NOT NULL,
+  kind         TEXT CHECK (kind IN ('cq','beacon','session')),
+  bandwidth    TEXT,
+  grid         TEXT,
+  caps         INTEGER,
+  snr_db       REAL,
+  snr_source   TEXT,
+  freq_hz      INTEGER,
+  freq_source  TEXT,
+  freq_age_ms  INTEGER
+);
+CREATE INDEX heard_callsign_time ON heard_observations (callsign, observed_utc);
+CREATE TABLE contacts (
+  callsign     TEXT PRIMARY KEY,
+  favourite    INTEGER NOT NULL DEFAULT 0,
+  display_name TEXT,
+  notes        TEXT,
+  updated_utc  TEXT
+);
+CREATE TABLE qso_records (
+  id          TEXT PRIMARY KEY,
+  session_id  TEXT,
+  peer        TEXT NOT NULL,
+  start_utc   TEXT NOT NULL,
+  end_utc     TEXT,
+  grid        TEXT,
+  band        TEXT,
+  freq_hz     INTEGER,
+  freq_source TEXT,
+  freq_age_ms INTEGER,
+  bandwidth   TEXT,
+  tx_modes    TEXT,
+  rx_modes    TEXT,
+  rst_sent    TEXT,
+  rst_rcvd    TEXT,
+  name        TEXT,
+  qth         TEXT,
+  my_power    TEXT,
+  notes       TEXT,
+  state       TEXT CHECK (state IN ('draft','final'))
+);
+CREATE INDEX qso_session ON qso_records (session_id);
+CREATE TABLE macros (
+  id         TEXT PRIMARY KEY,
+  profile_id TEXT NOT NULL,
+  name       TEXT NOT NULL,
+  body       TEXT NOT NULL,
+  sort       INTEGER NOT NULL
+);
+ALTER TABLE station_profiles ADD COLUMN qth TEXT;
+ALTER TABLE station_profiles ADD COLUMN rig TEXT;
+ALTER TABLE station_profiles ADD COLUMN power TEXT;
+ALTER TABLE station_profiles ADD COLUMN antenna TEXT;
+ALTER TABLE station_profiles ADD COLUMN email TEXT;
+ALTER TABLE station_profiles ADD COLUMN about TEXT;
+"#;
+
 fn user_version(conn: &Connection) -> rusqlite::Result<i64> {
     conn.pragma_query_value(None, "user_version", |r| r.get(0))
 }
@@ -146,3 +210,10 @@ fn backup_before(conn: &Connection, db_path: &Path, from: i64) -> Result<PathBuf
     conn.backup(rusqlite::MAIN_DB, &dest, None).map_err(|e| err(e.to_string()))?;
     Ok(dest)
 }
+
+/// Listening is on by default (D18, owner decision): `receive_only` replaces
+/// `listen_preferred`, which stays in the table but is no longer read, so every
+/// existing profile starts as "answering calls".
+const MIGRATION_5: &str = r#"
+ALTER TABLE station_profiles ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0;
+"#;

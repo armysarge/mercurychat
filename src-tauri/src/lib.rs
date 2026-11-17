@@ -3,8 +3,14 @@
 //! through `app_call` to the core's service actor; its events arrive on
 //! `mc://event`.
 
+mod appearance;
+mod devserver;
+mod links;
 mod probe;
+mod spectrum;
 mod startup;
+mod window_state;
+mod windows;
 
 use mc_core::app::{spawn_app, AppCommand, AppError, AppHandle as Core, AppOptions, CommandOk, EventEnvelope, Since};
 use serde::Serialize;
@@ -32,6 +38,8 @@ enum Shell {
 
 struct Running {
     core: Core,
+    /// Whether the window shows the spectrum or waterfall (spectrum.rs).
+    waterfall: tokio::sync::watch::Sender<bool>,
     data_root: PathBuf,
     db_path: PathBuf,
     /// Endpoint locks (MOD-02), shared by every instance on this machine.
@@ -53,6 +61,8 @@ impl Shell {
 #[derive(Serialize)]
 struct AppInfo {
     app_version: String,
+    /// The build: profile, OS and CPU (About).
+    build: String,
     protocol: String,
     os: String,
     arch: String,
@@ -79,6 +89,12 @@ fn app_info(shell: tauri::State<'_, Shell>) -> AppInfo {
     };
     AppInfo {
         app_version: env!("CARGO_PKG_VERSION").into(),
+        build: format!(
+            "{} · {} {}",
+            if cfg!(debug_assertions) { "debug" } else { "release" },
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ),
         protocol: format!("MCH/{}.{} draft", mch_protocol::MAJOR, mch_protocol::MINOR),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
@@ -89,6 +105,20 @@ fn app_info(shell: tauri::State<'_, Shell>) -> AppInfo {
         startup_ms: since_start_ms(),
         startup_error,
     }
+}
+
+/// The saved appearance (theme, density, font scale) as JSON, or null for defaults.
+/// The splash reads it too, before the core has opened the station data.
+#[tauri::command]
+fn appearance_load(app: tauri::AppHandle) -> Option<String> {
+    appearance::load(&data_root(&app).ok()?)
+}
+
+/// Save the appearance: validated and size-capped, written atomically.
+#[tauri::command]
+fn appearance_save(app: tauri::AppHandle, json: String) -> Result<(), String> {
+    let root = data_root(&app).map_err(|e| e.to_string())?;
+    appearance::save(&root, &json)
 }
 
 /// Every UI action (docs/02 §2): one typed command, one typed reply.
@@ -130,6 +160,8 @@ fn ui_ready(app: tauri::AppHandle) -> bool {
     let ms = since_start_ms();
     println!("MC_UI_READY_MS={ms}");
     let self_measure = std::env::var_os("MC_SELF_MEASURE").is_some();
+    // The first snapshot is in: the splash gives way to the main window.
+    windows::reveal_when_due(&app);
     if let Ok(v) = std::env::var("MC_EXIT_AFTER_READY_MS") {
         let delay = v.parse::<u64>().unwrap_or(0);
         std::thread::spawn(move || {
@@ -147,6 +179,26 @@ fn report_ipc(p50: f64, p95: f64, max: f64, samples: u32) {
 
 #[tauri::command]
 fn ping() {}
+
+/// The window shows (true) or hides (false) the spectrum and waterfall: only
+/// while shown does the shell forward spectra, at most 5 a second.
+#[tauri::command]
+fn set_waterfall_visible(shell: tauri::State<'_, Shell>, visible: bool) -> Result<(), AppError> {
+    match shell.inner() {
+        Shell::Running(r) => {
+            r.waterfall.send_replace(visible);
+            Ok(())
+        }
+        Shell::Failed(message) => Err(AppError::Internal { message: message.clone() }),
+    }
+}
+
+/// Open one of About's named web pages in the system browser (links.rs).
+#[tauri::command]
+fn open_link(link: String) -> Result<(), String> {
+    let url = links::url_for(&link).ok_or_else(|| format!("no link named {link:?}"))?;
+    links::open(&url).map_err(|e| format!("the browser could not be started: {e}"))
+}
 
 #[derive(Serialize)]
 struct ProbeResult {
@@ -218,12 +270,8 @@ fn stopped_err() -> AppError {
 
 /// Start-up order (docs/02 §6): data-root lock, logging, log pruning, crash
 /// report, store (all in `startup::prepare`), then the service actor.
-fn start(app: &tauri::App) -> Result<Shell, Box<dyn std::error::Error>> {
-    // Lab mode (MOD-02): MC_DATA_DIR gives each instance its own data root.
-    let root = match std::env::var_os("MC_DATA_DIR") {
-        Some(d) => PathBuf::from(d),
-        None => app.path().app_data_dir()?,
-    };
+fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
+    let root = data_root(app)?;
     let p = match startup::prepare(&root) {
         Ok(p) => p,
         Err(e) => {
@@ -239,20 +287,102 @@ fn start(app: &tauri::App) -> Result<Shell, Box<dyn std::error::Error>> {
         sim_root: Some(root.clone()),
         stations_root: Some(root.join("stations")),
         locks_dir: Some(locks_dir.clone()),
+        // The simulator's SIM1 calls CQ and beacons, so Heard has stations without RF.
+        sim_peer_broadcasts: true,
         ..AppOptions::default()
     };
     // spawn_app needs a runtime context; Tauri's runtime keeps the actor alive.
     let core = tauri::async_runtime::block_on(async move { spawn_app(store, opts) });
-    forward_events(app.handle().clone(), core.subscribe());
-    Ok(Shell::Running(Box::new(Running { core, data_root: root, db_path, locks_dir, schema, _log: log, _lock: lock })))
+    forward_events(app.clone(), core.subscribe());
+    let (waterfall, visible) = tokio::sync::watch::channel(false);
+    let window = app.clone();
+    tauri::async_runtime::spawn(spectrum::forward(core.spectrum(), visible, move |frame| {
+        let _ = window.emit(spectrum::CHANNEL, frame);
+    }));
+    Ok(Shell::Running(Box::new(Running {
+        core,
+        waterfall,
+        data_root: root,
+        db_path,
+        locks_dir,
+        schema,
+        _log: log,
+        _lock: lock,
+    })))
+}
+
+/// The data root. Lab mode (MOD-02): MC_DATA_DIR gives each instance its own.
+fn data_root(app: &tauri::AppHandle) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    Ok(match std::env::var_os("MC_DATA_DIR") {
+        Some(d) => PathBuf::from(d),
+        None => app.path().app_data_dir()?,
+    })
+}
+
+/// Start the core on a thread of its own so the splash is painted meanwhile,
+/// then open the (hidden) main window; the UI's first snapshot reveals it.
+fn boot(app: tauri::AppHandle) {
+    // A panic must not leave the splash spinning: it becomes a start-up failure.
+    let guarded = app.clone();
+    if let Err(panic) = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| boot_steps(app))) {
+        let message =
+            panic.downcast_ref::<String>().cloned().or_else(|| panic.downcast_ref::<&str>().map(|s| s.to_string()));
+        windows::set_stage(
+            &guarded,
+            windows::Stage::Failed { message: message.unwrap_or_else(|| "internal error".into()) },
+        );
+    }
+}
+
+fn boot_steps(app: tauri::AppHandle) {
+    // Lab only: stall start-up to prove the splash gives up (MC_BOOT_STALL_MS).
+    if let Some(ms) = std::env::var("MC_BOOT_STALL_MS").ok().and_then(|v| v.parse::<u64>().ok()) {
+        std::thread::sleep(Duration::from_millis(ms));
+    }
+    windows::set_stage(&app, windows::Stage::Opening);
+    let shell = start(&app).unwrap_or_else(|e| Shell::Failed(e.to_string()));
+    let failure = match &shell {
+        Shell::Failed(m) => Some(m.clone()),
+        Shell::Running(_) => None,
+    };
+    app.manage(shell);
+    if let Some(message) = failure {
+        windows::set_stage(&app, windows::Stage::Failed { message });
+        return;
+    }
+    windows::set_stage(&app, windows::Stage::Modem);
+    let opened = data_root(&app)
+        .map_err(|e| e.to_string())
+        .and_then(|root| windows::create_main(&app, &root).map_err(|e| e.to_string()));
+    if let Err(message) = opened {
+        windows::set_stage(&app, windows::Stage::Failed { message });
+    }
 }
 
 pub fn run() {
     STARTED.get_or_init(Instant::now);
     tauri::Builder::default()
+        // Desktop notifications (M3a Task 12b): the window may only send one,
+        // ask whether it may, and ask the operator once (capabilities/default.json).
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
-            let shell = start(app)?;
-            app.manage(shell);
+            // A development build loads its pages from devUrl: if nothing is
+            // serving them, say so and start nothing else (devserver.rs).
+            if tauri::is_dev() {
+                if let Some(url) = app.config().build.dev_url.clone() {
+                    if !devserver::reachable(&url, devserver::TIMEOUT) {
+                        eprintln!("MercuryChat: no dev server at {url}; run `npm run tauri dev` or build with `npx tauri build --debug`");
+                        if let Some(page) = devserver::page_file(&url) {
+                            windows::open_dev_server_missing(app.handle(), page)?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
+            windows::open_splash(app.handle())?;
+            windows::arm_startup_timeout(app.handle());
+            let handle = app.handle().clone();
+            std::thread::spawn(move || boot(handle));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -262,7 +392,13 @@ pub fn run() {
             ui_ready,
             report_ipc,
             ping,
-            modem_probe
+            open_link,
+            set_waterfall_visible,
+            modem_probe,
+            appearance_load,
+            appearance_save,
+            windows::splash_status,
+            windows::quit_app
         ])
         .run(tauri::generate_context!())
         .expect("error while running MercuryChat");

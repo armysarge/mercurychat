@@ -14,7 +14,10 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# Desktop notifications (M3a Task 12b), pinned.
+tauri-plugin-notification = "=2.8.0"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tokio = { version = "1", features = ["time", "sync"] }
 mc-storage = { path = "../crates/mc-storage" }
 mc-core = { path = "../crates/mc-core", features = ["sim"] }
@@ -23,5 +26,12 @@ thiserror = "2"
 mch-protocol = { path = "../crates/mch-protocol" }
 mercury-adapter = { path = "../crates/mercury-adapter", default-features = false }
 
+[features]
+# The webview inspector. Never default and never in a release build: the shell
+# builds without it, F12 and the default context menu are also inert in the UI.
+devtools = ["tauri/devtools"]
+
 [dev-dependencies]
 tempfile = "3"
+# The spectrum forwarder's test runs on a paused clock.
+tokio = { version = "1", features = ["time", "sync", "macros", "rt", "test-util"] }

@@ -93,11 +93,49 @@ fn host_must_be_present() {
 #[test]
 fn telemetry_url_must_be_websocket() {
     let mut p = StationProfile::new_existing("ZS6ABC");
-    *existing(&mut p).3 = Some("http://127.0.0.1:10000".into());
+    // M3a Task 7: exactly ws://host:port/path, at most 256 characters.
+    let shape = "Use ws://host:port/path, e.g. ws://127.0.0.1:10000/websocket";
+    for bad in [
+        "http://127.0.0.1:10000/websocket",
+        "ws://127.0.0.1:10000",
+        "ws://127.0.0.1/websocket",
+        "ws://:10000/websocket",
+        "ws://127.0.0.1:0/websocket",
+        "ws://127.0.0.1:65536/websocket",
+        "ws://127.0.0.1:10x00/websocket",
+        "ws://user:pw@127.0.0.1:10000/websocket",
+        "ws://127.0.0.1:10000/web socket",
+        "ws://127.0.0.1:10000/websocket\u{7}",
+        "ws://bad host:10000/websocket",
+        "ws://[::1:10000/websocket",
+    ] {
+        *existing(&mut p).3 = Some(bad.into());
+        let errs = p.validate().unwrap_err();
+        assert_eq!(fields(&errs), ["telemetryUrl"], "{bad:?}");
+        assert_eq!(errs[0].message, shape, "{bad:?}");
+    }
+    *existing(&mut p).3 = Some("wss://127.0.0.1:10000/websocket".into());
     let errs = p.validate().unwrap_err();
-    assert_eq!(fields(&errs), ["telemetryUrl"]);
-    assert_eq!(errs[0].message, "Use a ws:// or wss:// address");
-    *existing(&mut p).3 = Some("ws://127.0.0.1:10000".into());
+    assert_eq!(errs[0].message, "wss:// (TLS) is not supported: use ws://host:port/path");
+    let long = format!("ws://127.0.0.1:10000/{}", "a".repeat(240));
+    *existing(&mut p).3 = Some(long);
+    let errs = p.validate().unwrap_err();
+    assert_eq!((errs[0].field.as_str(), errs[0].message.as_str()), ("telemetryUrl", "At most 256 characters"));
+
+    for good in [
+        "ws://127.0.0.1:10000/websocket",
+        " ws://mercury.local:10000/websocket ",
+        "ws://[::1]:10000/websocket",
+        "ws://pi:1/",
+    ] {
+        *existing(&mut p).3 = Some(good.into());
+        let v = p.validate().unwrap_or_else(|e| panic!("{good:?}: {e:?}"));
+        assert_eq!(existing(&mut v.clone()).3.as_deref(), Some(good.trim()));
+    }
+    // No telemetry is fine: it is optional (shown as unconfigured).
+    *existing(&mut p).3 = Some("  ".into());
+    assert_eq!(existing(&mut p.validate().unwrap()).3, &None);
+    *existing(&mut p).3 = None;
     p.validate().unwrap();
 }
 
@@ -116,9 +154,9 @@ fn simulator_needs_no_endpoint() {
 }
 
 #[test]
-fn listen_preference_defaults_off() {
-    assert!(!StationProfile::new_existing("ZS6ABC").listen_preferred);
-    assert!(!StationProfile::new_simulator("ZS6ABC").listen_preferred);
+fn profiles_answer_calls_by_default() {
+    assert!(!StationProfile::new_existing("ZS6ABC").receive_only);
+    assert!(!StationProfile::new_simulator("ZS6ABC").receive_only);
 }
 
 #[test]
@@ -146,7 +184,7 @@ fn profile_survives_reopen() {
     p.name = Some("Home".into());
     p.grid = Some("KG33xi".into());
     p.lab = true;
-    p.listen_preferred = true;
+    p.receive_only = true;
     let p = p.validate().unwrap();
     let sim = StationProfile::new_simulator("ZS6ABC").validate().unwrap();
     {
@@ -203,4 +241,23 @@ fn a_new_profile_from_the_ui_gets_an_id() {
     let p = draft.validate().unwrap();
     assert!(!p.id.trim().is_empty());
     assert_ne!(p.id, StationProfile::new_simulator("ZS6ABC").validate().unwrap().id);
+}
+
+#[test]
+fn station_info_round_trips_through_the_row() {
+    let mut p = StationProfile::new_simulator("ZS6ABC");
+    p.qth = Some("Pretoria".into());
+    p.rig = Some("IC-7300".into());
+    p.power = Some("50 W".into());
+    p.antenna = Some("EFHW".into());
+    p.email = Some("me@example.org".into());
+    p.about = Some("Digital modes".into());
+    let mut store = Store::open_in_memory().unwrap();
+    store.save_profile(&to_row(&p)).unwrap();
+    let back = from_row(&store.profiles().unwrap()[0]).unwrap();
+    assert_eq!(back, p);
+    // Saving again with the fields cleared clears them (no stale values).
+    p.rig = None;
+    store.save_profile(&to_row(&p)).unwrap();
+    assert_eq!(from_row(&store.profiles().unwrap()[0]).unwrap().rig, None);
 }

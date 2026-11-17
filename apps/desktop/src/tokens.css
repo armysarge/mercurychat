@@ -1,4 +1,7 @@
-/* Design tokens from docs/04 §1. Platform fonts only (no network fonts). */
+/* Design tokens from docs/04 §1. Platform fonts only (no network fonts).
+   The colour blocks below are the Midnight and Daylight presets, which show
+   until the theme code runs (themes/presets.ts is the source: check-contrast
+   fails if the two differ). Every colour in the UI is one of these tokens. */
 :root {
   --canvas: #0b1018;
   --surface: #141d29;
@@ -6,12 +9,35 @@
   --text: #e8eff8;
   --text-2: #a7b5c8;
   --accent: #75d8e8;
+  --accent-text: #0b1018;
   --success: #88dead;
   --warning: #ffd186;
   --danger: #ff9b9b;
   --border: #263446;
+  --border-strong: #64788f;
+  --focus: #75d8e8;
+  --bubble-in: #1b2838;
+  --bubble-out: #294454;
+  --badge-beacon: #f0b27a;
+  --badge-cq: #8ec5ff;
+  --badge-session: #c3a6ff;
+  --waterfall-low: #0e2a47;
+  --waterfall-high: #ffe27a;
+  --freq-display: #a8ecf6;
+  --logo-tile-from: #20364b;
+  --logo-tile-to: #0b1018;
+  --logo-tile-edge: #496479;
+  --logo-boot-from: #bffbf1;
+  --logo-boot-to: #45afd6;
+  --logo-wing-from: #f1fdff;
+  --logo-wing-to: #87cae0;
+  --logo-line: #183e54;
+  --logo-wing-line: #152735;
+  --scrim: #00000059;
+  --shadow: #00000059;
   --radius: 12px;
   --space: 8px;
+  --font-scale: 1;
   --font-ui: system-ui, -apple-system, "Segoe UI", "Noto Sans", Ubuntu, Cantarell, sans-serif;
   --font-mono: ui-monospace, "Cascadia Mono", Consolas, "DejaVu Sans Mono", "Liberation Mono", monospace;
   color-scheme: dark;
@@ -25,13 +51,41 @@
     --text: #162235;
     --text-2: #536279;
     --accent: #126e80;
+    --accent-text: #ffffff;
     --success: #17683b;
     --warning: #805000;
     --danger: #a82435;
     --border: #d5dde8;
+    --border-strong: #74839a;
+    --focus: #126e80;
+    --bubble-in: #ffffff;
+    --bubble-out: #d1e1e6;
+    --badge-beacon: #8f4a00;
+    --badge-cq: #1b5fa8;
+    --badge-session: #6b3fb0;
+    --waterfall-low: #dbe8f5;
+    --waterfall-high: #0b3a6b;
+    --freq-display: #0b3a47;
+    --logo-tile-from: #20364b;
+    --logo-tile-to: #0b1018;
+    --logo-tile-edge: #496479;
+    --logo-boot-from: #bffbf1;
+    --logo-boot-to: #45afd6;
+    --logo-wing-from: #f1fdff;
+    --logo-wing-to: #87cae0;
+    --logo-line: #183e54;
+    --logo-wing-line: #152735;
+    --scrim: #16223540;
+    --shadow: #16223526;
     color-scheme: light;
   }
 }
+
+/* Compact density tightens the 8 px rhythm (set by themes/apply.ts). */
+:root[data-density="compact"] { --space: 6px; --radius: 10px; }
+:root[data-density="compact"] button { padding: 3px 10px; }
+:root[data-density="compact"] input, :root[data-density="compact"] textarea, :root[data-density="compact"] select { padding: 4px 8px; }
+:root[data-density="compact"] body { line-height: 1.35; }
 
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }
@@ -42,8 +96,8 @@ html, body { margin: 0; height: 100%; }
 body {
   background: var(--canvas);
   color: var(--text);
-  font: 14px/1.45 var(--font-ui);
+  font: calc(14px * var(--font-scale)) / 1.45 var(--font-ui);
 }
 button, input { font: inherit; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .mono { font-family: var(--font-mono); }

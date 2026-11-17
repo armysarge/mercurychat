@@ -1,0 +1,175 @@
+// Screenshots of the real app for the repository and README (M3a Task 14;
+// M5's manual generator calls it for every release, so no shot is taken by hand).
+//
+// It starts the built app on a fresh data folder, makes a simulator station with
+// a neutral demo callsign (N0CALL; the simulator's own peer is SIM1), sets up
+// what each shot needs through the window itself, and captures it over the
+// WebView2 DevTools protocol. Nothing personal is shown: no owner callsign, no
+// real endpoint, no lab path.
+//
+// Usage (Windows; the app built with its assets embedded,
+// `cargo build -p mercurychat --features tauri/custom-protocol`):
+//   node scripts/screenshots.mjs <mercurychat.exe> <out dir> [shots.json] [--only name,name]
+//
+// A shot is { name, view, theme, setup: [step...], clip? }:
+//   view   operate | logbook | settings
+//   theme  a theme id from apps/desktop/src/themes/presets.ts (or "system")
+//   setup  named steps (STEPS below), each done once per run, in order
+//   clip   a CSS selector: capture only that element (plus a margin)
+//   scroll a CSS selector to scroll into view first
+// Each PNG must be at most MAX_BYTES; a larger one fails the run.
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { kill, launch, page, sleep, until } from "../lab/windows/cdp.mjs";
+import { click, compose, pill, setInput } from "../lab/windows/m2-dom.mjs";
+
+const MAX_BYTES = 300 * 1024;
+const WIDTH = 1500;
+const HEIGHT = 920;
+const CALL = "N0CALL";
+
+/** The default shot list: what the README and the manual use. */
+const SHOTS = [
+  { name: "operate-dark", view: "operate", theme: "midnight", setup: ["station", "heard", "beacons", "session", "chat"], side: "heard" },
+  { name: "qso-card", view: "operate", theme: "midnight", setup: ["session", "qso"], clip: "section.qso-card" },
+  { name: "operate-light", view: "operate", theme: "daylight", setup: ["session"], side: "chats" },
+  { name: "settings-station", view: "settings", theme: "midnight", setup: ["stationInfo"], scroll: "form.station-info" },
+  { name: "logbook", view: "logbook", theme: "midnight", setup: ["disconnect"] },
+];
+
+const args = process.argv.slice(2);
+const only = (() => {
+  const i = args.indexOf("--only");
+  if (i < 0) return null;
+  const list = args[i + 1]?.split(",") ?? [];
+  args.splice(i, 2);
+  return list;
+})();
+const [exe, outArg, listArg] = args;
+if (!exe || !outArg) {
+  console.error("usage: node scripts/screenshots.mjs <mercurychat.exe> <out dir> [shots.json] [--only name,name]");
+  process.exit(2);
+}
+const out = resolve(outArg);
+mkdirSync(out, { recursive: true });
+const shots = (listArg ? JSON.parse(readFileSync(listArg, "utf8")) : SHOTS).filter((s) => !only || only.includes(s.name));
+
+const rail = (label) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(label)})`;
+const VIEW_LABEL = { operate: "Operate", logbook: "Logbook", settings: "Settings" };
+const sideTab = (name) => `[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === ${JSON.stringify(name)})?.click()`;
+
+/** The named set-up steps. Each runs at most once per run. */
+const STEPS = {
+  async station(s) {
+    await until(s, "!!document.querySelector('form.simulator')", "the first-use screen", 30000);
+    await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
+    await s.eval(click("Use simulator"));
+    await until(s, `['ready','listening'].includes(${pill}) && !!document.querySelector('textarea.composer')`, "the workspace", 30000);
+  },
+  async heard(s) {
+    await until(s, `!!document.querySelector('.heard .row[data-callsign="SIM1"] .grid')`, "SIM1 heard with its locator", 30000);
+  },
+  async beacons(s) {
+    await s.eval(`${rail("Operate")}.click()`);
+    await until(s, "!!document.querySelector('input.beacon-toggle')", "the beacon card");
+    if (!(await s.eval("document.querySelector('input.beacon-toggle').checked"))) await s.eval("document.querySelector('input.beacon-toggle').click()");
+    await until(s, "/Next beacon/.test(document.querySelector('.strip .next-beacon')?.textContent ?? '')", "the beacon countdown");
+  },
+  async session(s) {
+    if ((await s.eval(pill)) === "connected") return;
+    await s.eval(`${rail("Operate")}.click()`);
+    await s.eval(setInput("input.peer", "SIM1"));
+    await until(s, "document.querySelector('.peer-header h1')?.textContent.trim() === 'SIM1'", "SIM1 open");
+    await s.eval(click("Call"));
+    await until(s, `${pill} === 'connected'`, "connected to SIM1", 30000);
+  },
+  async chat(s) {
+    for (const text of ["Good afternoon from N0CALL, testing MercuryChat on the simulator.", "Signal looks clean here. 73!"]) {
+      await s.eval(compose(text));
+      await until(s, `[...document.querySelectorAll('.transcript [data-id]')].some(e => e.dataset.state === 'delivered' && e.querySelector('.body').textContent === ${JSON.stringify(text)})`, "a delivered message", 20000);
+    }
+  },
+  async qso(s) {
+    await until(s, "!!document.querySelector('section.qso-card input[name=rstSent]')", "the QSO card", 20000);
+    for (const [name, value] of [["rstSent", "59"], ["rstRcvd", "57"], ["name", "Sam"], ["qth", "Simulator"]]) {
+      await s.eval(setInput(`section.qso-card input[name=${name}]`, value));
+    }
+    await s.eval(setInput("section.qso-card textarea[name=notes]", "First contact on MercuryChat."));
+    await s.eval("document.querySelector('section.qso-card button.qso-save').click()");
+    await until(s, "/\\S/.test(document.querySelector('section.qso-card .saved')?.textContent ?? '')", "the record saved");
+  },
+  async stationInfo(s) {
+    await s.eval(`${rail("Settings")}.click()`);
+    await until(s, "!!document.querySelector('form.station-info')", "the station information form");
+    const fields = { name: "Alex", grid: "FN31pr", qth: "Springfield", rig: "HF transceiver", power: "50 W", antenna: "End-fed half-wave", about: "Portable station, evenings and weekends" };
+    for (const [k, v] of Object.entries(fields)) await s.eval(setInput(`form.station-info input[name=${k}]`, v));
+    await s.eval("document.querySelector('form.station-info button[type=submit]').click()");
+    await until(s, "/\\S/.test(document.querySelector('form.station-info .saved')?.textContent ?? '')", "station information saved");
+    await until(s, "document.querySelectorAll('.macro-editor .macro').length >= 3", "the macros");
+  },
+  async disconnect(s) {
+    if ((await s.eval(pill)) !== "connected") return;
+    await s.eval(`${rail("Operate")}.click()`);
+    await s.eval(click("Disconnect"));
+    await until(s, `['ready','listening'].includes(${pill})`, "the session ended", 20000);
+  },
+};
+
+async function setTheme(s, id) {
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, `!!document.querySelector('[data-theme-id=${JSON.stringify(id)}]')`, `theme ${id}`);
+  await s.eval(`document.querySelector('[data-theme-id=${JSON.stringify(id)}]').click()`);
+  await sleep(300);
+}
+
+const data = join(tmpdir(), `mc-shots-${process.pid}`);
+rmSync(data, { recursive: true, force: true });
+const port = "9371";
+const app = launch(exe, data, port);
+const done = new Set();
+const results = [];
+try {
+  const s = await page(port, (t) => !!t.trim() && !/Opening|Starting/.test(t), "the main window", 40000);
+  await s.send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
+  for (const step of ["station"]) {
+    await STEPS[step](s);
+    done.add(step);
+  }
+  for (const shot of shots) {
+    for (const step of shot.setup ?? []) {
+      if (done.has(step)) continue;
+      if (!STEPS[step]) throw new Error(`${shot.name}: no step "${step}"`);
+      await STEPS[step](s);
+      done.add(step);
+    }
+    if (shot.theme) await setTheme(s, shot.theme);
+    await s.eval(`${rail(VIEW_LABEL[shot.view] ?? "Operate")}.click()`);
+    if (shot.side) await s.eval(sideTab(shot.side === "heard" ? "Heard" : "Chats"));
+    await sleep(600);
+    if (shot.scroll) await s.eval(`document.querySelector(${JSON.stringify(shot.scroll)})?.scrollIntoView({ block: 'start' })`);
+    await sleep(300);
+    let clip;
+    if (shot.clip) {
+      const r = await s.eval(`(() => { const e = document.querySelector(${JSON.stringify(shot.clip)}); e?.scrollIntoView({ block: 'nearest' }); const b = e?.getBoundingClientRect(); return b && { x: b.x, y: b.y, width: b.width, height: b.height }; })()`);
+      if (!r) throw new Error(`${shot.name}: nothing matches ${shot.clip}`);
+      const m = 12;
+      clip = { x: Math.max(0, r.x - m), y: Math.max(0, r.y - m), width: r.width + 2 * m, height: r.height + 2 * m, scale: 1 };
+    }
+    const { data: png } = await s.send("Page.captureScreenshot", { format: "png", ...(clip ? { clip } : {}) });
+    const file = join(out, `${shot.name}.png`);
+    writeFileSync(file, Buffer.from(png, "base64"));
+    const size = statSync(file).size;
+    if (size > MAX_BYTES) throw new Error(`${shot.name}.png is ${Math.round(size / 1024)} KB, over ${MAX_BYTES / 1024} KB`);
+    results.push(`OK ${shot.name}.png ${Math.round(size / 1024)} KB (${shot.view}, ${shot.theme})`);
+  }
+  s.close();
+} catch (e) {
+  results.push(`FAIL ${e.message.slice(0, 400)}`);
+} finally {
+  kill(app);
+  await sleep(500);
+  rmSync(data, { recursive: true, force: true });
+}
+console.log(results.join("\n"));
+process.exit(results.some((r) => r.startsWith("FAIL")) ? 1 : 0);

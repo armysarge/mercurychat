@@ -3,18 +3,42 @@
 //! refused at once rather than making the UI wait. Every state change is
 //! persisted first, then published as an event.
 
+use super::beacon::{BeaconPrefs, BeaconState, Tick, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD};
+use super::broadcast::{
+    activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, NotConfirmedReason,
+    Tracker,
+};
 use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
+use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
+use super::logbook::{self, Qso, Start, FINALISE_SETTING};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
+use super::notify::{NotifyPrefs, NOTIFY_SETTING};
+use super::telemetry::{Telemetry, Tuning};
+use crate::macros::{self, MacroDef};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
-use mc_storage::{OutState, StorageError, Store};
+use crate::station::Observation;
+use mc_storage::{MacroRow, OutState, QsoEdit as RowEdit, QsoRow, StorageError, Store};
 use mch_protocol::ObjectId;
+use mercury_adapter::broadcast::BroadcastAbort;
+use mercury_adapter::telemetry::Spectrum;
 use mercury_adapter::Callsign;
 use std::path::PathBuf;
-use tokio::sync::{broadcast, mpsc, oneshot};
+use std::sync::Arc;
+use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 const ACTIVE_PROFILE: &str = "activeProfileId";
+/// The setting holding the interface language (`system` when absent).
+pub const UI_LANGUAGE_SETTING: &str = "ui.language";
+/// The values `ui.language` may hold. The UI maps `system` to the OS language.
+pub const UI_LANGUAGES: [&str; 5] = ["system", "en", "es", "pt-BR", "fr"];
+/// Longest history search text, in characters.
+const SEARCH_MAX: usize = 128;
+
+fn macros_seeded_key(profile: &str) -> String {
+    format!("macros.seeded:{profile}")
+}
 
 #[derive(Debug, Clone)]
 pub struct AppOptions {
@@ -28,6 +52,9 @@ pub struct AppOptions {
     pub locks_dir: Option<PathBuf>,
     /// HELLO wait over a real Mercury; `None` is `station::RADIO_HELLO_TIMEOUT`.
     pub radio_hello_timeout: Option<std::time::Duration>,
+    /// The simulator's SIM1 calls CQ and beacons, and the simulator opens its
+    /// broadcast port (the desktop app turns this on; default off).
+    pub sim_peer_broadcasts: bool,
 }
 
 impl Default for AppOptions {
@@ -39,6 +66,7 @@ impl Default for AppOptions {
             stations_root: None,
             locks_dir: None,
             radio_hello_timeout: None,
+            sim_peer_broadcasts: false,
         }
     }
 }
@@ -46,14 +74,17 @@ impl Default for AppOptions {
 type Reply<T> = oneshot::Sender<Result<T, AppError>>;
 
 enum Request {
-    Command(AppCommand, Reply<CommandOk>),
+    Command(Box<AppCommand>, Reply<CommandOk>),
     Since(u64, Reply<Since>),
+    #[cfg(any(test, feature = "test-hooks"))]
+    Beacon(Vec<u8>, Reply<CommandOk>),
 }
 
 #[derive(Clone)]
 pub struct AppHandle {
     tx: mpsc::Sender<Request>,
     events: broadcast::Sender<EventEnvelope>,
+    spectrum: watch::Receiver<Option<Arc<Spectrum>>>,
 }
 
 fn stopped() -> AppError {
@@ -63,7 +94,7 @@ fn stopped() -> AppError {
 impl AppHandle {
     pub async fn call(&self, cmd: AppCommand) -> Result<CommandOk, AppError> {
         let (reply, rx) = oneshot::channel();
-        self.send(Request::Command(cmd, reply))?;
+        self.send(Request::Command(Box::new(cmd), reply))?;
         rx.await.map_err(|_| stopped())?
     }
 
@@ -74,8 +105,27 @@ impl AppHandle {
         rx.await.map_err(|_| stopped())?
     }
 
+    /// Send one wrapped payload as a beacon, through the same gate and
+    /// outcome tracking as the periodic beacons. Not a UI command: the UI
+    /// never sends arbitrary payloads. Compiled only for tests (the `test-hooks`
+    /// feature, which no shipped crate may enable; scripts/check.sh enforces it).
+    #[cfg(any(test, feature = "test-hooks"))]
+    #[doc(hidden)]
+    pub async fn send_beacon_payload(&self, payload: Vec<u8>) -> Result<CommandOk, AppError> {
+        let (reply, rx) = oneshot::channel();
+        self.send(Request::Beacon(payload, reply))?;
+        rx.await.map_err(|_| stopped())?
+    }
+
     pub fn subscribe(&self) -> broadcast::Receiver<EventEnvelope> {
         self.events.subscribe()
+    }
+
+    /// The latest valid spectrum from Mercury's telemetry (OBS-02), or
+    /// `None` while there is none: no telemetry, or it was lost. Not on the
+    /// event stream: a viewer reads it at its own pace.
+    pub fn spectrum(&self) -> watch::Receiver<Option<Arc<Spectrum>>> {
+        self.spectrum.clone()
     }
 
     fn send(&self, r: Request) -> Result<(), AppError> {
@@ -106,11 +156,24 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             locks_dir: opts.locks_dir,
             radio_hello_timeout: opts.radio_hello_timeout,
             slot: Default::default(),
+            spectrum: Default::default(),
+            sim_peer_broadcasts: opts.sim_peer_broadcasts,
         },
         reports,
         task: None,
         pending: None,
+        discovery: Discovery::default(),
+        listen_mode: ListenMode::default(),
+        broadcasts: Tracker::default(),
+        broadcast_abort: None,
+        broadcast_silent: false,
+        beacon: BeaconState::new(),
+        telemetry: Telemetry::default(),
+        qso: None,
+        mercury_listening: false,
+        receive_only_shown: (false, false),
     };
+    let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
         // The selection survives a restart, so its modem is attached again (attach
         // only: a stored listen preference never arms transmission, RF-02).
@@ -118,12 +181,15 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             app.switch_modem(Some(p));
         }
         loop {
+            let due = app.broadcasts.deadline();
+            let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
+            let telemetry_wake = app.telemetry.wake();
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
                     match req {
                         Request::Command(cmd, reply) => {
-                            let _ = reply.send(app.handle(cmd));
+                            let _ = reply.send(app.handle(*cmd));
                             // A modem change is answered at once, then started.
                             if let Some(target) = app.pending.take() {
                                 app.switch_modem(target);
@@ -132,13 +198,29 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                         Request::Since(seq, reply) => {
                             let _ = reply.send(Ok(app.log.since(seq)));
                         }
+                        #[cfg(any(test, feature = "test-hooks"))]
+                        Request::Beacon(payload, reply) => {
+                            let sent = app.send_broadcast(BroadcastKind::Beacon, payload);
+                            let _ = reply.send(sent.map(|_| CommandOk::Done));
+                        }
                     }
                 }
                 Some(report) = report_rx.recv() => app.on_report(report),
+                _ = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => {
+                    let out = app.broadcasts.expired(tokio::time::Instant::now());
+                    app.publish_broadcasts(out);
+                }
+                _ = tokio::time::sleep_until(beacon_wake.unwrap_or_else(tokio::time::Instant::now)), if beacon_wake.is_some() => {
+                    app.beacon_due();
+                }
+                // A throttled telemetry change is due: published just below.
+                _ = tokio::time::sleep_until(telemetry_wake.unwrap_or_else(tokio::time::Instant::now)), if telemetry_wake.is_some() => {}
             }
+            app.sync_beacon();
+            app.sync_telemetry();
         }
     });
-    AppHandle { tx, events }
+    AppHandle { tx, events, spectrum }
 }
 
 struct App {
@@ -160,6 +242,27 @@ struct App {
     task: Option<ModemHandle>,
     /// The modem the last selection asked for, started after replying.
     pending: Option<Option<StationProfile>>,
+    /// The activity log and broadcast counters; heard rows go to `chat`.
+    discovery: Discovery,
+    /// The modem's listen mode, for the beacon capacity gate.
+    listen_mode: ListenMode,
+    /// The one CQ or beacon awaiting its outcome.
+    broadcasts: Tracker,
+    broadcast_abort: Option<BroadcastAbort>,
+    /// The closed port cannot take another beacon until an explicit retry or recovery.
+    broadcast_silent: bool,
+    /// Periodic beacons: the schedule, the profile's settings, the status shown.
+    beacon: BeaconState,
+    /// Link quality and Mercury's telemetry (OBS-01), and its event throttle.
+    telemetry: Telemetry,
+    /// The record of the latest session this run, as stored.
+    qso: Option<QsoRow>,
+    /// Whether Mercury was last known to answer calls: from the idle states,
+    /// and from a LISTEN ON sent mid-link. Receive only chosen while it is,
+    /// during a call or a session, waits for the link to end (lab F2).
+    mercury_listening: bool,
+    /// Receive only as last published: (on, pending).
+    receive_only_shown: (bool, bool),
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -176,10 +279,24 @@ fn storage(e: StorageError) -> AppError {
     AppError::Storage { message: e.to_string() }
 }
 
+fn qso_error(e: StorageError, id: &str) -> AppError {
+    match e {
+        StorageError::QsoNotFound(_) => AppError::NotFound { id: id.to_string() },
+        StorageError::QsoFinal(_) => conflict("the record is final and cannot be edited".into()),
+        e => storage(e),
+    }
+}
+
 impl App {
     fn emit(&mut self, event: AppEvent) {
         let env = self.log.push(event);
         let _ = self.events.send(env); // no subscriber is fine
+    }
+
+    fn emit_all(&mut self, events: Vec<AppEvent>) {
+        for e in events {
+            self.emit(e);
+        }
     }
 
     fn handle(&mut self, cmd: AppCommand) -> Result<CommandOk, AppError> {
@@ -192,14 +309,17 @@ impl App {
                 let p = profile.validate().map_err(|errors| AppError::Validation { errors })?;
                 // Editing the profile in use: a new callsign or modem must reach
                 // the modem now, not at the next selection.
-                let reattach = self
-                    .active_profile()
-                    .is_some_and(|old| old.id == p.id && (old.callsign != p.callsign || old.modem != p.modem));
+                let old = self.active_profile().filter(|old| old.id == p.id);
+                let reattach = old.as_ref().is_some_and(|old| old.callsign != p.callsign || old.modem != p.modem);
+                let receive_only_changed = old.as_ref().is_some_and(|old| old.receive_only != p.receive_only);
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
                 if reattach {
                     self.log.bump_generation();
                     self.pending = Some(Some(p.clone()));
+                } else if receive_only_changed {
+                    // Receive only applies to the running modem now, too.
+                    self.receive_only_changed(p.receive_only);
                 }
                 Ok(CommandOk::Profile(p))
             }
@@ -208,6 +328,10 @@ impl App {
                     return Err(AppError::NotFound { id });
                 }
                 self.emit(AppEvent::ProfilesChanged);
+                BeaconPrefs::forget(&mut self.store, &id);
+                if let Err(e) = self.store.delete_setting(&macros_seeded_key(&id)) {
+                    tracing::warn!("could not remove a macro marker: {e}");
+                }
                 if self.store.setting(ACTIVE_PROFILE).map_err(storage)?.as_deref() == Some(id.as_str()) {
                     self.store.delete_setting(ACTIVE_PROFILE).map_err(storage)?;
                     self.log.bump_generation();
@@ -216,18 +340,22 @@ impl App {
                 }
                 Ok(CommandOk::Done)
             }
-            AppCommand::SetListen { on } => {
-                if !matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+            AppCommand::SetReceiveOnly { on } => {
+                // Always taken and stored at once (a safety switch), in any
+                // state with a station. The modem task acts on it when it is
+                // idle: after a call, a session or a recovery. LISTEN OFF is
+                // never sent on a live link: Mercury takes it by dropping the
+                // link with no DISCONNECT and strands the peer (lab F2), so
+                // until the link ends the snapshot shows it as pending.
+                if self.modem == ModemState::Unavailable {
                     let state = format!("{:?}", self.modem).to_lowercase();
-                    return Err(conflict(format!("the modem is {state}: listening can be changed once it is ready")));
+                    return Err(conflict(format!("the modem is {state}: pick a station first")));
                 }
                 let Some(mut p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
-                p.listen_preferred = on;
+                p.receive_only = on;
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
-                if !self.task.as_ref().is_some_and(|t| t.send(ModemCmd::SetListen(on))) {
-                    return Err(conflict("the modem is not accepting commands".into()));
-                }
+                self.receive_only_changed(on);
                 Ok(CommandOk::Done)
             }
             AppCommand::Call { peer } => {
@@ -362,6 +490,135 @@ impl App {
                     .map_err(storage)?;
                 Ok(CommandOk::History { messages: rows.iter().map(ChatMessage::from).collect() })
             }
+            AppCommand::Heard => {
+                let store = self.chat.as_ref().ok_or_else(|| conflict("no station is selected".into()))?;
+                let stations = discovery::heard_list(store, self.discovery.offsets()).map_err(storage)?;
+                Ok(CommandOk::Heard { stations })
+            }
+            AppCommand::SetFavourite { callsign, on } => {
+                let call = Callsign::parse(&callsign)
+                    .map_err(|e| AppError::Validation { errors: chat::field("callsign", e.to_string()) })?;
+                let store = self.chat.as_mut().ok_or_else(|| conflict("no station is selected".into()))?;
+                store.set_favourite(call.as_str(), on).map_err(storage)?;
+                let station =
+                    discovery::heard_station(store, call.as_str(), self.discovery.offsets()).map_err(storage)?;
+                self.emit(AppEvent::Heard { station });
+                Ok(CommandOk::Done)
+            }
+            AppCommand::Activity => Ok(CommandOk::Activity { entries: self.discovery.entries() }),
+            AppCommand::SendCq => self.send_broadcast(BroadcastKind::Cq, Vec::new()).map(|_| CommandOk::Done),
+            AppCommand::SetBeacon { on } => self.set_beacon(on).map(|_| CommandOk::Done),
+            AppCommand::SetBeaconInterval { minutes } => self.set_beacon_interval(minutes).map(|_| CommandOk::Done),
+            AppCommand::SetBeaconContent { include_grid } => {
+                let id = self.beacon_profile()?;
+                BeaconPrefs::save_include_grid(&mut self.store, &id, include_grid).map_err(storage)?;
+                self.beacon.prefs.include_grid = include_grid;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SendBeaconNow => self.send_beacon().map(|_| CommandOk::Done),
+            AppCommand::Qsos { limit } => {
+                let rows = self.chat_store()?.qsos(limit.clamp(1, 500)).map_err(storage)?;
+                Ok(CommandOk::Qsos { qsos: rows.iter().map(Qso::from).collect() })
+            }
+            AppCommand::UpdateQso { id, edit } => {
+                let edit = edit.validate().map_err(|errors| AppError::Validation { errors })?;
+                let row = self.chat_store()?.update_qso(&id, &edit).map_err(|e| qso_error(e, &id))?;
+                Ok(CommandOk::Qso(self.qso_changed(row)))
+            }
+            AppCommand::FinaliseQso { id } => {
+                let row = self.chat_store()?.finalise_qso(&id).map_err(|e| qso_error(e, &id))?;
+                Ok(CommandOk::Qso(self.qso_changed(row)))
+            }
+            AppCommand::SetFinaliseOnDisconnect { on } => {
+                self.store.set_setting(FINALISE_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SetUiLanguage { language } => {
+                if !UI_LANGUAGES.contains(&language.as_str()) {
+                    return Err(AppError::Validation {
+                        errors: chat::field("language", format!("not one of {}", UI_LANGUAGES.join(", "))),
+                    });
+                }
+                self.store.set_setting(UI_LANGUAGE_SETTING, &language).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SetNotifyPrefs { prefs } => {
+                prefs.validate().map_err(|errors| AppError::Validation { errors })?;
+                let json = serde_json::to_string(&*prefs).map_err(|e| AppError::Internal { message: e.to_string() })?;
+                self.store.set_setting(NOTIFY_SETTING, &json).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::Macros => self.macros_list().map(|macros| CommandOk::Macros { macros }),
+            AppCommand::SaveMacro { macro_ } => {
+                let def = macros::validate(&macro_).map_err(|errors| AppError::Validation { errors })?;
+                let profile = self.macro_profile()?;
+                let existing = self.store.macros(&profile).map_err(storage)?;
+                let (id, sort) = if def.id.is_empty() {
+                    if existing.len() >= macros::MAX_MACROS {
+                        let n = macros::MAX_MACROS;
+                        return Err(AppError::Validation {
+                            errors: chat::field("name", format!("At most {n} macros; delete one first")),
+                        });
+                    }
+                    (uuid::Uuid::new_v4().to_string(), existing.iter().map(|m| m.sort).max().map_or(0, |s| s + 1))
+                } else {
+                    // Only this profile's own macro may be edited.
+                    let Some(old) = existing.iter().find(|m| m.id == def.id) else {
+                        return Err(AppError::NotFound { id: def.id });
+                    };
+                    (old.id.clone(), old.sort)
+                };
+                self.mark_macros_seeded(&profile)?;
+                let row = MacroRow {
+                    id: id.clone(),
+                    profile_id: profile,
+                    name: def.name.clone(),
+                    body: def.body.clone(),
+                    sort,
+                };
+                self.store.save_macro(&row).map_err(storage)?;
+                Ok(CommandOk::Macro(MacroDef { id, name: def.name, body: def.body }))
+            }
+            AppCommand::DeleteMacro { id } => {
+                let profile = self.macro_profile()?;
+                if !self.store.macros(&profile).map_err(storage)?.iter().any(|m| m.id == id) {
+                    return Err(AppError::NotFound { id });
+                }
+                self.store.delete_macro(&id).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::ExpandMacro { id, peer, allow_email } => {
+                let p = self.active_profile().ok_or_else(|| conflict("no station is selected".into()))?;
+                let call = peer.as_deref().map(parse_peer).transpose()?;
+                let rows = self.store.macros(&p.id).map_err(storage)?;
+                let Some(row) = rows.into_iter().find(|m| m.id == id) else { return Err(AppError::NotFound { id }) };
+                let ctx = macros::MacroContext {
+                    call,
+                    mycall: p.callsign.clone(),
+                    name: p.name.clone(),
+                    qth: p.qth.clone(),
+                    loc: p.grid.clone(),
+                    rig: p.rig.clone(),
+                    pwr: p.power.clone(),
+                    ant: p.antenna.clone(),
+                    about: p.about.clone(),
+                    email: p.email.clone(),
+                    utc: chrono::Utc::now().format("%H:%M").to_string(),
+                    allow_email,
+                };
+                let out = macros::expand(&row.body, &ctx).map_err(|errors| AppError::Validation { errors })?;
+                Ok(CommandOk::Expanded { text: out.text, missing: out.missing })
+            }
+            AppCommand::SearchHistory { query, limit } => {
+                let q = query.trim();
+                if q.is_empty() || q.chars().count() > SEARCH_MAX {
+                    return Err(AppError::Validation {
+                        errors: chat::field("query", format!("Enter 1 to {SEARCH_MAX} characters to search for")),
+                    });
+                }
+                let rows = self.chat_store()?.search_messages(q, limit.clamp(1, 100)).map_err(storage)?;
+                Ok(CommandOk::History { messages: rows.iter().map(ChatMessage::from).collect() })
+            }
             AppCommand::SelectProfile { id } => {
                 let target = match &id {
                     Some(i) => {
@@ -394,6 +651,198 @@ impl App {
         )
     }
 
+    /// Receive only was just stored as `on`: tell the modem task, and show it.
+    fn receive_only_changed(&mut self, on: bool) {
+        if let Some(t) = &self.task {
+            t.set_receive_only(on);
+        }
+        // Turning it off on a live link sends LISTEN ON at once (harmless).
+        if !on && matches!(self.modem, ModemState::Negotiating | ModemState::Connected | ModemState::Draining) {
+            self.mercury_listening = true;
+        }
+        self.sync_receive_only();
+    }
+
+    /// Receive only chosen, but waiting for the call or session to end
+    /// before the modem stops answering calls (lab F2).
+    fn receive_only_pending(&self, on: bool) -> bool {
+        on && self.mercury_listening && self.in_call()
+    }
+
+    /// Read the active profile's choice: after it changed, or a new profile.
+    fn sync_receive_only(&mut self) {
+        let on = self.active_profile().is_some_and(|p| p.receive_only);
+        self.show_receive_only(on);
+    }
+
+    /// Publish Receive only (`on`, pending) if it changed.
+    fn show_receive_only(&mut self, on: bool) {
+        let now = (on, self.receive_only_pending(on));
+        if now != self.receive_only_shown {
+            self.receive_only_shown = now;
+            self.emit(AppEvent::ReceiveOnly { on: now.0, pending: now.1 });
+        }
+    }
+
+    /// Send a CQ (payload unused) or a beacon, if the gate allows it now
+    /// (DSC-02). A refusal is answered, published and logged, never queued.
+    fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
+        let len = (kind == BroadcastKind::Beacon).then_some(payload.len());
+        let calling = self.modem == ModemState::Calling;
+        if let Err(g) = broadcast_gate(self.modem, calling, len, self.listen_mode.current()) {
+            return Err(self.refuse_broadcast(kind, g.message()));
+        }
+        if self.broadcasts.busy() {
+            return Err(self.refuse_broadcast(kind, "not sent: a broadcast is still being sent".into()));
+        }
+        if kind == BroadcastKind::Beacon && self.broadcast_silent {
+            let why = NotConfirmedReason::BroadcastPortSilent.text();
+            let refusal = self.refuse_broadcast(kind, format!("not sent: {why}"));
+            self.record_silent_beacon();
+            return Err(refusal);
+        }
+        let cmd = match kind {
+            BroadcastKind::Cq => ModemCmd::Cq,
+            BroadcastKind::Beacon => ModemCmd::Broadcast(payload),
+        };
+        if !self.task.as_ref().is_some_and(|t| t.send(cmd)) {
+            return Err(self.refuse_broadcast(kind, GateRefusal::Detached.message()));
+        }
+        self.broadcasts.start(kind, tokio::time::Instant::now());
+        Ok(())
+    }
+
+    fn beacon_profile(&self) -> Result<String, AppError> {
+        self.beacon.profile.clone().ok_or_else(|| conflict("no station is selected".into()))
+    }
+
+    /// Arm or disarm beacons for this run, and remember the choice. Arming
+    /// needs an idle modem, as listening does (RF-02).
+    fn set_beacon(&mut self, on: bool) -> Result<(), AppError> {
+        let id = self.beacon_profile()?;
+        if on && !matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+            let state = self.state_word();
+            return Err(conflict(format!("the modem is {state}: beacons can be turned on once it is ready")));
+        }
+        BeaconPrefs::save_preferred(&mut self.store, &id, on).map_err(storage)?;
+        self.beacon.prefs.preferred = on;
+        match (on, self.beacon.sched.active()) {
+            (true, false) => {
+                // Queue the reopen before a possible Beacon now. A healthy
+                // connection is kept, including if it has a beacon in flight.
+                if self.task.as_ref().is_some_and(|t| t.send(ModemCmd::ReopenBroadcast)) {
+                    self.broadcast_silent = false;
+                }
+                self.beacon.sched.arm(tokio::time::Instant::now());
+            }
+            (false, _) => self.beacon.sched.disarm(),
+            (true, true) => {}
+        }
+        Ok(())
+    }
+
+    fn set_beacon_interval(&mut self, minutes: u32) -> Result<(), AppError> {
+        if !(MIN_INTERVAL_MIN..=MAX_INTERVAL_MIN).contains(&minutes) {
+            let why = format!("use {MIN_INTERVAL_MIN} to {MAX_INTERVAL_MIN} minutes");
+            return Err(AppError::Validation { errors: chat::field("minutes", why) });
+        }
+        let id = self.beacon_profile()?;
+        BeaconPrefs::save_interval(&mut self.store, &id, minutes).map_err(storage)?;
+        self.beacon.prefs.interval_min = minutes;
+        self.beacon.sched.set_interval(minutes, tokio::time::Instant::now());
+        Ok(())
+    }
+
+    /// One beacon now, from the active profile, through the broadcast gate.
+    fn send_beacon(&mut self) -> Result<(), AppError> {
+        let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+        let payload = match self.beacon.payload(&p.callsign, p.grid.as_deref()) {
+            Ok(payload) => payload,
+            Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
+        };
+        self.send_broadcast(BroadcastKind::Beacon, payload)
+    }
+
+    /// The scheduler's deadline passed. Whatever happens, the next beacon is
+    /// already an interval away: a refused one is never retried.
+    fn beacon_due(&mut self) {
+        if self.beacon.sched.tick(tokio::time::Instant::now()) == Tick::Send {
+            let _ = self.send_beacon(); // a refusal is already published and logged
+        }
+    }
+
+    /// Publish the beacon status if it changed.
+    fn sync_beacon(&mut self) {
+        if let Some(status) = self.beacon.changed(tokio::time::Instant::now()) {
+            self.emit(AppEvent::Beacon { status });
+        }
+    }
+
+    /// Publish the telemetry view if it changed, at most twice a second; a
+    /// change held back goes out at the next allowed moment.
+    fn sync_telemetry(&mut self) {
+        if let Some(telemetry) = self.telemetry.take_event(tokio::time::Instant::now()) {
+            self.emit(AppEvent::Telemetry { telemetry });
+        }
+    }
+
+    fn refuse_broadcast(&mut self, kind: BroadcastKind, reason: String) -> AppError {
+        self.publish_broadcasts(vec![(kind, BroadcastOutcome::Refused { reason: reason.clone() })]);
+        conflict(reason)
+    }
+
+    /// Publish broadcast outcomes, each with its activity line.
+    fn publish_broadcasts(&mut self, outcomes: Vec<(BroadcastKind, BroadcastOutcome)>) {
+        for (kind, outcome) in outcomes {
+            // Only a beacon the modem accepted counts as sent (last_utc, next seq).
+            if kind == BroadcastKind::Beacon && outcome == BroadcastOutcome::Submitted {
+                self.beacon.submitted();
+            }
+            let silent = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
+            let line = self.discovery.note("broadcast", activity_text(kind, &outcome));
+            self.emit(AppEvent::Broadcast { kind, outcome });
+            self.emit(line);
+            if silent {
+                self.record_silent_beacon();
+            }
+        }
+    }
+
+    /// Stop a silent beacon from lingering on its TCP connection. This
+    /// cannot wait for the modem to return to idle (lab F5).
+    fn beacon_outcome(&mut self, outcome: &BroadcastOutcome) -> bool {
+        match outcome {
+            BroadcastOutcome::Transmitted => self.beacon.sched.on_transmitted(tokio::time::Instant::now()),
+            BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) } => {
+                if let Some(port) = self.broadcast_abort.take() {
+                    port.abort();
+                    let line = self.discovery.note(
+                        "broadcast",
+                        "broadcast port reset after an unconfirmed beacon; turn beacons off and on to reconnect",
+                    );
+                    self.emit(line);
+                }
+                self.broadcast_silent = true;
+                return true;
+            }
+            _ => {}
+        }
+        false
+    }
+
+    fn record_silent_beacon(&mut self) {
+        let was_held = self.beacon.sched.held();
+        self.beacon.sched.on_silent();
+        if !was_held && self.beacon.sched.held() {
+            let why = NotConfirmedReason::BroadcastPortSilent.text();
+            let line = self.discovery.note(
+                "broadcast",
+                format!("beacons held: {why} ({SILENT_HOLD} attempts in a row); turn beacons off and on to try again"),
+            );
+            self.emit(line);
+        }
+    }
+
     fn state_word(&self) -> String {
         format!("{:?}", self.modem).to_lowercase()
     }
@@ -404,6 +853,39 @@ impl App {
         } else {
             Err(conflict("the modem is not accepting commands".into()))
         }
+    }
+
+    /// The profile macros belong to: the active one.
+    fn macro_profile(&self) -> Result<String, AppError> {
+        self.active_profile().map(|p| p.id).ok_or_else(|| conflict("no station is selected".into()))
+    }
+
+    fn mark_macros_seeded(&mut self, profile: &str) -> Result<(), AppError> {
+        self.store.set_setting(&macros_seeded_key(profile), "true").map_err(storage)
+    }
+
+    /// The active profile's macros; the defaults go in once per profile (a
+    /// marker is kept, so deleting them all does not bring them back).
+    fn macros_list(&mut self) -> Result<Vec<MacroDef>, AppError> {
+        let profile = self.macro_profile()?;
+        let mut rows = self.store.macros(&profile).map_err(storage)?;
+        if self.store.setting(&macros_seeded_key(&profile)).map_err(storage)?.is_none() {
+            if rows.is_empty() {
+                for (i, (name, body)) in macros::DEFAULTS.iter().enumerate() {
+                    let row = MacroRow {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        profile_id: profile.clone(),
+                        name: (*name).into(),
+                        body: (*body).into(),
+                        sort: i as i64,
+                    };
+                    self.store.save_macro(&row).map_err(storage)?;
+                }
+                rows = self.store.macros(&profile).map_err(storage)?;
+            }
+            self.mark_macros_seeded(&profile)?;
+        }
+        Ok(rows.into_iter().map(|m| MacroDef { id: m.id, name: m.name, body: m.body }).collect())
     }
 
     fn chat_store(&mut self) -> Result<&mut Store, AppError> {
@@ -442,12 +924,21 @@ impl App {
             .map_err(|e| e.to_string())
             .and_then(|_| Store::open(&dir.join("station.db")).map_err(|e| e.to_string()));
         match opened {
-            Ok(s) => self.chat = Some(s),
+            Ok(mut s) => {
+                let purged = self.discovery.purge(&mut s);
+                self.emit_all(purged);
+                self.chat = Some(s);
+            }
             Err(e) => tracing::warn!("station store unavailable: {e}"),
         }
     }
 
     fn set_session(&mut self, session: Option<SessionInfo>) {
+        if session.is_none() {
+            if let Some(ended) = self.session.clone() {
+                self.end_qso(&ended.session_id);
+            }
+        }
         if self.session != session {
             self.session = session.clone();
             self.emit(AppEvent::Session { session });
@@ -464,7 +955,30 @@ impl App {
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {
         self.modem = state;
         self.modem_detail = detail.clone();
+        // What Mercury does about calls is known only while idle; a call or a
+        // session leaves it as it was.
+        match state {
+            ModemState::Listening => self.mercury_listening = true,
+            ModemState::Ready
+            | ModemState::Unavailable
+            | ModemState::Attaching
+            | ModemState::Recovering
+            | ModemState::Faulted => self.mercury_listening = false,
+            ModemState::Calling | ModemState::Negotiating | ModemState::Connected | ModemState::Draining => {}
+        }
+        let line = self.discovery.state(state, detail.as_deref());
         self.emit(AppEvent::ModemState { state, detail });
+        self.emit(line);
+        self.beacon.sched.on_state(state, tokio::time::Instant::now());
+        let out = self.broadcasts.state(state);
+        self.publish_broadcasts(out);
+        if state == ModemState::Faulted {
+            // Also re-syncs the gate's live listen mode (ruling P2).
+            self.telemetry.modem_faulted(&mut self.listen_mode);
+        }
+        // The stored choice is cached (it changes only through the paths that
+        // re-read it): a state change costs no store read.
+        self.show_receive_only(self.receive_only_shown.0);
     }
 
     /// Stop whatever modem task runs, then start the selected one. Never
@@ -473,8 +987,22 @@ impl App {
         // The old task is told to stop; the new one waits for it to let go
         // (ModemOptions::slot).
         self.task = None;
+        let abandoned = self.broadcasts.abandon();
+        self.publish_broadcasts(abandoned);
+        self.broadcast_abort = None;
+        self.broadcast_silent = false;
+        self.listen_mode = ListenMode::default();
+        let telemetry =
+            matches!(&target, Some(p) if matches!(&p.modem, ModemTarget::Existing { telemetry_url: Some(_), .. }));
+        self.telemetry.reset(telemetry);
+        // Beacons are armed for one run: a new modem or profile starts disarmed (RF-02).
+        self.beacon.select(target.as_ref().map(|p| p.id.clone()), &self.store);
         self.set_session(None);
         self.chat = None;
+        self.qso = None;
+        self.discovery.modem_changed();
+        // A new active profile (or none): its stored Receive only choice.
+        self.sync_receive_only();
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
@@ -498,13 +1026,185 @@ impl App {
         }
         match report.kind {
             ReportKind::State { state, detail } => self.set_modem(state, detail),
-            ReportKind::Session(session) => self.set_session(session),
+            ReportKind::Session(session) => {
+                let now = tokio::time::Instant::now();
+                // A new session id is a new session: one draft each.
+                let new_session =
+                    session.as_ref().filter(|s| self.session.as_ref().map(|c| &c.session_id) != Some(&s.session_id));
+                if let Some(s) = new_session {
+                    let tuning = self.telemetry.tuning(now);
+                    // Before the session itself is recorded as the latest heard row (which has no grid).
+                    let grid = self.heard_grid(&s.peer);
+                    let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &tuning);
+                    self.emit_all(heard);
+                    self.telemetry.session_started(now);
+                    self.begin_qso(s, grid, &tuning);
+                }
+                if session.is_none() {
+                    self.telemetry.session_ended();
+                }
+                self.set_session(session)
+            }
             ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
-            ReportKind::Message(message) => self.emit(AppEvent::MessageChanged { message }),
+            ReportKind::Message(message) => {
+                self.telemetry.on_message(&message);
+                self.emit(AppEvent::MessageChanged { message })
+            }
+            ReportKind::Observation(o) => {
+                let now = tokio::time::Instant::now();
+                match &o {
+                    Observation::Busy(on) => self.beacon.on_busy(*on, now),
+                    Observation::Snr(snr) => self.telemetry.on_control_snr(*snr),
+                    Observation::Buffer(n) => self.telemetry.on_buffer(*n),
+                    _ => {}
+                }
+                let out = self.broadcasts.observe(&o);
+                self.publish_broadcasts(out);
+                let events = self.discovery.observation(self.chat.as_mut(), o, &self.telemetry.tuning(now));
+                self.emit_all(events);
+            }
+            ReportKind::Frame(f) => {
+                let tuning = self.telemetry.tuning(tokio::time::Instant::now());
+                let events = self.discovery.frame(self.chat.as_mut(), f, &tuning);
+                self.emit_all(events);
+            }
+            ReportKind::Telemetry(msg) => {
+                let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
+                // Ruling P2: the gate prefers telemetry's live listen mode.
+                self.listen_mode.set_live(self.telemetry.live_listen_mode());
+                self.observe_modes();
+                if let Some(text) = line {
+                    let line = self.discovery.note("telemetry", text);
+                    self.emit(line);
+                }
+            }
+            ReportKind::BroadcastOpened(abort) => {
+                self.broadcast_abort = Some(abort);
+                self.broadcast_silent = false;
+            }
+            ReportKind::Broadcast(why) => {
+                let line = self.discovery.note("broadcast", why);
+                self.emit(line);
+            }
+            ReportKind::ListenMode(mode) => {
+                self.listen_mode.set_attach(mode);
+                if mode.is_none() {
+                    let why = "the modem did not accept listen mode DATAC3: beacons are not sent; CQ still works";
+                    let line = self.discovery.note("broadcast", why);
+                    self.emit(line);
+                }
+            }
+            ReportKind::BroadcastSubmitted(kind) => {
+                let out = self.broadcasts.submitted(kind);
+                self.publish_broadcasts(out);
+            }
+            ReportKind::BroadcastRefused { kind, reason } => {
+                let out = self.broadcasts.refused(kind, reason);
+                self.publish_broadcasts(out);
+            }
+            ReportKind::BroadcastUnconfirmed { kind, note } => {
+                let out = self.broadcasts.unconfirmed(kind);
+                if !out.is_empty() {
+                    self.publish_broadcasts(out);
+                    let line = self.discovery.note("broadcast", note);
+                    self.emit(line);
+                }
+            }
         }
     }
 
-    fn snapshot(&self) -> Result<AppSnapshot, AppError> {
+    /// The locator the heard list holds for `peer`, if any.
+    fn heard_grid(&self, peer: &str) -> Option<String> {
+        let store = self.chat.as_ref()?;
+        discovery::heard_station(store, peer, self.discovery.offsets()).ok()?.grid
+    }
+
+    /// Draft the QSO record of a session that just started.
+    fn begin_qso(&mut self, s: &SessionInfo, grid: Option<String>, tuning: &Tuning) {
+        let Some(store) = self.chat.as_mut() else { return };
+        let mut row = logbook::draft_row(&Start {
+            session_id: &s.session_id,
+            peer: &s.peer,
+            start_utc: &s.since_utc,
+            bandwidth: &s.bandwidth,
+            grid,
+            tuning,
+        });
+        let view = self.telemetry.view(tokio::time::Instant::now());
+        row.tx_modes = view.tx_mode.as_deref().and_then(|m| logbook::with_mode(None, m));
+        row.rx_modes = view.rx_mode.as_deref().and_then(|m| logbook::with_mode(None, m));
+        if let Err(e) = store.create_qso(&row) {
+            tracing::warn!("could not draft the QSO record: {e}");
+            return;
+        }
+        self.qso = Some(row.clone());
+        self.emit(AppEvent::Qso { qso: Qso::from(&row) });
+    }
+
+    /// Stamp the end of a session's record, and finalise it if asked to.
+    fn end_qso(&mut self, session_id: &str) {
+        let finalise = self.finalise_on_disconnect();
+        let Some(store) = self.chat.as_mut() else { return };
+        let ended = store.end_qso_for_session(session_id, &mc_storage::now_utc()).and_then(|row| match row {
+            Some(r) if finalise => store.finalise_qso(&r.id).map(Some),
+            other => Ok(other),
+        });
+        match ended {
+            Ok(Some(row)) => {
+                self.qso_changed(row);
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!("could not end the QSO record: {e}"),
+        }
+    }
+
+    /// Add Mercury's newly observed ARQ modes to the session's draft, each once.
+    fn observe_modes(&mut self) {
+        let Some(session) = self.session.as_ref() else { return };
+        let Some(row) =
+            self.qso.as_ref().filter(|r| r.state == "draft" && r.session_id.as_deref() == Some(&session.session_id))
+        else {
+            return;
+        };
+        let view = self.telemetry.view(tokio::time::Instant::now());
+        let tx_modes = view.tx_mode.as_deref().and_then(|m| logbook::with_mode(row.tx_modes.as_deref(), m));
+        let rx_modes = view.rx_mode.as_deref().and_then(|m| logbook::with_mode(row.rx_modes.as_deref(), m));
+        if tx_modes.is_none() && rx_modes.is_none() {
+            return;
+        }
+        let id = row.id.clone();
+        let Some(store) = self.chat.as_mut() else { return };
+        match store.update_qso(&id, &RowEdit { tx_modes, rx_modes, ..RowEdit::default() }) {
+            Ok(row) => {
+                self.qso_changed(row);
+            }
+            Err(e) => tracing::warn!("could not record the observed modes: {e}"),
+        }
+    }
+
+    /// Publish a changed record, and keep it as the current one if it is.
+    fn qso_changed(&mut self, row: QsoRow) -> Qso {
+        let qso = Qso::from(&row);
+        if self.qso.as_ref().is_some_and(|c| c.id == row.id) {
+            self.qso = Some(row);
+        }
+        self.emit(AppEvent::Qso { qso: qso.clone() });
+        qso
+    }
+
+    fn finalise_on_disconnect(&self) -> bool {
+        matches!(self.store.setting(FINALISE_SETTING), Ok(Some(v)) if v == "true")
+    }
+
+    fn ui_language(&self) -> String {
+        // A stored value outside the list (an older or edited database) reads as the default.
+        match self.store.setting(UI_LANGUAGE_SETTING) {
+            Ok(Some(v)) if UI_LANGUAGES.contains(&v.as_str()) => v,
+            _ => UI_LANGUAGES[0].to_string(),
+        }
+    }
+
+    fn snapshot(&mut self) -> Result<AppSnapshot, AppError> {
         let mut profiles = Vec::new();
         for row in self.store.profiles().map_err(storage)? {
             match from_row(&row) {
@@ -515,17 +1215,26 @@ impl App {
         // A setting naming a profile that no longer exists reads as none.
         let active =
             self.store.setting(ACTIVE_PROFILE).map_err(storage)?.filter(|id| profiles.iter().any(|p| &p.id == id));
-        let listen_preferred =
-            active.as_ref().and_then(|id| profiles.iter().find(|p| &p.id == id)).is_some_and(|p| p.listen_preferred);
+        let receive_only =
+            active.as_ref().and_then(|id| profiles.iter().find(|p| &p.id == id)).is_some_and(|p| p.receive_only);
         Ok(AppSnapshot {
             seq: self.log.last_seq(),
             generation: self.log.generation(),
             modem: self.modem,
             modem_detail: self.modem_detail.clone(),
             profiles,
-            listen_preferred,
+            receive_only,
+            receive_only_pending: self.receive_only_pending(receive_only),
+            listening: self.modem == ModemState::Listening,
+            beacon: self.beacon.status(tokio::time::Instant::now()),
             session: self.session.clone(),
             active_profile_id: active,
+            discovery: self.discovery.stats(),
+            telemetry: Box::new(self.telemetry.view(tokio::time::Instant::now())),
+            current_qso: self.qso.as_ref().map(|r| Box::new(Qso::from(r))),
+            finalise_on_disconnect: self.finalise_on_disconnect(),
+            ui_language: self.ui_language(),
+            notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
         })
     }
 }

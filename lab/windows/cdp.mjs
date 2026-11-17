@@ -2,6 +2,8 @@
 // WebView2 DevTools port, find its page, and evaluate this script's own fixed
 // expressions in it (CDP Runtime.evaluate in the lab instance it launched).
 import { spawn, execFileSync } from "node:child_process";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 export const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -9,6 +11,11 @@ export function launch(exe, dataDir, port) {
   const env = {
     ...process.env,
     MC_DATA_DIR: dataDir,
+    // A lab WebView2 profile per DevTools port: otherwise a MercuryChat the
+    // operator has open owns the shared browser process and this instance gets
+    // no DevTools port. Kept between runs, because a brand-new profile delays
+    // the first page's script by seconds.
+    WEBVIEW2_USER_DATA_FOLDER: join(tmpdir(), `mc-lab-webview2-${port}`),
     WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port}`,
   };
   const child = spawn(exe, [], { env, stdio: ["ignore", "pipe", "pipe"] });
@@ -24,7 +31,7 @@ export function kill(child) {
   } catch {}
 }
 
-async function pages(port) {
+export async function pages(port) {
   try {
     const r = await fetch(`http://127.0.0.1:${port}/json/list`);
     return (await r.json()).filter((t) => t.type === "page");
@@ -33,7 +40,7 @@ async function pages(port) {
   }
 }
 
-function connect(wsUrl) {
+export function connect(wsUrl) {
   const ws = new WebSocket(wsUrl);
   let id = 0;
   const waiting = new Map();

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-set-waterfall-visible"
+description = "Enables the set_waterfall_visible command without any pre-configured scope."
+commands.allow = ["set_waterfall_visible"]
+
+[[permission]]
+identifier = "deny-set-waterfall-visible"
+description = "Denies the set_waterfall_visible command without any pre-configured scope."
+commands.deny = ["set_waterfall_visible"]
