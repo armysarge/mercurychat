@@ -1,5 +1,21 @@
 # Planning changes
 
+## 0.7 — 17 November 2026 (M3a discovery and operator tools)
+
+- Built M3a on branch `m3a`. **Discovery:** the heard list, kept from CQs, MCB/1 beacons and sessions, shows where each SNR, frequency and offset came from, with favourites and a 30-day retention. Malformed and foreign broadcasts are counted, never shown as stations. **CQ and Beacon now** go through an idle-only, capacity-limited broadcast gate, and the result is "transmitted", never "delivered". **Periodic beacons** are off by default and jittered. They are suppressed during calls, sessions, draining, faults and a busy channel, never replayed in a burst, and never re-armed by a restart or recovery.
+- Listening is on by default after attach and recovery, with a Receive only switch. Receive only chosen during a session waits for the session to end, because Mercury drops a live link without telling the peer.
+- **Telemetry** comes from Mercury's WebSocket. Missing values read "unavailable", never 0, and losing telemetry never ends a session. The **spectrum and waterfall** are optional, collapsed by default, and forwarded at most 5 frames a second, only while shown.
+- **Operator tools:** a draft QSO record for every session, edited on a QSO card and kept in a new Logbook (finalise locks a record). Station information and local macros are expanded into the draft, never sent by themselves; the email address goes in only by an explicit "Insert email". There is history search by text or callsign, and inline transcript rows for a session's end (a QSO summary) and for each CQ or beacon transmitted.
+- **Window:** the Operate station strip (a seven-segment frequency read-out in DSEG7, band, mode, bandwidth and actions), the Heard tab, telemetry, beacon and activity panels, and an About page ("Founded by ZS6SHZ", licence, credits). About's links open in the system browser, and the app never looks online by itself. Optional **desktop notifications** are off for Virtual Audio Lab stations and support quiet hours. Also: the UI localised in English, Spanish, Portuguese and French (es, pt-BR and fr are machine drafts), theme presets and custom themes, a start-up splash, and remembered window placement.
+- **Real-Mercury lab** (two Mercury modems over VB-Audio cables, PTT none) found five modem-behaviour issues. All five were fixed in the app with tests:
+  - the CQ/MONITOR line order;
+  - LISTEN OFF on a live link;
+  - a silently held broadcast port;
+  - an SNR shown before any decode;
+  - stale beacons sent once a held port frees.
+  A Mercury-side fix for the last one went upstream as Rhizomatica/mercury#588. The Hamlib reopen fix (#571) is now merged upstream, so lab builds use upstream `f77adfb7` plus the two still-open patches #565 and #566.
+- Still open: the Raspberry Pi smoke test (it gates the exits of M1, M2 and M3a's Pi row), real OS notification toasts checked by a person, and the waterfall drawing real spectra on a release build. Next: M3b, rig control. Details: docs/M3-progress.md.
+
 ## 0.6 — 15 November 2026 (M2 connected messaging)
 
 - Built M2 on branch `m2-chat`: one modem task per station that owns Mercury; explicit listening that is off after every start and recovery (RF-02); calls with cancel, disconnect (drain) and abort; MCH/1 negotiation that names a non-MercuryChat peer instead of failing silently; a durable outbox with per-peer quotas, drafts and paged history; end-to-end receipts only after the receiver has stored the message; duplicates shown once; untrusted peer callsigns and control lines validated and bounded.
