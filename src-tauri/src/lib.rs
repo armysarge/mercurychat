@@ -4,6 +4,7 @@
 //! `mc://event`.
 
 mod appearance;
+mod devserver;
 mod links;
 mod probe;
 mod spectrum;
@@ -365,6 +366,19 @@ pub fn run() {
         // ask whether it may, and ask the operator once (capabilities/default.json).
         .plugin(tauri_plugin_notification::init())
         .setup(|app| {
+            // A development build loads its pages from devUrl: if nothing is
+            // serving them, say so and start nothing else (devserver.rs).
+            if tauri::is_dev() {
+                if let Some(url) = app.config().build.dev_url.clone() {
+                    if !devserver::reachable(&url, devserver::TIMEOUT) {
+                        eprintln!("MercuryChat: no dev server at {url}; run `npm run tauri dev` or build with `npx tauri build --debug`");
+                        if let Some(page) = devserver::page_file(&url) {
+                            windows::open_dev_server_missing(app.handle(), page)?;
+                            return Ok(());
+                        }
+                    }
+                }
+            }
             windows::open_splash(app.handle())?;
             windows::arm_startup_timeout(app.handle());
             let handle = app.handle().clone();

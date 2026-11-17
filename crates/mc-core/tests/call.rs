@@ -236,7 +236,15 @@ async fn control_loss_recovers_and_resumes_listening() {
     });
     let states = states_until(&mut rx, ModemState::Connected, 15).await;
     assert_eq!(states, [ModemState::Negotiating, ModemState::Connected]);
-    let s = snapshot(&h).await.session.expect("a session");
+    // The session is reported just after the Connected state (as in listen.rs).
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    let s = loop {
+        if let Some(s) = snapshot(&h).await.session {
+            break s;
+        }
+        assert!(tokio::time::Instant::now() < deadline, "no session after Connected");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    };
     assert_eq!((s.peer.as_str(), s.direction), ("SIM1", SessionDirection::Incoming));
 
     let wire = in_flight(dir.path(), &id, "SIM1");

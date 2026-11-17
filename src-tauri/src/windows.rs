@@ -58,6 +58,18 @@ pub fn open_splash(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// A development build whose dev server is not running: one ordinary window
+/// (title bar, closable) saying so, instead of the splash (devserver.rs).
+pub fn open_dev_server_missing(app: &AppHandle, page: tauri::Url) -> tauri::Result<()> {
+    WebviewWindowBuilder::new(app, MAIN, WebviewUrl::External(page))
+        .title("MercuryChat: dev server not running")
+        .inner_size(620.0, 380.0)
+        .center()
+        .focused(true)
+        .build()?;
+    Ok(())
+}
+
 pub fn set_stage(app: &AppHandle, stage: Stage) {
     if let Some(s) = app.try_state::<Splash>() {
         *s.stage.lock().unwrap_or_else(|e| e.into_inner()) = stage;
