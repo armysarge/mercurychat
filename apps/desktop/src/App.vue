@@ -8,8 +8,8 @@ import { call, describeError } from "./api";
 import { info, measureIpc } from "./diag";
 import { t } from "./i18n";
 import {
-  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, openPeer, reloadChat, session, snapshot, stopTimers,
-  type ViewName,
+  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, openPeer, reloadChat, reloadDiscovery, session, snapshot,
+  stopTimers, type ViewName,
 } from "./store";
 import Conversations from "./views/Conversations.vue";
 import Diagnostics from "./views/Diagnostics.vue";
@@ -19,6 +19,7 @@ import Welcome from "./views/Welcome.vue";
 import AppLogo from "./components/AppLogo.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import Sidebar from "./components/Sidebar.vue";
+import StationStrip from "./components/StationStrip.vue";
 import WindowControls from "./components/WindowControls.vue";
 
 const startupError = ref("");
@@ -63,6 +64,10 @@ const receiveOnly = computed(() => snapshot.value?.receiveOnly ?? false);
 /** Chosen during a call or session: it takes effect when the link ends (the live link is never touched). */
 const receiveOnlyPending = computed(() => snapshot.value?.receiveOnlyPending ?? false);
 const modeWordKey = computed(() => (receiveOnlyPending.value ? "mode.receiveOnlyPending" : receiveOnly.value ? "mode.receiveOnly" : "mode.answering"));
+/** The switch's tooltip: while pending, this session still runs (it answered or called), so it does not say "never answers". */
+const switchTitleKey = computed(() =>
+  receiveOnlyPending.value ? "mode.receiveOnlyPendingTitle" : receiveOnly.value ? "mode.receiveOnlyTitle" : "mode.answeringTitle",
+);
 const showLinkMode = computed(() => !["ready", "listening"].includes(modemState.value));
 const rxError = ref("");
 
@@ -97,7 +102,10 @@ function onKey(e: KeyboardEvent) {
 watch(
   () => activeProfile.value?.id,
   (id, old) => {
-    if (id !== old) void reloadChat();
+    if (id !== old) {
+      void reloadChat();
+      void reloadDiscovery();
+    }
   },
 );
 
@@ -152,7 +160,7 @@ onUnmounted(() => {
       </div>
       <span v-if="activeProfile" class="station-mode" role="status" aria-live="polite">
         <span :class="['mode-word', { rx: receiveOnly }]">{{ t(modeWordKey) }}</span>
-        <label class="switch" :title="receiveOnly ? t('mode.receiveOnlyTitle') : t('mode.answeringTitle')">
+        <label class="switch" :title="t(switchTitleKey)">
           <input type="checkbox" role="switch" :checked="receiveOnly" :disabled="modemState === 'unavailable'" :aria-label="t('mode.receiveOnly')" @change="toggleReceiveOnly" />
           <span class="track" aria-hidden="true"></span>
         </label>
@@ -183,6 +191,9 @@ onUnmounted(() => {
       </i18n-t>
       <button class="quiet" @click="openPeer(otherSession.peer)">{{ t("banner.open") }}</button>
     </p>
+
+    <!-- The station strip: full width above the sidebar and the workspace, on Operate only. -->
+    <StationStrip v-if="snapshot && !firstUse && app.page === 'operate'" :now="now.getTime()" />
 
     <div :class="['body', { solo: firstUse || !snapshot }]">
       <nav class="rail" :aria-label="t('nav.label')">

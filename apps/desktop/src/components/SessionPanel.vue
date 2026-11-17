@@ -1,12 +1,20 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 // The right pane: whether incoming calls are answered (the Receive only switch
-// is in the window header, D18), the session, the open peer's queue, and the
-// link. No telemetry exists yet, so none is shown: a missing metric is never
-// drawn as a value.
+// is in the window header, D18), the session, the open peer's queue, the
+// link, the modem's telemetry, beacons and the activity log (M3a Task 10). A
+// missing metric is never drawn as a value.
+import ActivityDrawer from "./ActivityDrawer.vue";
+import BeaconControl from "./BeaconControl.vue";
+import TelemetryPanel from "./TelemetryPanel.vue";
 import { activeProfile, chat, modemLabel, queuedBytes, session, snapshot } from "../store";
 
 const { t } = useI18n();
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | undefined;
+onMounted(() => (clock = setInterval(() => (now.value = Date.now()), 1000)));
+onUnmounted(() => clearInterval(clock));
 const since = (utc: string) => utc.slice(11, 16) + " UTC";
 function where() {
   const p = activeProfile.value;
@@ -42,8 +50,11 @@ function where() {
       <span id="h-link" class="label">{{ t("session.link") }}</span>
       <div class="stat"><span class="muted">{{ t("session.modem") }}</span><span class="small">{{ where() }}</span></div>
       <div class="stat"><span class="muted">{{ t("session.state") }}</span><span class="mono">{{ modemLabel }}</span></div>
-      <p class="muted small">{{ t("session.noReadings") }}</p>
     </section>
+
+    <TelemetryPanel />
+    <BeaconControl :now="now" />
+    <ActivityDrawer />
 
     <p v-if="snapshot && !activeProfile" class="muted small">{{ t("session.chooseStation") }}</p>
   </div>

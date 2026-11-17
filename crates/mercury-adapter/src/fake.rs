@@ -205,6 +205,45 @@ impl FakeNet {
         self.shared.lock().unwrap().st[i].listen
     }
 
+    /// Station `from` calls CQ with no host of its own driving it (the
+    /// simulator's peer): station `to` hears it as a real Mercury reports it,
+    /// CQFRAME then (with MONITOR on) the MONITOR line. Nothing goes out while
+    /// a session is up, as on the air.
+    pub fn air_cq(&self, from: usize, call: &str, bw: &str) {
+        let s = self.shared.lock().unwrap();
+        if s.session.is_some() {
+            return;
+        }
+        let to = 1 - from;
+        send_line(&s, to, &format!("CQFRAME {call} {bw}"));
+        if s.st[to].monitor {
+            send_line(&s, to, &format!("MONITOR DATAC16 CQ FROM={call} BW={bw} SNR=7.5"));
+        }
+    }
+
+    /// Station `from` broadcasts `payload` on its listen mode with no host of
+    /// its own (the simulator's peer). Same rules as a KISS frame from a host:
+    /// dropped while a session is up, cut to the wrapped capacity, heard only
+    /// on the same listen mode. Returns whether it went on the air.
+    pub fn air_broadcast(&self, from: usize, mut payload: Vec<u8>) -> bool {
+        let mut s = self.shared.lock().unwrap();
+        if s.session.is_some() {
+            return false;
+        }
+        let mode = s.st[from].listen_mode();
+        if let Some(cap) = crate::kiss::wrapped_capacity(mode) {
+            payload.truncate(cap);
+        }
+        s.bcast_log.push((from, payload.clone()));
+        let to = 1 - from;
+        if s.st[to].listen_mode() == mode {
+            if let Some(tx) = &s.st[to].bcast_tx {
+                let _ = tx.send(crate::kiss::encode(crate::kiss::CMD_DATA_STD, &payload));
+            }
+        }
+        true
+    }
+
     /// Broadcasts put on the air, as (sender, payload as transmitted). Dropped
     /// ones (session up) are not listed; over-capacity ones are truncated.
     pub fn broadcast_log(&self) -> Vec<(usize, Vec<u8>)> {

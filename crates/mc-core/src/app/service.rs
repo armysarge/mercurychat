@@ -51,6 +51,9 @@ pub struct AppOptions {
     pub locks_dir: Option<PathBuf>,
     /// HELLO wait over a real Mercury; `None` is `station::RADIO_HELLO_TIMEOUT`.
     pub radio_hello_timeout: Option<std::time::Duration>,
+    /// The simulator's SIM1 calls CQ and beacons, and the simulator opens its
+    /// broadcast port (the desktop app turns this on; default off).
+    pub sim_peer_broadcasts: bool,
 }
 
 impl Default for AppOptions {
@@ -62,6 +65,7 @@ impl Default for AppOptions {
             stations_root: None,
             locks_dir: None,
             radio_hello_timeout: None,
+            sim_peer_broadcasts: false,
         }
     }
 }
@@ -152,6 +156,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             radio_hello_timeout: opts.radio_hello_timeout,
             slot: Default::default(),
             spectrum: Default::default(),
+            sim_peer_broadcasts: opts.sim_peer_broadcasts,
         },
         reports,
         task: None,

@@ -2,7 +2,11 @@
 // `app_call`, events on `mc://event`, and `events_since` to fill gaps.
 import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
+import type { ActivityEntry } from "./bindings/ActivityEntry";
 import type { AppCommand } from "./bindings/AppCommand";
+import type { BroadcastKind } from "./bindings/BroadcastKind";
+import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
+import type { HeardStation } from "./bindings/HeardStation";
 import type { AppError } from "./bindings/AppError";
 import type { AppSnapshot } from "./bindings/AppSnapshot";
 import type { ChatMessage } from "./bindings/ChatMessage";
@@ -60,6 +64,12 @@ export interface View {
 export interface MirrorHooks {
   /** A message was queued, changed state, or arrived. */
   message?: (m: ChatMessage) => void;
+  /** A heard-list row, new or changed (heard again, its SNR completed, starred). */
+  heard?: (station: HeardStation) => void;
+  /** A line for the activity log. */
+  activity?: (entry: ActivityEntry) => void;
+  /** What became of a CQ or a beacon. */
+  broadcast?: (kind: BroadcastKind, outcome: BroadcastOutcome) => void;
   /** The local copy was rebuilt from a snapshot: message events may be missing. */
   resynced?: () => void;
 }
@@ -160,6 +170,25 @@ export class Mirror {
         break;
       case "messageChanged":
         this.hooks.message?.(ev.message);
+        break;
+      case "beacon":
+        v.snapshot.beacon = ev.status;
+        break;
+      case "telemetry":
+        v.snapshot.telemetry = ev.telemetry;
+        break;
+      case "qso":
+        v.snapshot.currentQso = ev.qso;
+        break;
+      case "heard":
+      case "heardUpdated":
+        this.hooks.heard?.(ev.station);
+        break;
+      case "activity":
+        this.hooks.activity?.(ev.entry);
+        break;
+      case "broadcast":
+        this.hooks.broadcast?.(ev.kind, ev.outcome);
         break;
       case "profilesChanged": {
         const fresh = await snapshot();

@@ -43,6 +43,10 @@ pub struct ModemOptions {
     pub slot: Arc<tokio::sync::Mutex<()>>,
     /// Where the modem's telemetry client publishes the latest spectrum.
     pub spectrum: SpectrumFeed,
+    /// The simulator opens its broadcast port and its SIM1 calls CQ and
+    /// beacons after attach and every minute (the desktop app; tests that
+    /// pin event sequences leave it off).
+    pub sim_peer_broadcasts: bool,
 }
 
 /// The latest valid spectrum from Mercury's telemetry, shared by every modem
@@ -518,7 +522,10 @@ async fn run(
             let mut station = station;
             serve(&mut station, cmds, &r, receive_only, &mut broadcast).await;
         }
-        ModemTarget::Simulator => simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders).await,
+        ModemTarget::Simulator => {
+            let on_air = opts.sim_peer_broadcasts;
+            simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air).await
+        }
     }
 }
 
@@ -530,6 +537,7 @@ async fn simulator(
     mut cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
     forwarders: &mut Forwarders,
+    on_air: bool,
 ) {
     r.state(ModemState::Attaching, None).await;
     let peer_dir = station_dir.join("sim-peer");
@@ -553,11 +561,21 @@ async fn simulator(
         },
         _ = stopped(&mut cmds, &r) => return,
     };
+    // With SIM1 on the air, our side opens the fake's broadcast port before
+    // Ready, as it would Mercury's, so beacons are heard and sent (ruling P4).
+    let target = on_air.then(|| ("127.0.0.1".to_string(), sim.broadcast_port()));
+    let mut broadcast = Broadcast::new(target, &r);
+    tokio::select! {
+        _ = broadcast.open(false) => {}
+        _ = stopped(&mut cmds, &r) => return,
+    }
     r.send(ReportKind::ListenMode(sim.station.listen_mode())).await;
     r.state(ModemState::Ready, Some("simulator".into())).await;
     let mut sim = sim;
     forwarders.observe(&mut sim.station, &r);
-    let mut broadcast = Broadcast::new(None, &r);
+    if on_air {
+        sim.start_peer_broadcasts();
+    }
     serve(&mut sim.station, cmds, &r, receive_only, &mut broadcast).await;
 }
 
@@ -569,6 +587,7 @@ async fn simulator(
     _cmds: mpsc::Receiver<ModemCmd>,
     r: Reporter,
     _forwarders: &mut Forwarders,
+    _on_air: bool,
 ) {
     r.fault("the simulator is not part of this build".into()).await;
 }

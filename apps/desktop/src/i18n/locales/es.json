@@ -42,7 +42,8 @@
     "recovering": "Recuperando",
     "fault": "Fallo del módem",
     "receiveOnlyTitle": "Solo recepción: esta estación escucha pero nunca responde llamadas transmitiendo. Desactívalo para responder llamadas.",
-    "answeringTitle": "Esta estación responde las llamadas entrantes automáticamente, lo que implica transmitir. Activa Solo recepción para escuchar nada más."
+    "answeringTitle": "Esta estación responde las llamadas entrantes automáticamente, lo que implica transmitir. Activa Solo recepción para escuchar nada más.",
+    "receiveOnlyPendingTitle": "Solo recepción elegido: esta sesión sigue y las llamadas dejarán de responderse al terminar. Desactívelo para seguir respondiendo."
   },
   "where": {
     "simulator": "Simulador · sin radio",
@@ -120,7 +121,7 @@
     "draft": "borrador",
     "noMatch": "Ningún indicativo coincide.",
     "none": "Aún no hay chats. Escribe un indicativo para empezar uno.",
-    "note": "Las estaciones oídas en el aire todavía no aparecen aquí. Un chat en esta lista no significa que la estación esté disponible ahora.",
+    "note": "Las estaciones oídas en el aire están en la pestaña Escuchadas. Un chat en esta lista no significa que la estación esté disponible ahora.",
     "historySearchAria": "Buscar en este historial (Ctrl+F)",
     "historySearchPlaceholder": "Buscar en el historial (Ctrl+F)"
   },
@@ -163,7 +164,6 @@
     "state": "Estado",
     "simulator": "Simulador (sin radio)",
     "mercuryAt": "Mercury en {host}:{port}",
-    "noReadings": "Las lecturas de señal, audio y frecuencia no están disponibles en esta versión.",
     "chooseStation": "Elige una estación en Ajustes."
   },
   "window": {
@@ -351,6 +351,118 @@
     "heard": "Escuchadas",
     "heardEmpty": "Aún no se ha escuchado ninguna estación. Las que escuches en el aire aparecerán aquí.",
     "toggle": "Chats",
-    "close": "Cerrar"
+    "close": "Cerrar",
+    "heardNew": "{n} estación oída desde la última vez | {n} estaciones oídas desde la última vez"
+  },
+  "heard": {
+    "searchAria": "Buscar estaciones oídas",
+    "searchPlaceholder": "Buscar indicativo o locator",
+    "filterAria": "Mostrar estaciones oídas por",
+    "filter": {
+      "all": "Todas",
+      "cq": "CQ",
+      "beacon": "Baliza",
+      "session": "Sesión",
+      "favourite": "Destacadas"
+    },
+    "listAria": "Estaciones oídas",
+    "source": {
+      "cq": "CQ",
+      "beacon": "Baliza",
+      "session": "Sesión"
+    },
+    "age": {
+      "s": "hace {n} s",
+      "min": "hace {n} min",
+      "h": "hace {n} h",
+      "d": "hace {n} d"
+    },
+    "notHeard": "no oída recientemente",
+    "gridTitle": "Locator que envió la estación",
+    "snr": "{db} dB",
+    "mhz": "{mhz} MHz",
+    "offset": "{hz} Hz de desvío",
+    "count": "oída {n} vez | oída {n} veces",
+    "from": "{source}, {at}",
+    "fromAged": "{source}, {at}, de hace {age} s",
+    "star": "Destacar {callsign}",
+    "unstar": "Quitar destacado de {callsign}",
+    "noMatch": "Ninguna estación oída coincide.",
+    "notReachable": "Oída no es lo mismo que alcanzable: una estación oída aquí puede no responder a una llamada.",
+    "announce": "{callsign} oída: {source}"
+  },
+  "beacon": {
+    "title": "Balizas",
+    "periodic": "Enviar balizas periódicas",
+    "prompt": "Las balizas estaban activas la última vez; ¿activarlas de nuevo?",
+    "interval": "Cada",
+    "minutes": "{n} min",
+    "jitter": "variación ±15 %",
+    "includeGrid": "Incluir mi locator",
+    "noGrid": "Esta estación no tiene locator, así que las balizas no lo llevan.",
+    "next": "Próxima baliza",
+    "off": "Balizas desactivadas",
+    "suppressed": "en espera: {reason}",
+    "channelLabel": "Canal",
+    "channel": {
+      "unknown": "Ocupación del canal desconocida",
+      "clear": "Libre",
+      "busy": "Ocupado"
+    }
+  },
+  "telemetry": {
+    "title": "Telemetría",
+    "linkLabel": "Enlace de telemetría",
+    "link": {
+      "unconfigured": "Sin configurar",
+      "connecting": "Conectando",
+      "up": "Activo",
+      "lost": "Perdido"
+    },
+    "lostInSession": "Se perdió la telemetría; el chat continúa sin ella.",
+    "snr": "SNR",
+    "mode": "Modo TX / RX",
+    "txRx": "{tx} / {rx}",
+    "queued": "En cola en el módem",
+    "throughput": "Rendimiento",
+    "throughputTitle": "Bytes confirmados por el otro en esta sesión, por segundo",
+    "bps": "{n} B/s",
+    "audio": "Audio",
+    "audioOk": "Correcto",
+    "audioFault": "Fallo",
+    "frequency": "Frecuencia",
+    "mhz": "{mhz} MHz",
+    "ageS": "de hace {s} s",
+    "unavailable": "no disponible"
+  },
+  "activity": {
+    "title": "Actividad",
+    "count": "{n} línea | {n} líneas",
+    "listAria": "Actividad, lo más reciente primero",
+    "empty": "Nada todavía."
+  },
+  "strip": {
+    "aria": "Estación",
+    "collapse": "Contraer la barra de estación",
+    "expand": "Expandir la barra de estación",
+    "freqAria": "{mhz} MHz",
+    "freqNone": "Frecuencia no disponible",
+    "noBand": "banda desconocida",
+    "noMode": "modo desconocido",
+    "profile": "Estación",
+    "cq": "Llamar CQ",
+    "beaconNow": "Baliza ahora",
+    "cqOutcome": "CQ: {what}",
+    "beaconOutcome": "Baliza: {what}",
+    "nextBeacon": "Próxima baliza {time}",
+    "outcome": {
+      "submitted": "entregado al módem",
+      "transmitted": "transmitido",
+      "notConfirmed": "sin confirmar",
+      "refused": "no enviado: {reason}"
+    },
+    "spectrum": "Espectro",
+    "spectrumSoon": "La vista de espectro llega en una versión posterior.",
+    "telemetryUnavailable": "telemetría no disponible"
   }
 }

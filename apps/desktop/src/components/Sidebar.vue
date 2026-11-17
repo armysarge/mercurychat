@@ -6,7 +6,8 @@
 // drawer (04 §2).
 import { useI18n } from "vue-i18n";
 import ConversationList from "./ConversationList.vue";
-import { app } from "../store";
+import HeardList from "./HeardList.vue";
+import { app, discovery } from "../store";
 
 const { t } = useI18n();
 const TABS = [
@@ -31,11 +32,16 @@ function opened() {
         role="tab"
         :aria-selected="app.sideTab === tab.id"
         :aria-controls="`side-pane-${tab.id}`"
+        :aria-describedby="tab.id === 'heard' && discovery.unseen ? 'side-heard-new' : undefined"
         :class="{ on: app.sideTab === tab.id }"
         @click="app.sideTab = tab.id"
       >
         {{ t(tab.label) }}
       </button>
+      <!-- Stations heard since the Heard tab was last open, beside that tab (its own name stays unchanged). -->
+      <span v-if="discovery.unseen" id="side-heard-new" class="unseen" :title="t('sidebar.heardNew', discovery.unseen)">
+        <span aria-hidden="true">{{ discovery.unseen }}</span><span class="sr-only">{{ t("sidebar.heardNew", discovery.unseen) }}</span>
+      </span>
       <span class="grow"></span>
       <button class="close quiet" :aria-label="t('sidebar.close')" @click="app.drawer = null">×</button>
     </div>
@@ -43,7 +49,7 @@ function opened() {
       <ConversationList @opened="opened" />
     </div>
     <div v-show="app.sideTab === 'heard'" id="side-pane-heard" class="pane" role="tabpanel" aria-labelledby="side-tab-heard">
-      <p class="empty muted small">{{ t("sidebar.heardEmpty") }}</p>
+      <HeardList @opened="opened" />
     </div>
   </aside>
 </template>
@@ -58,7 +64,10 @@ function opened() {
 .tabs button[role="tab"].on { color: var(--accent); border-bottom-color: var(--accent); }
 .close { display: none; padding: 2px 10px; font-size: calc(18px * var(--font-scale)); line-height: 1; }
 .pane { flex: 1; min-height: 0; overflow: hidden; }
-.empty { padding: calc(var(--space) * 2); }
+.unseen {
+  display: inline-block; min-width: 18px; margin-left: 4px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text); font-size: calc(11px * var(--font-scale)); line-height: 18px; text-align: center;
+}
 @media (max-width: 960px) {
   .sidebar {
     position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 92vw); z-index: 30; border-right: 1px solid var(--border);

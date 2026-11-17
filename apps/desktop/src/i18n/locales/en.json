@@ -41,7 +41,8 @@
     "recovering": "Recovering",
     "fault": "Modem fault",
     "receiveOnlyTitle": "Receive only: this station listens but never answers calls by transmitting. Turn it off to answer calls.",
-    "answeringTitle": "This station answers incoming calls automatically, which means it transmits. Turn on Receive only to just listen."
+    "answeringTitle": "This station answers incoming calls automatically, which means it transmits. Turn on Receive only to just listen.",
+    "receiveOnlyPendingTitle": "Receive only is chosen: this session carries on, and calls stop being answered when it ends. Turn it off to keep answering."
   },
   "where": {
     "simulator": "Simulator · no radio",
@@ -119,7 +120,7 @@
     "draft": "draft",
     "noMatch": "No callsign matches.",
     "none": "No conversations yet. Type a callsign to start one.",
-    "note": "Stations heard on the air are not listed yet. A conversation here does not mean the station is reachable now.",
+    "note": "Stations heard on the air are in the Heard tab. A conversation here does not mean the station is reachable now.",
     "historySearchAria": "Search this history (Ctrl+F)",
     "historySearchPlaceholder": "Search history (Ctrl+F)"
   },
@@ -162,7 +163,6 @@
     "state": "State",
     "simulator": "Simulator (no radio)",
     "mercuryAt": "Mercury at {host}:{port}",
-    "noReadings": "Signal, audio and frequency readings are not available in this version.",
     "chooseStation": "Choose a station in Settings."
   },
   "window": {
@@ -350,6 +350,118 @@
     "heard": "Heard",
     "heardEmpty": "No stations heard yet. Stations you hear on the air will appear here.",
     "toggle": "Chats",
-    "close": "Close"
+    "close": "Close",
+    "heardNew": "{n} station heard since you last looked | {n} stations heard since you last looked"
+  },
+  "heard": {
+    "searchAria": "Search heard stations",
+    "searchPlaceholder": "Search callsign or locator",
+    "filterAria": "Show stations heard by",
+    "filter": {
+      "all": "All",
+      "cq": "CQ",
+      "beacon": "Beacon",
+      "session": "Session",
+      "favourite": "Starred"
+    },
+    "listAria": "Heard stations",
+    "source": {
+      "cq": "CQ",
+      "beacon": "Beacon",
+      "session": "Session"
+    },
+    "age": {
+      "s": "{n} s ago",
+      "min": "{n} min ago",
+      "h": "{n} h ago",
+      "d": "{n} d ago"
+    },
+    "notHeard": "not heard recently",
+    "gridTitle": "Locator the station sent",
+    "snr": "{db} dB",
+    "mhz": "{mhz} MHz",
+    "offset": "{hz} Hz off",
+    "count": "heard {n} time | heard {n} times",
+    "from": "{source}, {at}",
+    "fromAged": "{source}, {at}, {age} s old",
+    "star": "Star {callsign}",
+    "unstar": "Unstar {callsign}",
+    "noMatch": "No heard station matches.",
+    "notReachable": "Heard is not the same as reachable: a station heard here may not answer a call.",
+    "announce": "{callsign} heard: {source}"
+  },
+  "beacon": {
+    "title": "Beacons",
+    "periodic": "Send periodic beacons",
+    "prompt": "Beacons were on last time; turn on again?",
+    "interval": "Every",
+    "minutes": "{n} min",
+    "jitter": "±15 % jitter",
+    "includeGrid": "Include my locator",
+    "noGrid": "This station has no locator set, so beacons carry none.",
+    "next": "Next beacon",
+    "off": "Beacons are off",
+    "suppressed": "suppressed: {reason}",
+    "channelLabel": "Channel",
+    "channel": {
+      "unknown": "Channel occupancy unknown",
+      "clear": "Clear",
+      "busy": "Busy"
+    }
+  },
+  "telemetry": {
+    "title": "Telemetry",
+    "linkLabel": "Telemetry link",
+    "link": {
+      "unconfigured": "Not configured",
+      "connecting": "Connecting",
+      "up": "Up",
+      "lost": "Lost"
+    },
+    "lostInSession": "Telemetry is lost; the chat carries on without it.",
+    "snr": "SNR",
+    "mode": "TX / RX mode",
+    "txRx": "{tx} / {rx}",
+    "queued": "Queued in modem",
+    "throughput": "Throughput",
+    "throughputTitle": "Bytes the peer confirmed this session, per second",
+    "bps": "{n} B/s",
+    "audio": "Audio",
+    "audioOk": "OK",
+    "audioFault": "Fault",
+    "frequency": "Frequency",
+    "mhz": "{mhz} MHz",
+    "ageS": "{s} s old",
+    "unavailable": "unavailable"
+  },
+  "activity": {
+    "title": "Activity",
+    "count": "{n} line | {n} lines",
+    "listAria": "Activity, newest first",
+    "empty": "Nothing yet."
+  },
+  "strip": {
+    "aria": "Station",
+    "collapse": "Collapse the station strip",
+    "expand": "Expand the station strip",
+    "freqAria": "{mhz} MHz",
+    "freqNone": "Frequency unavailable",
+    "noBand": "band unknown",
+    "noMode": "mode unknown",
+    "profile": "Station",
+    "cq": "Call CQ",
+    "beaconNow": "Beacon now",
+    "cqOutcome": "CQ: {what}",
+    "beaconOutcome": "Beacon: {what}",
+    "nextBeacon": "Next beacon {time}",
+    "outcome": {
+      "submitted": "submitted",
+      "transmitted": "transmitted",
+      "notConfirmed": "not confirmed",
+      "refused": "not sent: {reason}"
+    },
+    "spectrum": "Spectrum",
+    "spectrumSoon": "The spectrum view arrives in a later version.",
+    "telemetryUnavailable": "telemetry unavailable"
   }
 }

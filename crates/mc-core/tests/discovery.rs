@@ -478,6 +478,40 @@ async fn session_peer_is_recorded_as_heard() {
     assert_eq!(row.count, 1);
 }
 
+/// M3a Task 10: on the simulator with SIM1 on the air (the desktop app's
+/// setting), SIM1's CQ and its beacon with a locator reach the heard list
+/// without RF, and our own Beacon now goes out through the fake's broadcast
+/// port. Tests that pin event sequences leave this off (the default).
+#[tokio::test(flavor = "multi_thread")]
+async fn simulator_peer_calls_cq_and_beacons() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions { sim_peer_broadcasts: true, ..opts(dir.path()) });
+    let id = save(&h, StationProfile::new_simulator("ZS6ABC")).await;
+    let mut rx = h.subscribe();
+    select(&h, &mut rx, &id).await;
+    let cq = heard_event(&mut rx, "SIM1", 10).await;
+    assert_eq!(cq.source, Some(HeardSource::Cq), "{cq:?}");
+    let beacon = wait_for(&mut rx, 10, |e| match e {
+        AppEvent::Heard { station } | AppEvent::HeardUpdated { station }
+            if station.callsign == "SIM1" && station.source == Some(HeardSource::Beacon) =>
+        {
+            Some(station.clone())
+        }
+        _ => None,
+    })
+    .await;
+    assert_eq!(beacon.grid.as_deref(), Some(mc_core::sim::PEER_GRID));
+    h.call(AppCommand::SendBeaconNow).await.unwrap();
+    let outcome = wait_for(&mut rx, 10, |e| match e {
+        AppEvent::Broadcast { outcome, .. } if !matches!(outcome, mc_core::app::BroadcastOutcome::Submitted) => {
+            Some(outcome.clone())
+        }
+        _ => None,
+    })
+    .await;
+    assert_eq!(outcome, mc_core::app::BroadcastOutcome::Transmitted, "our beacon goes out on the simulator");
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn favourite_is_listed_without_recent_observation() {
     let net = FakeNet::start().await;

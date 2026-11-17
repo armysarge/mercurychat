@@ -7,6 +7,7 @@
 
 use crate::session::{SessionCommand, SessionEvent};
 use crate::station::{Station, StationConfig, StationError};
+use mch_protocol::beacon::{Beacon, CAP_CHAT};
 use mch_protocol::ObjectId;
 use mercury_adapter::fake::FakeNet;
 use mercury_adapter::{Callsign, Endpoint};
@@ -17,17 +18,28 @@ use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
 
 pub const PEER_CALLSIGN: &str = "SIM1";
+/// The locator SIM1's beacons carry (a demo square, not anyone's station).
+pub const PEER_GRID: &str = "JJ00aa";
+/// How long after attach SIM1 first calls CQ and beacons, and how often after.
+pub const PEER_FIRST: Duration = Duration::from_secs(3);
+pub const PEER_EVERY: Duration = Duration::from_secs(60);
+/// The gap between SIM1's CQ and its beacon, so each is heard on its own.
+const PEER_GAP: Duration = Duration::from_secs(2);
 
 pub struct SimModem {
     pub net: Arc<FakeNet>,
     pub peer_callsign: String,
     pub station: Station,
     peer: AbortHandle,
+    on_air: Option<AbortHandle>,
 }
 
 impl Drop for SimModem {
     fn drop(&mut self) {
         self.peer.abort(); // drops the peer station, its sockets and its lock
+        if let Some(t) = self.on_air.take() {
+            t.abort();
+        }
     }
 }
 
@@ -45,7 +57,39 @@ impl SimModem {
         let mut station =
             Station::open(StationConfig::defaults(ours, Endpoint::base("127.0.0.1", net.a_base), station_dir))?;
         station.attach().await?;
-        Ok(SimModem { net, peer_callsign: PEER_CALLSIGN.into(), station, peer })
+        Ok(SimModem { net, peer_callsign: PEER_CALLSIGN.into(), station, peer, on_air: None })
+    }
+
+    /// Our side's broadcast (KISS) port on the fake modem.
+    pub fn broadcast_port(&self) -> u16 {
+        self.net.a_bcast
+    }
+
+    /// Make SIM1 call CQ and send an MCB/1 beacon with its locator,
+    /// [`PEER_FIRST`] after now and then every [`PEER_EVERY`], so the heard
+    /// list has stations without a radio (M3a Task 10). As on the air, none
+    /// goes out while a session is up; a skipped one is not made up later.
+    pub fn start_peer_broadcasts(&mut self) {
+        if self.on_air.is_some() {
+            return;
+        }
+        let net = self.net.clone();
+        let task = tokio::spawn(async move {
+            let mut seq = rand::random::<u32>();
+            let mut next = tokio::time::Instant::now() + PEER_FIRST;
+            loop {
+                tokio::time::sleep_until(next).await;
+                net.air_cq(1, PEER_CALLSIGN, "2300");
+                tokio::time::sleep(PEER_GAP).await;
+                if let Ok(b) = Beacon::new(seq, PEER_CALLSIGN, Some(PEER_GRID), CAP_CHAT) {
+                    if net.air_broadcast(1, b.encode()) {
+                        seq = seq.wrapping_add(1);
+                    }
+                }
+                next += PEER_EVERY;
+            }
+        });
+        self.on_air = Some(task.abort_handle());
     }
 }
 

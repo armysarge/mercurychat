@@ -9,7 +9,8 @@
 //   4. the composer has no resize handle, grows with its text up to about
 //      8 lines, scrolls beyond that, and shrinks back after Send
 //   5. one sidebar, the same on Operate, Conversations, Settings and
-//      Diagnostics: same element, width, search text and selection; Heard tab
+//      Diagnostics: same element, left edge and width (Operate's station strip
+//      sits above it, so its top differs), search text and selection; Heard tab
 //      stays chosen; picking a chat from Settings opens it
 //   6. at 900 px the sidebar is a drawer
 //   7. a moved and resized window comes back the same after a restart
@@ -18,6 +19,15 @@
 //      and the tauri `devtools` feature is not in the dependency tree
 //   9. themes: Night Red re-colours the window at once, density and text size apply
 //      at once, and the splash and window come back in it after a restart
+// M3a Task 10 (Operate workspace), on the same simulator run:
+//   T10a SIM1 appears in Heard by CQ and then with a "Beacon" badge and its
+//        locator, highlighted (static under reduced motion), announced politely;
+//        the Heard tab counts new stations while Chats is open and clears on open
+//   T10b a star persists across a restart (checked in T10e)
+//   T10c Call CQ shows "transmitted"; telemetry reads "unavailable"; the strip's
+//        frequency is dashes in the seven-segment font; channel occupancy unknown
+//   T10d turning beacons on shows a countdown; the activity drawer lists PTT lines
+//   T10e after a restart beacons are off and the prompt asks to turn them on
 // Usage: node lab/windows/m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -137,6 +147,56 @@ try {
   if (await s.eval("document.querySelector('input.listen')")) throw new Error("the old Listen switch is still in the window");
   results.push('PASS receive only: first use explains automatic answering and offers "Start in Receive only"; header toggles Answering calls <-> Receive only from the core\'s state; no old Listen switch');
 
+  // ---- T10a. SIM1 is heard by CQ, then by beacon with its locator (Chats open: the Heard tab counts them)
+  await until(s, "document.querySelector('aside.sidebar [role=tab][aria-selected=true]')?.textContent.trim() === 'Chats'", "Chats open first");
+  await until(s, "!!document.querySelector('#side-heard-new')", "the Heard tab's new-station count while Chats is open", 15000);
+  const count = await s.eval("document.querySelector('#side-heard-new [aria-hidden]').textContent.trim()");
+  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
+  await until(s, "!document.querySelector('#side-heard-new')", "the count cleared once Heard is open");
+  const heardRow = "document.querySelector('.heard .row[data-callsign=\"SIM1\"]')";
+  await until(s, heardRow, "SIM1 in the Heard list", 15000);
+  // The first observation (the CQ) came while Chats was open; the beacon follows about 2 s later.
+  await until(s, `${heardRow}.querySelector('.badge')?.textContent.trim() === 'Beacon' && ${heardRow}.querySelector('.grid')?.textContent.trim() === 'JJ00aa'`, "SIM1's Beacon badge and locator", 15000);
+  const fresh = await s.eval(`${heardRow}.classList.contains('fresh')`);
+  const anim = await s.eval(`getComputedStyle(${heardRow}).animationName`);
+  if (!fresh || anim === "none") throw new Error(`no new-station highlight: fresh ${fresh}, animation ${anim}`);
+  await s.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "reduce" }] });
+  const stillAnim = await s.eval(`getComputedStyle(${heardRow}).animationName`);
+  await s.send("Emulation.setEmulatedMedia", { features: [{ name: "prefers-reduced-motion", value: "no-preference" }] });
+  if (stillAnim !== "none") throw new Error(`the highlight still animates under reduced motion: ${stillAnim}`);
+  const live = await s.eval("document.querySelector('.heard [aria-live=polite]').textContent.trim()");
+  if (!/^SIM1 heard: (CQ|Beacon)$/.test(live)) throw new Error(`live region: "${live}"`);
+  const act = await s.eval("[...document.querySelectorAll('.activity .line[data-kind=heard]')].map(l => l.querySelector('.text').textContent)");
+  if (!act.some((l) => /SIM1 \(CQ/.test(l))) throw new Error(`no CQ heard line in the activity drawer: ${act.slice(0, 6).join(" | ")}`);
+  results.push(`PASS heard: while Chats was open the Heard tab counted ${count}; opening Heard cleared it; SIM1 listed with a "Beacon" badge and locator JJ00aa after its CQ, highlighted (animation ${anim}, static under reduced motion); live region "${live}"; the activity drawer has the CQ line`);
+
+  // ---- T10b. a star persists (checked again after the restart in section 7)
+  await s.eval(`${heardRow}.querySelector('.star').click()`);
+  await until(s, `${heardRow}.querySelector('.star').getAttribute('aria-pressed') === 'true'`, "SIM1 starred");
+
+  // ---- T10c. CQ shows "transmitted"; telemetry reads unavailable; the strip shows dashes
+  await s.eval(click("Call CQ"));
+  await until(s, "/CQ: transmitted/.test(document.querySelector('.strip .cq-outcome')?.textContent ?? '')", "CQ transmitted", 10000);
+  const tel = await s.eval("[...document.querySelectorAll('.telemetry .stat')].map(e => e.className.split(' ').pop() + '=' + e.lastElementChild.textContent.trim())");
+  for (const k of ["snr", "mode", "throughput", "audio", "frequency"]) {
+    if (!tel.includes(`${k}=unavailable`)) throw new Error(`telemetry ${k} is not "unavailable": ${tel.join(", ")}`);
+  }
+  if (!tel.some((x) => x.startsWith("link=") && x.endsWith("Not configured"))) throw new Error(`telemetry link: ${tel.join(", ")}`);
+  const freq = await s.eval("({ text: document.querySelector('.strip .freq-digits').textContent.trim(), aria: document.querySelector('.strip .freq-digits').getAttribute('aria-label'), font: getComputedStyle(document.querySelector('.strip .freq-digits')).fontFamily })");
+  if (freq.text !== "--.---.---" || freq.aria !== "Frequency unavailable" || !/DSEG7/.test(freq.font)) throw new Error(`strip frequency: ${JSON.stringify(freq)}`);
+  const channel = await s.eval("document.querySelector('.beacon .channel').textContent.trim()");
+  if (channel !== "Channel occupancy unknown") throw new Error(`channel: ${channel}`);
+
+  // ---- T10d. beacons on show a countdown; the activity drawer lists PTT lines
+  await s.eval("document.querySelector('input.beacon-toggle').click()");
+  await until(s, "document.querySelector('input.beacon-toggle').checked && /^Next beacon \\d\\d:\\d\\d:\\d\\d$/.test(document.querySelector('.strip .next-beacon').textContent.trim())", "the beacon countdown on the strip");
+  const cd = await s.eval("[document.querySelector('.strip .next-beacon').textContent.trim(), document.querySelector('.beacon .countdown')?.textContent.trim()]");
+  await s.eval(click("Beacon now"));
+  await until(s, "/Beacon: transmitted/.test(document.querySelector('.strip .beacon-outcome')?.textContent ?? '')", "Beacon now transmitted", 10000);
+  const ptt = await s.eval("[...document.querySelectorAll('.activity .line[data-kind=ptt]')].map(l => l.querySelector('.text').textContent)");
+  if (!ptt.includes("PTT on") || !ptt.includes("PTT off")) throw new Error(`no PTT lines in the activity drawer: ${JSON.stringify(ptt)}`);
+  results.push(`PASS operate: Call CQ -> "transmitted"; telemetry rows read "unavailable" (link Not configured); strip frequency "--.---.---" in DSEG7, aria "Frequency unavailable"; "${channel}"; beacons on -> "${cd[0]}" (card ${cd[1]}); Beacon now -> "transmitted"; the activity drawer lists ${ptt.length} PTT lines`);
+
   // ---- 3. the antenna icon
   const d = await s.eval(`${rail("Operate")}.querySelector('path').getAttribute('d')`);
   if (d !== ANTENNA) throw new Error(`Operate icon path is ${d}`);
@@ -181,7 +241,10 @@ try {
       search: document.querySelector('input.search').value, active: document.querySelector('.item.active b')?.textContent,
       tabs: [...document.querySelectorAll('aside.sidebar [role=tab]')].map(b => b.textContent.trim()).join('|') })`);
     if (state.same !== "same instance") throw new Error(`${name}: the sidebar was rebuilt`);
-    if (state.rect !== sideRect) throw new Error(`${name}: sidebar rect ${state.rect} != ${sideRect}`);
+    // Left edge and width only: on Operate the station strip (Task 10, owner ruling 17 Nov)
+    // sits above the sidebar, so its top and height differ from the other pages.
+    const lw = (r) => { const [l, , w] = r.split(","); return `${l},${w}`; };
+    if (lw(state.rect) !== lw(sideRect)) throw new Error(`${name}: sidebar left/width ${lw(state.rect)} != ${lw(sideRect)}`);
     if (state.search !== "SIM" || state.active !== picked) throw new Error(`${name}: search/selection lost: ${JSON.stringify(state)}`);
     if (state.tabs !== "Chats|Heard") throw new Error(`${name}: tabs ${state.tabs}`);
   }
@@ -244,6 +307,16 @@ try {
   const diff = ["x", "y", "w", "h"].map((k, i) => Math.abs(back2[k] - want[i]));
   if (Math.max(...diff) > 2) throw new Error(`window came back at ${JSON.stringify(back2)}, wanted ${want}`);
   results.push(`PASS window: moved and resized to ${want.join(",")}, back at ${back2.x},${back2.y},${back2.w},${back2.h} after restart`);
+
+  // ---- T10e. after the restart: the star is kept, beacons are off and the prompt asks (RF-02)
+  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
+  await until(s, "document.querySelector('.heard .row[data-callsign=\"SIM1\"] .star')?.getAttribute('aria-pressed') === 'true'", "SIM1 still starred after the restart");
+  await until(s, "!!document.querySelector('.beacon .prompt')", "the beacon prompt after the restart");
+  const prompt = await s.eval("document.querySelector('.beacon .prompt').textContent.trim()");
+  const armed = await s.eval("document.querySelector('input.beacon-toggle').checked");
+  const stripOff = await s.eval("document.querySelector('.strip .next-beacon').textContent.trim()");
+  if (armed || prompt !== "Beacons were on last time; turn on again?" || stripOff !== "Beacons are off") throw new Error(`after restart: armed ${armed}, prompt "${prompt}", strip "${stripOff}"`);
+  results.push(`PASS restart: SIM1's star kept; beacons off ("${stripOff}") with the prompt "${prompt}"`);
 
   // ---- 11. themes: Night Red changes the window, persists, and the splash uses it themeAfter a restart
   const rgb = (hex) => { const h = hex.replace("#", ""); return `rgb(${parseInt(h.slice(0, 2), 16)}, ${parseInt(h.slice(2, 4), 16)}, ${parseInt(h.slice(4, 6), 16)})`; };

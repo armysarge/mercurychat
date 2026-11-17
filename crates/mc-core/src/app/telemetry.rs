@@ -78,6 +78,9 @@ pub struct TelemetryView {
     /// The radio's dial frequency (Hz) as Mercury last read it, with its age.
     #[ts(as = "Option<Reading<f64>>")]
     pub frequency: Option<Reading<u64>>,
+    /// The amateur band `frequency` falls in (e.g. `40m`); `None` with no
+    /// frequency or outside every band (never guessed).
+    pub band: Option<String>,
     /// The broadcast plane's listen mode (`MODE` index) as telemetry reports it.
     pub listen_mode: Option<u8>,
 }
@@ -270,10 +273,13 @@ impl Telemetry {
     pub fn view(&self, now: Instant) -> TelemetryView {
         let st = self.latest.as_ref();
         let status = st.map(|l| &l.status);
+        // The SNR is of the last frame Mercury decoded: its age is that
+        // decode's (`freq_offset_age_ms`), carried forward from receipt.
         let snr_db = st
             .and_then(|l| {
                 let value = l.status.snr?;
-                Some(Reading { value, source: TELEMETRY_SOURCE.into(), at_utc: l.at_utc.clone(), age_ms: None })
+                let age_ms = l.status.freq_offset_age_ms.map(|a| a.saturating_add(ms(now - l.at)));
+                Some(Reading { value, source: TELEMETRY_SOURCE.into(), at_utc: l.at_utc.clone(), age_ms })
             })
             .or_else(|| self.control_snr.clone());
         let frequency = st.and_then(|l| {
@@ -294,6 +300,7 @@ impl Telemetry {
             queued_bytes: self.queued,
             acked_bps,
             audio: status.and_then(|s| Some(AudioView { ok: s.audio_ok?, error: s.audio_error.clone() })),
+            band: frequency.as_ref().and_then(|f| crate::band::band_for(f.value)).map(String::from),
             frequency,
             listen_mode: self.live_listen_mode(),
         }
@@ -470,6 +477,18 @@ mod tests {
         assert_eq!(t.tuning(now), Tuning::default());
         assert_eq!(listen.current(), Some(1), "the gate falls back to the attach value");
         assert!(t.take_event(now + EVENT_GAP).is_some(), "the loss is published");
+    }
+
+    /// OBS-01 provenance (13F carry): the telemetry SNR carries the age of
+    /// the decode it measures, aged from receipt like the frequency.
+    #[tokio::test(start_paused = true)]
+    async fn telemetry_snr_carries_its_decode_age() {
+        let mut t = Telemetry::default();
+        let now = Instant::now();
+        up(&mut t, now);
+        t.on_msg(status(r#"{"type":"status","snr":7.5,"freq_offset_hz":1.0,"freq_offset_age_ms":300}"#), now);
+        let snr = t.view(now + Duration::from_millis(200)).snr_db.expect("an SNR after a decode");
+        assert_eq!((snr.value, snr.source.as_str(), snr.age_ms), (7.5, TELEMETRY_SOURCE, Some(500)));
     }
 
     #[tokio::test(start_paused = true)]

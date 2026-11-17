@@ -216,12 +216,24 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
       e.isDirectory() ? (e.name === "bindings" ? [] : walkAll(join(dir, e.name))) : /\.(vue|ts)$/.test(e.name) ? [join(dir, e.name)] : [],
     );
   const namespaces = new Set(Object.keys(flat.en).map((k) => k.split(".")[0]));
+  const binding = (file) => readFileSync(join(src, "bindings", file), "utf8").replace(/\/\*\*[\s\S]*?\*\//g, "");
+  /** The members of a string-literal union type (`"cq" | "beacon"`). */
+  const unionOf = (file) => [...binding(file).split("=").slice(1).join("=").matchAll(/"(\w+)"/g)].map((m) => m[1]);
+  /** The `type` tags of a tagged union (`{ "type": "up" } | ...`). */
+  const taggedOf = (file) => [...binding(file).matchAll(/"type": "(\w+)"/g)].map((m) => m[1]);
   /** Values the dynamic keys `${prefix}${x}` can take, from the app's own lists. */
   const dynamic = {
     "theme.name.": () => PRESETS.map((p) => p.id),
     "theme.token.": () => TOKEN_KEYS.filter((k) => k !== "scrim" && k !== "shadow" && !LOGO_KEYS.includes(k)),
     "theme.file.": () => ["tooLarge", "notJson", "notTheme", "version"],
     "modem.": () => [...readFileSync(join(src, "bindings", "ModemState.ts"), "utf8").matchAll(/"type": "(\w+)"/g)].map((m) => m[1]),
+    // Task 10: the values come from the generated contract, so a new variant fails here until it has words.
+    "heard.source.": () => unionOf("HeardSource.ts"),
+    "heard.filter.": () => ["all", "favourite", ...unionOf("HeardSource.ts")],
+    "beacon.channel.": () => taggedOf("ChannelState.ts"),
+    "telemetry.link.": () => taggedOf("TelemetryLinkView.ts"),
+    "strip.outcome.": () => taggedOf("BroadcastOutcome.ts"),
+    "broadcast.notConfirmed.": () => unionOf("NotConfirmedReason.ts"),
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
       const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";

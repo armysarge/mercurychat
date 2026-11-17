@@ -30,6 +30,11 @@ ackedBps: number | null, audio: AudioView | null,
  */
 frequency: Reading<number> | null, 
 /**
+ * The amateur band `frequency` falls in (e.g. `40m`); `None` with no
+ * frequency or outside every band (never guessed).
+ */
+band: string | null, 
+/**
  * The broadcast plane's listen mode (`MODE` index) as telemetry reports it.
  */
 listenMode: number | null, };

@@ -3,8 +3,12 @@
 // typed command (api.ts) and comes back as an event.
 import { computed, reactive, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
+import type { ActivityEntry } from "./bindings/ActivityEntry";
+import type { BroadcastKind } from "./bindings/BroadcastKind";
+import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
+import type { HeardStation } from "./bindings/HeardStation";
 import { applyLanguage, rememberLanguage, t } from "./i18n";
 
 export const MAX_BYTES = 4096; // CHT-01
@@ -102,8 +106,113 @@ export const canAbort = computed(() => inSession.value || ["calling", "draining"
 
 export const mirror = new Mirror((v) => (app.view = v), {
   message: onMessage,
-  resynced: () => void reloadChat(),
+  heard: onHeard,
+  activity: (e) => {
+    discovery.activity.unshift(e);
+    if (discovery.activity.length > ACTIVITY_MAX) discovery.activity.length = ACTIVITY_MAX;
+  },
+  broadcast: (kind, outcome) => (discovery.outcome[kind] = outcome),
+  resynced: () => {
+    void reloadChat();
+    void reloadDiscovery();
+  },
 });
+
+// ---- discovery: the heard list, the activity log, CQ and beacon outcomes (M3a Task 10)
+
+/** Lines the activity drawer keeps (the core's ring holds more; it is re-read on resync). */
+const ACTIVITY_MAX = 500;
+/** How long a newly heard row stays highlighted (04 §2, owner request: about 3 s). */
+export const HIGHLIGHT_MS = 3000;
+
+export const discovery = reactive({
+  /** The heard list, newest first; favourites with nothing heard sort last. */
+  heard: [] as HeardStation[],
+  /** The activity log, newest first. */
+  activity: [] as ActivityEntry[],
+  /** The latest outcome of each kind of broadcast this run. */
+  outcome: {} as Partial<Record<BroadcastKind, BroadcastOutcome>>,
+  /** Stations heard since the Heard tab was last shown. */
+  unseen: 0,
+  /** Rows heard just now, by callsign: the time they were heard (for the highlight). */
+  fresh: {} as Record<string, number>,
+  /** The latest polite announcement: "{callsign} heard: {Beacon|CQ}". */
+  announce: "",
+});
+
+/** Newest heard first; never-heard favourites last, by callsign. */
+function heardOrder(a: HeardStation, b: HeardStation): number {
+  if (a.lastHeardUtc && b.lastHeardUtc) return b.lastHeardUtc.localeCompare(a.lastHeardUtc);
+  if (a.lastHeardUtc || b.lastHeardUtc) return a.lastHeardUtc ? -1 : 1;
+  return a.callsign.localeCompare(b.callsign);
+}
+
+/** A heard-list row from the core: new, heard again, or changed (SNR, star). */
+function onHeard(st: HeardStation) {
+  const i = discovery.heard.findIndex((h) => h.callsign === st.callsign);
+  const before = i >= 0 ? discovery.heard[i] : null;
+  // A new observation is a newer last-heard time; a star or a completed SNR is not.
+  const heardAgain = !!st.lastHeardUtc && st.lastHeardUtc !== before?.lastHeardUtc;
+  if (i >= 0) discovery.heard.splice(i, 1, st);
+  else discovery.heard.push(st);
+  discovery.heard.sort(heardOrder);
+  if (!heardAgain || !st.source) return;
+  discovery.fresh[st.callsign] = Date.now();
+  setTimeout(() => {
+    if (Date.now() - (discovery.fresh[st.callsign] ?? 0) >= HIGHLIGHT_MS) delete discovery.fresh[st.callsign];
+  }, HIGHLIGHT_MS + 50);
+  if (app.sideTab !== "heard") discovery.unseen++;
+  if (st.source !== "session") discovery.announce = t("heard.announce", { callsign: st.callsign, source: t(`heard.source.${st.source}`) });
+}
+
+/** Re-read the heard list and the activity log (start-up, resync, a new station). */
+export async function reloadDiscovery() {
+  if (!activeProfile.value) {
+    discovery.heard = [];
+    discovery.activity = [];
+    return;
+  }
+  try {
+    const [h, a] = await Promise.all([call({ type: "heard" }), call({ type: "activity" })]);
+    if (h.type === "heard") discovery.heard = [...h.stations].sort(heardOrder);
+    if (a.type === "activity") discovery.activity = [...a.entries].reverse().slice(0, ACTIVITY_MAX);
+  } catch {
+    // Shown as an empty list; the next event or resync fills it.
+  }
+}
+
+// Opening the Heard tab clears its count.
+watch(
+  () => app.sideTab,
+  (tab) => {
+    if (tab === "heard") discovery.unseen = 0;
+  },
+);
+
+/** A discovery command's refusal, shown inline beside the control that sent it. */
+export const discoveryError = reactive({ cq: "", beacon: "", star: "" });
+
+async function discoveryAct(slot: keyof typeof discoveryError, step: () => Promise<unknown>) {
+  discoveryError[slot] = "";
+  try {
+    await step();
+  } catch (e) {
+    discoveryError[slot] = describeError(e);
+  }
+}
+
+export const sendCq = () => discoveryAct("cq", () => call({ type: "sendCq" }));
+export const sendBeaconNow = () => discoveryAct("beacon", () => call({ type: "sendBeaconNow" }));
+export const setBeacon = (on: boolean) => discoveryAct("beacon", () => call({ type: "setBeacon", on }));
+export const setBeaconInterval = (minutes: number) => discoveryAct("beacon", () => call({ type: "setBeaconInterval", minutes }));
+export const setBeaconContent = (includeGrid: boolean) =>
+  discoveryAct("beacon", async () => {
+    await call({ type: "setBeaconContent", includeGrid });
+    // No event carries this setting: keep the local copy in step with the core.
+    if (app.view) app.view.snapshot.beacon = { ...app.view.snapshot.beacon, includeGrid };
+  });
+export const setFavourite = (callsign: string, on: boolean) => discoveryAct("star", () => call({ type: "setFavourite", callsign, on }));
+export const selectProfile = (id: string) => act(() => call({ type: "selectProfile", id }));
 
 let convTimer: ReturnType<typeof setTimeout> | undefined;
 
