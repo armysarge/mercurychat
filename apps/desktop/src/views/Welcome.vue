@@ -6,6 +6,7 @@ import { ref } from "vue";
 import { useI18n } from "vue-i18n";
 import ProfileForms from "../components/ProfileForms.vue";
 import { app } from "../store";
+import Switch from "../components/Switch.vue";
 
 const { t } = useI18n();
 const startReceiveOnly = ref(false);
@@ -17,9 +18,9 @@ const startReceiveOnly = ref(false);
       <h1>{{ t("welcome.title") }}</h1>
       <p class="muted">{{ t("welcome.intro") }}</p>
       <p class="muted">{{ t("welcome.answersAuto") }}</p>
-      <label class="start-rx">
-        <input v-model="startReceiveOnly" type="checkbox" name="startReceiveOnly" />
+      <label class="switch-row start-rx">
         <span>{{ t("welcome.startReceiveOnly") }}</span>
+        <Switch input-class="start-receive-only" warn :checked="startReceiveOnly" @change="startReceiveOnly = ($event.target as HTMLInputElement).checked" />
       </label>
       <p class="muted small">{{ t("welcome.startReceiveOnlyNote") }}</p>
     </div>
@@ -30,5 +31,4 @@ const startReceiveOnly = ref(false);
 <style scoped>
 .welcome { padding: calc(var(--space) * 4); display: grid; gap: calc(var(--space) * 3); max-width: 960px; overflow-y: auto; height: 100%; align-content: start; }
 h1 { font-size: calc(22px * var(--font-scale)); }
-.start-rx { flex-direction: row; align-items: center; gap: 8px; color: var(--text); font-size: calc(14px * var(--font-scale)); }
 </style>

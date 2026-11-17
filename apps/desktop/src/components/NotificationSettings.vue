@@ -12,6 +12,7 @@ import type { NotifyPrefs } from "../bindings/NotifyPrefs";
 import { askPermission } from "../notifier";
 import { DEFAULT_PREFS } from "../notify";
 import { setNotifyPrefs, snapshot } from "../store";
+import Switch from "./Switch.vue";
 
 const { t } = useI18n();
 const KINDS = ["message", "incoming", "callFailed", "delivery", "heardFavourite", "heardAny", "fault", "beaconRefused"] as const;
@@ -47,27 +48,45 @@ const setTime = (k: "quietStart" | "quietEnd", e: Event) => {
 <template>
   <section class="card stack notifications" aria-labelledby="h-notify">
     <h2 id="h-notify">{{ t("notifySettings.title") }}</h2>
-    <label class="row toggle">
-      <input type="checkbox" class="notify-enabled" :checked="prefs.enabled" @change="toggle('enabled', $event)" />
+    <label class="switch-row master">
       <span>{{ t("notifySettings.enabled") }}</span>
+      <Switch input-class="notify-enabled" :checked="prefs.enabled" @change="toggle('enabled', $event)" />
     </label>
     <fieldset :disabled="!prefs.enabled" class="kinds">
       <legend class="label">{{ t("notifySettings.kindsLegend") }}</legend>
-      <label v-for="k in KINDS" :key="k" class="row toggle">
-        <input type="checkbox" :class="`notify-${k}`" :checked="prefs[k]" @change="toggle(k, $event)" />
-        <span>{{ t(`notifySettings.kind.${k}`) }}</span>
-      </label>
+      <div class="grid">
+        <label v-for="k in KINDS" :key="k" class="switch-row">
+          <span>{{ t(`notifySettings.kind.${k}`) }}</span>
+          <Switch :input-class="`notify-${k}`" :checked="prefs[k]" :disabled="!prefs.enabled" @change="toggle(k, $event)" />
+        </label>
+      </div>
     </fieldset>
     <fieldset :disabled="!prefs.enabled" class="how">
       <legend class="label">{{ t("notifySettings.howLegend") }}</legend>
-      <label class="row toggle"><input type="checkbox" :checked="prefs.sound" @change="toggle('sound', $event)" /><span>{{ t("notifySettings.sound") }}</span></label>
-      <label class="row toggle"><input type="checkbox" class="notify-hide-text" :checked="prefs.hideText" @change="toggle('hideText', $event)" /><span>{{ t("notifySettings.hideText") }}</span></label>
-      <label class="row toggle"><input type="checkbox" :checked="quietOn" @change="setQuiet(($event.target as HTMLInputElement).checked)" /><span>{{ t("notifySettings.quiet") }}</span></label>
-      <div v-if="quietOn" class="row quiet">
-        <label>{{ t("notifySettings.quietFrom") }} <input type="time" :value="prefs.quietStart ?? ''" @change="setTime('quietStart', $event)" /></label>
-        <label>{{ t("notifySettings.quietTo") }} <input type="time" :value="prefs.quietEnd ?? ''" @change="setTime('quietEnd', $event)" /></label>
+      <div class="grid">
+        <label class="switch-row">
+          <span>{{ t("notifySettings.sound") }}</span>
+          <Switch :checked="prefs.sound" :disabled="!prefs.enabled" @change="toggle('sound', $event)" />
+        </label>
+        <label class="switch-row">
+          <span>{{ t("notifySettings.hideText") }}</span>
+          <Switch input-class="notify-hide-text" :checked="prefs.hideText" :disabled="!prefs.enabled" @change="toggle('hideText', $event)" />
+        </label>
+        <label class="switch-row">
+          <span>{{ t("notifySettings.lab") }}</span>
+          <Switch :checked="prefs.labEnabled" :disabled="!prefs.enabled" @change="toggle('labEnabled', $event)" />
+        </label>
+        <div class="quiet-hours">
+          <label class="switch-row">
+            <span>{{ t("notifySettings.quiet") }}</span>
+            <Switch :checked="quietOn" :disabled="!prefs.enabled" @change="setQuiet(($event.target as HTMLInputElement).checked)" />
+          </label>
+          <div v-if="quietOn" class="times">
+            <label>{{ t("notifySettings.quietFrom") }} <input type="time" :value="prefs.quietStart ?? ''" @change="setTime('quietStart', $event)" /></label>
+            <label>{{ t("notifySettings.quietTo") }} <input type="time" :value="prefs.quietEnd ?? ''" @change="setTime('quietEnd', $event)" /></label>
+          </div>
+        </div>
       </div>
-      <label class="row toggle"><input type="checkbox" :checked="prefs.labEnabled" @change="toggle('labEnabled', $event)" /><span>{{ t("notifySettings.lab") }}</span></label>
     </fieldset>
     <p class="muted small">{{ t("notifySettings.note") }}</p>
     <p v-if="denied" class="warn small" role="status">{{ t("notifySettings.denied") }}</p>
@@ -76,8 +95,15 @@ const setTime = (k: "quietStart" | "quietEnd", e: Event) => {
 </template>
 
 <style scoped>
-fieldset { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
-fieldset:disabled { opacity: 0.6; }
-.kinds { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
-.quiet { gap: calc(var(--space) * 2); padding-left: 1.6em; }
+fieldset { border: 0; padding: 0; margin: 0; min-width: 0; transition: opacity 160ms ease; }
+fieldset:disabled { opacity: 0.55; }
+legend { padding: 0; margin-bottom: 4px; }
+.master { font-weight: 600; border-bottom: 1px solid var(--border); }
+/* Two columns of rows on a wide window, one on a narrow one; each row ends in its switch. */
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); column-gap: calc(var(--space) * 4); }
+.grid > .switch-row, .quiet-hours { border-bottom: 1px solid var(--border); }
+.grid .switch-row + .switch-row { border-top: 0; }
+.quiet-hours .switch-row { border: 0; }
+.times { display: flex; gap: calc(var(--space) * 2); padding: 0 0 8px; }
+.times label { flex-direction: row; align-items: center; gap: var(--space); }
 </style>

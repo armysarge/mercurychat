@@ -186,12 +186,13 @@ onUnmounted(() => {
   void setForwarding(false);
 });
 
-const AXIS_HZ = [0, 1000, 2000, 3000, 4000];
+/** Axis labels, drawn inside the canvases: kHz along the bottom, dB up the side. */
+const AXIS_KHZ = ["0", "1k", "2k", "3k", "4k"];
 const AXIS_DB = [-20, -70, -120];
 </script>
 
 <template>
-  <div class="waterfall">
+  <div :class="['waterfall', { open }]">
     <div class="head">
       <span class="label">{{ t("strip.spectrum") }}</span>
       <button class="quiet wf-toggle small" :aria-expanded="open" aria-controls="wf-body" @click="open = !open">
@@ -201,35 +202,34 @@ const AXIS_DB = [-20, -70, -120];
     <div v-if="open" id="wf-body" class="body">
       <p v-if="!up" class="muted small wf-status" role="status">{{ t("waterfall.unavailable", { link: t(`telemetry.link.${link}`) }) }}</p>
       <div v-else class="panels" :data-drawing="String(drawing)">
-        <figure class="panel">
-          <div class="plot">
-            <span class="y mono small" aria-hidden="true"><span v-for="d in AXIS_DB" :key="d">{{ d }}</span></span>
-            <canvas ref="spectrumCanvas" class="spectrum-canvas" role="img" :aria-label="t('waterfall.spectrumAria')"></canvas>
-          </div>
-          <figcaption class="x mono small" aria-hidden="true"><span v-for="hz in AXIS_HZ" :key="hz">{{ hz }}</span></figcaption>
-          <figcaption class="muted small">{{ t("waterfall.spectrumAxis") }}</figcaption>
+        <figure class="panel" :title="t('waterfall.spectrumAxis')">
+          <canvas ref="spectrumCanvas" class="spectrum-canvas" role="img" :aria-label="t('waterfall.spectrumAria')"></canvas>
+          <span class="y mono" aria-hidden="true"><span v-for="d in AXIS_DB" :key="d">{{ d }}</span></span>
+          <span class="x mono" aria-hidden="true"><span v-for="hz in AXIS_KHZ" :key="hz">{{ hz }}</span></span>
         </figure>
-        <figure class="panel">
+        <figure class="panel" :title="t('waterfall.waterfallAxis')">
           <canvas ref="waterfallCanvas" class="waterfall-canvas" role="img" :aria-label="t('waterfall.waterfallAria')"></canvas>
-          <figcaption class="x mono small" aria-hidden="true"><span v-for="hz in AXIS_HZ" :key="hz">{{ hz }}</span></figcaption>
-          <figcaption class="muted small">{{ t("waterfall.waterfallAxis") }}</figcaption>
+          <span class="x mono" aria-hidden="true"><span v-for="hz in AXIS_KHZ" :key="hz">{{ hz }}</span></span>
         </figure>
       </div>
       <p v-if="error" class="err small" role="alert">{{ error }}</p>
     </div>
-    <p v-else class="muted small">{{ up ? t("waterfall.closed") : t("strip.telemetryUnavailable") }}</p>
+    <p v-else class="muted small closed-note">{{ up ? t("waterfall.closed") : t("strip.telemetryUnavailable") }}</p>
   </div>
 </template>
 
 <style scoped>
-.waterfall { display: grid; gap: 4px; min-width: 0; }
-.head { display: flex; align-items: center; justify-content: space-between; gap: var(--space); }
-.wf-toggle { padding: 1px 8px; }
-.panels { display: grid; grid-template-columns: 1fr 1fr; gap: var(--space); }
-.panel { margin: 0; display: grid; gap: 2px; min-width: 0; }
-.plot { display: grid; grid-template-columns: auto 1fr; gap: 4px; }
-.y { display: flex; flex-direction: column; justify-content: space-between; color: var(--text-2); }
-canvas { width: 100%; height: 72px; display: block; background: var(--canvas); border: 1px solid var(--border); border-radius: 4px; }
+/* Compact, for the 60 px station strip: the label and Show/Hide on the left,
+   then the spectrum and the waterfall, 40 px tall, axis labels drawn inside. */
+.waterfall { display: flex; align-items: center; gap: var(--space); min-width: 0; height: 100%; }
+.head { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.waterfall:not(.open) { flex-direction: row; }
+.closed-note, .wf-status { margin: 0; white-space: nowrap; }
+.panels { display: flex; gap: 6px; }
+.panel { position: relative; margin: 0; width: 200px; height: 44px; }
+canvas { width: 100%; height: 100%; display: block; background: var(--canvas); border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; }
 .waterfall-canvas { image-rendering: pixelated; }
-.x { display: flex; justify-content: space-between; color: var(--text-2); }
+.x, .y { position: absolute; pointer-events: none; font-size: 9px; line-height: 1; color: var(--text-2); opacity: 0.85; }
+.x { left: 3px; right: 3px; bottom: 2px; display: flex; justify-content: space-between; }
+.y { top: 2px; bottom: 12px; left: 3px; display: flex; flex-direction: column; justify-content: space-between; }
 </style>

@@ -9,6 +9,7 @@ import { computed } from "vue";
 import { useI18n } from "vue-i18n";
 import { activeProfile, discoveryError, modemState, setBeacon, setBeaconContent, setBeaconInterval, snapshot } from "../store";
 import { countdown } from "./countdown";
+import Switch from "./Switch.vue";
 
 const { t } = useI18n();
 const props = defineProps<{ now: number }>();
@@ -31,16 +32,9 @@ function onToggle(e: Event) {
   <section class="card stack beacon" aria-labelledby="h-beacon">
     <span id="h-beacon" class="label">{{ t("beacon.title") }}</span>
     <template v-if="beacon">
-      <label class="row toggle">
-        <input
-          class="beacon-toggle"
-          type="checkbox"
-          role="switch"
-          :checked="beacon.active"
-          :disabled="!activeProfile || (!beacon.active && !idle)"
-          @change="onToggle"
-        />
+      <label class="switch-row">
         <span>{{ t("beacon.periodic") }}</span>
+        <Switch input-class="beacon-toggle" :checked="beacon.active" :disabled="!activeProfile || (!beacon.active && !idle)" @change="onToggle" />
       </label>
       <p v-if="beacon.preferred && !beacon.active" class="warn small prompt">{{ t("beacon.prompt") }}</p>
       <div class="row">
@@ -52,9 +46,9 @@ function onToggle(e: Event) {
         </label>
         <span class="muted small">{{ t("beacon.jitter") }}</span>
       </div>
-      <label class="row toggle">
-        <input type="checkbox" class="beacon-grid" :checked="beacon.includeGrid" :disabled="!activeProfile" @change="setBeaconContent(($event.target as HTMLInputElement).checked)" />
+      <label class="switch-row">
         <span>{{ t("beacon.includeGrid") }}</span>
+        <Switch input-class="beacon-grid" :checked="beacon.includeGrid" :disabled="!activeProfile" @change="setBeaconContent(($event.target as HTMLInputElement).checked)" />
       </label>
       <p v-if="beacon.includeGrid && !hasGrid" class="muted small">{{ t("beacon.noGrid") }}</p>
       <div class="stat">
@@ -70,7 +64,6 @@ function onToggle(e: Event) {
 </template>
 
 <style scoped>
-.toggle { flex-direction: row; align-items: center; gap: var(--space); color: var(--text); font-size: calc(13px * var(--font-scale)); }
 .inline { flex-direction: row; align-items: center; gap: 6px; }
 .stat { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 6px; font-size: calc(13px * var(--font-scale)); }
 .channel.busy { color: var(--warning); }

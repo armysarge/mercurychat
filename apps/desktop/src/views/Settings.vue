@@ -14,6 +14,7 @@ import StationInfo from "../components/StationInfo.vue";
 import ThemePicker from "../components/ThemePicker.vue";
 import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../i18n/locale";
 import { activeProfile, mirror, setFinaliseOnDisconnect, snapshot } from "../store";
+import Switch from "../components/Switch.vue";
 
 const { t } = useI18n();
 
@@ -91,14 +92,9 @@ async function chooseFinalise(on: boolean) {
     <MacroEditor />
     <section v-if="activeProfile" class="card stack" aria-labelledby="h-logbook">
       <h2 id="h-logbook">{{ t("logbook.title") }}</h2>
-      <label class="row toggle">
-        <input
-          type="checkbox"
-          class="finalise-on-disconnect"
-          :checked="snapshot?.finaliseOnDisconnect ?? false"
-          @change="chooseFinalise(($event.target as HTMLInputElement).checked)"
-        />
+      <label class="switch-row">
         <span>{{ t("logbook.finaliseOnDisconnect") }}</span>
+        <Switch input-class="finalise-on-disconnect" :checked="snapshot?.finaliseOnDisconnect ?? false" @change="chooseFinalise(($event.target as HTMLInputElement).checked)" />
       </label>
       <p class="muted small">{{ t("logbook.finaliseNote") }}</p>
       <p v-if="finaliseError" class="err" role="alert">{{ finaliseError }}</p>

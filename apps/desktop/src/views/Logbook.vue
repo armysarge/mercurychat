@@ -105,12 +105,12 @@ h1 { font-size: calc(20px * var(--font-scale)); }
 .table-wrap { overflow-x: auto; }
 table { border-collapse: collapse; width: 100%; font-size: calc(13px * var(--font-scale)); }
 th { text-align: left; border-bottom: 1px solid var(--border-strong); }
-th button { padding: 4px 6px; border-color: transparent; font-weight: 600; white-space: nowrap; }
+th button { min-height: 0; padding: 4px 6px; border-color: transparent; font-weight: 600; white-space: nowrap; }
 td { padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 tbody tr { cursor: pointer; }
 tbody tr:hover, tbody tr.chosen { background: var(--raised); }
 tr[data-state="final"] .state { color: var(--text-2); }
-.link { padding: 0; border: 0; background: transparent; font: inherit; color: var(--accent); }
+.link { min-height: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--accent); }
 @media (max-width: 1099px) {
   .layout { grid-template-columns: minmax(0, 1fr); }
 }

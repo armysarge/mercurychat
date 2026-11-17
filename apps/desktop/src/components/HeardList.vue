@@ -132,7 +132,7 @@ async function pick(h: HeardStation) {
 .call { overflow-wrap: anywhere; }
 .meta { gap: 2px 8px; }
 .meta > span { white-space: nowrap; }
-.star { padding: 4px 8px; border-color: transparent; font-size: calc(16px * var(--font-scale)); line-height: 1; color: var(--warning); }
+.star { min-height: 0; padding: 4px 8px; border-color: transparent; font-size: calc(16px * var(--font-scale)); line-height: 1; color: var(--warning); }
 .star[aria-pressed="false"] { color: var(--text-2); }
 .note { border-top: 1px solid var(--border); padding-top: var(--space); }
 .empty { padding: calc(var(--space) * 0.5); }

@@ -152,7 +152,7 @@ try {
   // ---- 2. first use and the header mode
   const welcome = await s.eval("document.querySelector('.welcome').innerText");
   if (!/answers? (incoming )?calls automatically/i.test(welcome) || !welcome.includes("Start in Receive only")) throw new Error(`first-use text: ${welcome}`);
-  if (await s.eval("document.querySelector('.welcome input[name=startReceiveOnly]').checked")) throw new Error("Start in Receive only is on by default");
+  if (await s.eval("document.querySelector('.welcome input.start-receive-only').checked")) throw new Error("Start in Receive only is on by default");
   await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
   await s.eval(click("Use simulator"));
   await until(s, ready, "the workspace");
@@ -472,6 +472,8 @@ try {
   const cssVar = (n) => `getComputedStyle(document.documentElement).getPropertyValue('--${n}').trim()`;
   const bg = (sel) => `getComputedStyle(document.querySelector(${JSON.stringify(sel)})).backgroundColor`;
   // The composer's frame is a control edge: it uses the 3:1 control border, not the decorative divider.
+  await s.eval(`${rail("Operate")}.click()`);
+  await until(s, "!!document.querySelector('.composer-box')", `the composer on Operate (page: ${await s.eval("document.querySelector('.rail button.selected')?.getAttribute('aria-label') ?? 'none'")})`);
   const frame = await s.eval(`({ edge: getComputedStyle(document.querySelector('.composer-box')).borderTopColor, strong: ${cssVar("border-strong")} })`);
   if (frame.edge !== rgb(frame.strong)) throw new Error(`composer frame ${frame.edge} is not --border-strong ${frame.strong}`);
   await s.eval(`${rail("Settings")}.click()`);

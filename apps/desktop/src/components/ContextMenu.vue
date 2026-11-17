@@ -79,6 +79,6 @@ watch(
   position: fixed; z-index: 100; display: grid; min-width: 150px; padding: 4px;
   background: var(--raised); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 8px 24px var(--shadow);
 }
-.ctx-menu button { text-align: left; border-color: transparent; background: transparent; padding: 6px 10px; }
+.ctx-menu button { justify-content: flex-start; width: 100%; text-align: left; border-color: transparent; background: transparent; padding: 6px 10px; }
 .ctx-menu button:hover { background: var(--surface); }
 </style>

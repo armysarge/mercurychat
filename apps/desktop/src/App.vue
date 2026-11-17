@@ -71,7 +71,8 @@ const modeWordKey = computed(() => (receiveOnlyPending.value ? "mode.receiveOnly
 const switchTitleKey = computed(() =>
   receiveOnlyPending.value ? "mode.receiveOnlyPendingTitle" : receiveOnly.value ? "mode.receiveOnlyTitle" : "mode.answeringTitle",
 );
-const showLinkMode = computed(() => !["ready", "listening"].includes(modemState.value));
+/** The full status for the header's tooltip: the state, its detail and what it means. */
+const stateTitle = computed(() => [...new Set([modemLabel.value, detail.value, modeWord.value].filter((x): x is string => !!x))].join(" · "));
 const rxError = ref("");
 
 /** Ask the core to switch; the switch itself only follows the snapshot, so a refused command leaves it as it was. */
@@ -166,14 +167,14 @@ onUnmounted(() => {
       </div>
       <span v-if="activeProfile" class="station-mode" role="status" aria-live="polite">
         <span :class="['mode-word', { rx: receiveOnly }]">{{ t(modeWordKey) }}</span>
-        <label class="switch" :title="t(switchTitleKey)">
+        <label class="switch warn" :title="t(switchTitleKey)">
           <input type="checkbox" role="switch" :checked="receiveOnly" :disabled="modemState === 'unavailable'" :aria-label="t('mode.receiveOnly')" @change="toggleReceiveOnly" />
           <span class="track" aria-hidden="true"></span>
         </label>
       </span>
-      <span v-if="showLinkMode || !activeProfile" class="mode" role="status" aria-live="polite" data-tauri-drag-region>{{ modeWord }}</span>
       <span class="grow" data-tauri-drag-region></span>
-      <span class="state" data-tauri-drag-region>
+      <!-- The modem's state, the one place it is said (owner, 17 Nov): a long detail is cut with an ellipsis; hover shows it all. -->
+      <span class="state" role="status" aria-live="polite" :title="stateTitle" data-tauri-drag-region>
         <span :class="['pill', modemState]">{{ modemLabel }}</span>
         <span v-if="detail" class="detail muted small">{{ detail }}</span>
       </span>
@@ -199,7 +200,7 @@ onUnmounted(() => {
     </p>
 
     <!-- The station strip: full width above the sidebar and the workspace, on Operate only. -->
-    <StationStrip v-if="snapshot && !firstUse && app.page === 'operate'" :now="now.getTime()" />
+    <StationStrip v-if="snapshot && !firstUse" :now="now.getTime()" />
 
     <div :class="['body', { solo: firstUse || !snapshot }]">
       <nav class="rail" :aria-label="t('nav.label')">
@@ -252,28 +253,13 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .mark { display: block; -webkit-user-drag: none; }
 .alpha { color: var(--warning); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
 .station { display: flex; flex-direction: column; line-height: 1.2; border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
-.mode { font-weight: 600; }
 .station-mode { display: inline-flex; align-items: center; gap: var(--space); }
 .mode-word { font-weight: 600; color: var(--success); }
 .mode-word.rx { color: var(--warning); }
-.switch { flex-direction: row; display: inline-flex; align-items: center; cursor: pointer; position: relative; }
-.switch input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
-.track {
-  width: 34px; height: 20px; border-radius: 999px; background: var(--raised); border: 1px solid var(--border-strong);
-  position: relative; transition: background 120ms;
-}
-.track::after {
-  content: ""; position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
-  background: var(--text-2); transition: transform 120ms;
-}
-.switch input:checked + .track { background: color-mix(in srgb, var(--warning) 35%, var(--raised)); border-color: var(--warning); }
-.switch input:checked + .track::after { transform: translateX(14px); background: var(--warning); }
-.switch input:focus-visible + .track { outline: 2px solid var(--focus); outline-offset: 2px; }
-.switch input:disabled + .track { opacity: 0.5; }
 .toggle-sidebar { display: none; }
 .scrim { display: none; }
-.state { display: flex; align-items: center; gap: var(--space); }
-.detail { max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.state { display: flex; align-items: center; gap: var(--space); min-width: 0; cursor: default; }
+.detail { min-width: 0; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner {
   flex: none; margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border);
   background: var(--raised); display: flex; gap: var(--space); align-items: center; flex-wrap: wrap;
@@ -281,7 +267,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .banner.warn { border-left: 3px solid var(--warning); }
 .banner.err { border-left: 3px solid var(--danger); }
 .banner.info { border-left: 3px solid var(--accent); }
-.banner button { padding: 2px 10px; }
+
 .body { flex: 1; display: grid; grid-template-columns: minmax(84px, 112px) 260px minmax(0, 1fr); min-height: 0; }
 .body.solo { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
 .rail { display: flex; flex-direction: column; gap: 6px; padding: var(--space) 6px; border-right: 1px solid var(--border); background: var(--surface); }

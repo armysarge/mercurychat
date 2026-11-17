@@ -67,7 +67,7 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
   position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 25; min-width: 200px; max-height: 280px; overflow-y: auto;
   display: grid; padding: 4px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--raised); box-shadow: 0 6px 18px var(--shadow);
 }
-.macro-menu button { text-align: left; border-color: transparent; background: transparent; padding: 6px 10px; }
+.macro-menu button { justify-content: flex-start; width: 100%; text-align: left; border-color: transparent; background: transparent; padding: 6px 10px; }
 .macro-menu button:hover:not(:disabled), .macro-menu button:focus-visible { background: var(--surface); }
 .macro-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 .macro-menu p { margin: 4px 10px; }
