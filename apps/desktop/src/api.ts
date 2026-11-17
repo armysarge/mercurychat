@@ -7,6 +7,7 @@ import type { AppCommand } from "./bindings/AppCommand";
 import type { BroadcastKind } from "./bindings/BroadcastKind";
 import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { HeardStation } from "./bindings/HeardStation";
+import type { Qso } from "./bindings/Qso";
 import type { AppError } from "./bindings/AppError";
 import type { AppSnapshot } from "./bindings/AppSnapshot";
 import type { ChatMessage } from "./bindings/ChatMessage";
@@ -70,6 +71,8 @@ export interface MirrorHooks {
   activity?: (entry: ActivityEntry) => void;
   /** What became of a CQ or a beacon. */
   broadcast?: (kind: BroadcastKind, outcome: BroadcastOutcome) => void;
+  /** A QSO record was created, edited or finalised. */
+  qso?: (qso: Qso) => void;
   /** The local copy was rebuilt from a snapshot: message events may be missing. */
   resynced?: () => void;
 }
@@ -178,7 +181,11 @@ export class Mirror {
         v.snapshot.telemetry = ev.telemetry;
         break;
       case "qso":
-        v.snapshot.currentQso = ev.qso;
+        // The card follows the latest session's record; an edit of an older one (Logbook) leaves it.
+        if (!v.snapshot.currentQso || v.snapshot.currentQso.id === ev.qso.id || ev.qso.startUtc >= v.snapshot.currentQso.startUtc) {
+          v.snapshot.currentQso = ev.qso;
+        }
+        this.hooks.qso?.(ev.qso);
         break;
       case "heard":
       case "heardUpdated":

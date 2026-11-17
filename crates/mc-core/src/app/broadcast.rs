@@ -462,6 +462,29 @@ mod tests {
         }
     }
 
+    /// The UI places "CQ transmitted" / "Beacon transmitted" rows in the
+    /// transcript from these activity lines (Transcript.vue, store.ts
+    /// `transmitted`); only a transmitted broadcast may match.
+    #[test]
+    fn transmitted_lines_keep_the_wording_the_transcript_reads() {
+        let reads = |line: &str| {
+            let l = line.to_lowercase();
+            l.starts_with("cq transmitted") || l.starts_with("beacon transmitted")
+        };
+        assert!(activity_text(BroadcastKind::Cq, &BroadcastOutcome::Transmitted).starts_with("CQ transmitted"));
+        assert!(activity_text(BroadcastKind::Beacon, &BroadcastOutcome::Transmitted).starts_with("beacon transmitted"));
+        for kind in [BroadcastKind::Cq, BroadcastKind::Beacon] {
+            for o in [
+                BroadcastOutcome::Submitted,
+                BroadcastOutcome::NOT_CONFIRMED,
+                SILENT,
+                BroadcastOutcome::Refused { reason: "not sent: x".into() },
+            ] {
+                assert!(!reads(&activity_text(kind, &o)), "{:?}", o);
+            }
+        }
+    }
+
     const SILENT: BroadcastOutcome =
         BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) };
 

@@ -28,6 +28,17 @@
 //        frequency is dashes in the seven-segment font; channel occupancy unknown
 //   T10d turning beacons on shows a countdown; the activity drawer lists PTT lines
 //   T10e after a restart beacons are off and the prompt asks to turn them on
+// M3a Task 11 (QSO card, Logbook, macros, search, About):
+//   T11a station information and a macro are saved in Settings; finalise on
+//        disconnect is off by default
+//   T11b About shows the version and "Founded by ZS6SHZ"; its links go to the
+//        system browser (recorded through MC_OPEN_LINK_LOG) and the window fetches nothing
+//   T11c the Greeting macro expands into the composer without sending; <EMAIL>
+//        needs the explicit "Insert email" item, which fills it
+//   T11d calling SIM1 opens the QSO card with peer and bandwidth; edits survive a
+//        window reload; after the disconnect a QSO summary row is in the transcript
+//   T11e the record is a draft in the Logbook; Finalise locks it
+//   T11f history search finds an old message by its text
 // Usage: node lab/windows/m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -44,6 +55,10 @@ if (!exe || !dataDir) {
 const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..");
 const CALL = "ZS6SIM";
+// About's links are recorded here instead of opening a browser (debug builds only).
+const linkLog = join(dirname(dataDir), `${port}-links.txt`);
+rmSync(linkLog, { force: true });
+process.env.MC_OPEN_LINK_LOG = linkLog;
 const ANTENNA = "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4";
 
 /** Top-level windows of a process: [{x, y, w, h, title}], optionally after moving the largest. */
@@ -268,6 +283,100 @@ try {
   await until(s, `!(${onScreen("aside.sidebar")})`, "the drawer closed by Escape");
   await s.send("Emulation.clearDeviceMetricsOverride");
   results.push("PASS narrow: at 900 px the sidebar is a drawer opened from the header and closed by Escape");
+
+  // ---- T11a. station information and a macro with <EMAIL> (Settings); finalise-on-disconnect is off
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, "!!document.querySelector('form.station-info')", "the station information form");
+  await s.eval(setInput("form.station-info input[name=qth]", "Cape Town"));
+  await s.eval(setInput("form.station-info input[name=email]", "op@example.org"));
+  await s.eval("document.querySelector('form.station-info button[type=submit]').click()");
+  await until(s, "/saved/i.test(document.querySelector('form.station-info .saved')?.textContent ?? '')", "station information saved");
+  if (await s.eval("document.querySelector('input.finalise-on-disconnect').checked")) throw new Error("finalise on disconnect is on by default");
+  await until(s, "document.querySelectorAll('.macro-editor .macro').length === 3", "the three seeded macros in the editor");
+  await s.eval("document.querySelector('.macro-editor button.macro-add').click()");
+  await s.eval(setInput(".macro-editor form.macro-edit input[name=name]", "Contact"));
+  await s.eval(setInput(".macro-editor form.macro-edit textarea[name=body]", "Mail me: <EMAIL>"));
+  await s.eval("document.querySelector('.macro-editor form.macro-edit button[type=submit]').click()");
+  await until(s, "[...document.querySelectorAll('.macro-editor .macro .name')].some(n => n.textContent.trim() === 'Contact')", "the Contact macro saved");
+  results.push("PASS station info: QTH and email saved from Settings; three macros seeded; a Contact macro with <EMAIL> added; finalise on disconnect is off by default");
+
+  // ---- T11b. About: version, founder, links open in the system browser, nothing fetched
+  const about = await s.eval("({ text: document.querySelector('section.about')?.innerText ?? '', version: document.querySelector('section.about .about-version')?.textContent.trim() ?? '' })");
+  if (!/^0\.\d+\.\d+/.test(about.version) || !about.text.includes("Founded by ZS6SHZ") || !/GPL-3\.0-or-later/.test(about.text) || !/Rhizomatica/.test(about.text) || !/Hamlib/.test(about.text)) throw new Error(`About: ${JSON.stringify(about).slice(0, 400)}`);
+  const before = await s.eval("performance.getEntriesByType('resource').length");
+  await s.eval("document.querySelector('section.about button[data-link=issues]').click()");
+  await s.eval("document.querySelector('section.about button[data-link=releases]').click()");
+  await sleep(600);
+  const opened = existsSync(linkLog) ? readFileSync(linkLog, "utf8").trim().split(/\r?\n/) : [];
+  if (opened.join(" ") !== "https://github.com/armysarge/mercurychat/issues https://github.com/armysarge/mercurychat/releases") throw new Error(`links handed to the browser: ${JSON.stringify(opened)}`);
+  const fetched = await s.eval(`performance.getEntriesByType('resource').slice(${before}).map(e => e.name).filter(n => /^https?:/.test(n) && !/\\/\\/(tauri|ipc)\\.localhost/.test(n))`);
+  if (fetched.length) throw new Error(`About made requests: ${fetched.join(", ")}`);
+  results.push(`PASS about: version ${about.version}, "Founded by ZS6SHZ", GPL-3.0-or-later, Mercury and Hamlib credited; Report an issue and Check for updates went to the system browser (${opened.length} URLs), no request from the window`);
+
+  // ---- T11c. macros expand into the composer without sending; Insert email is its own item
+  await s.eval(`${rail("Operate")}.click()`);
+  await until(s, "document.querySelector('.peer-header h1')?.textContent.trim() === 'SIM1'", "SIM1 open on Operate");
+  const msgsBefore = await s.eval("document.querySelectorAll('.transcript [data-id]').length");
+  await s.eval("document.querySelector('textarea.composer').value = ''; document.querySelector('textarea.composer').dispatchEvent(new Event('input'))");
+  const pickMacro = (name) => `(() => { document.querySelector('button.macro-toggle').click(); return new Promise(r => setTimeout(() => { const i = [...document.querySelectorAll('.macro-menu [role=menuitem]')].find(b => b.textContent.trim() === ${JSON.stringify(name)}); if (!i) throw new Error('no macro ' + ${JSON.stringify(name)}); i.click(); r(true); }, 50)); })()`;
+  await s.eval(pickMacro("Greeting"));
+  await until(s, "document.querySelector('textarea.composer').value.startsWith('Hello SIM1, this is ZS6SIM')", "Greeting expanded into the composer");
+  const greet = await s.eval("({ text: document.querySelector('textarea.composer').value, note: document.querySelector('.macro-note')?.textContent.trim() ?? '' })");
+  if (!/<NAME>/.test(greet.text) || !/NAME/.test(greet.note) || !/\d+ bytes/.test(greet.note)) throw new Error(`Greeting: ${JSON.stringify(greet)}`);
+  await sleep(500);
+  if ((await s.eval("document.querySelectorAll('.transcript [data-id]').length")) !== msgsBefore) throw new Error("expanding a macro sent a message");
+  await s.eval("document.querySelector('textarea.composer').value = ''; document.querySelector('textarea.composer').dispatchEvent(new Event('input'))");
+  await s.eval(pickMacro("Contact"));
+  await until(s, "document.querySelector('textarea.composer').value === 'Mail me: <EMAIL>'", "Contact leaves <EMAIL> as it is");
+  await s.eval(pickMacro("Insert email"));
+  await until(s, "document.querySelector('textarea.composer').value === 'Mail me: op@example.org'", "Insert email fills the <EMAIL> tag");
+  const mail = await s.eval("document.querySelector('textarea.composer').value");
+  await s.eval("document.querySelector('textarea.composer').value = ''; document.querySelector('textarea.composer').dispatchEvent(new Event('input'))");
+  results.push(`PASS macros: Greeting -> "${greet.text}" (note "${greet.note}"), nothing sent; Contact keeps <EMAIL>; Insert email -> "${mail}"`);
+
+  // ---- T11d. a session opens the QSO card; edits survive a window reload; a summary row after the disconnect
+  await s.eval(click("Call"));
+  await until(s, `${pill} === 'connected'`, "connected to SIM1", 20000);
+  await until(s, "document.querySelector('section.qso-card .qso-peer')?.textContent.trim() === 'SIM1' && !!document.querySelector('section.qso-card .qso-bw')?.textContent.trim()", "the QSO card with peer and bandwidth");
+  const bw = await s.eval("document.querySelector('section.qso-card .qso-bw').textContent.trim()");
+  await s.eval(setInput("section.qso-card input[name=rstSent]", "59"));
+  await s.eval(setInput("section.qso-card textarea[name=notes]", "first M3a QSO"));
+  await s.eval("document.querySelector('section.qso-card button.qso-save').click()");
+  await until(s, "/saved/i.test(document.querySelector('section.qso-card .saved')?.textContent ?? '')", "the QSO edits saved");
+  await s.eval("(() => { const t = document.querySelector('textarea.composer'); t.value = 'qso bytes'; t.dispatchEvent(new Event('input')); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true })); })()");
+  await until(s, "[...document.querySelectorAll('.transcript [data-id]')].some(e => e.dataset.state === 'delivered' && e.querySelector('.body').textContent === 'qso bytes')", "a message delivered in the session", 20000);
+  await s.eval("location.reload()");
+  await sleep(1500);
+  await until(s, `${pill} === 'connected' && document.querySelector('section.qso-card input[name=rstSent]')?.value === '59'`, "the QSO edits after a window reload", 20000);
+  await s.eval(click("Disconnect"));
+  await until(s, `['ready','listening'].includes(${pill})`, "the session ended", 20000);
+  await until(s, "!!document.querySelector('.transcript li.sys[data-kind=session-end]')", "the QSO summary row");
+  const summary = await s.eval("document.querySelector('.transcript li.sys[data-kind=session-end]').textContent.replace(/\\s+/g, ' ').trim()");
+  if (!/Frequency unavailable/.test(summary) || !/\d+ s|\d+ min/.test(summary) || !/9 bytes|\d+ bytes/.test(summary)) throw new Error(`summary row: ${summary}`);
+  if (!(await s.eval("!!document.querySelector('section.qso-card') && document.querySelector('section.qso-card .qso-state').textContent.trim() === 'Draft'"))) throw new Error("the last session's card is gone before it was finalised");
+  const cqRow = await s.eval("document.querySelector('.transcript li.sys[data-kind=cq]')?.textContent.trim() ?? ''");
+  if (!/CQ transmitted/.test(cqRow)) throw new Error(`no CQ row in the transcript: "${cqRow}"`);
+  results.push(`PASS QSO card: Call opened it for SIM1 (${bw}); RST 59 and notes saved and kept across a window reload; after Disconnect the card stays as a draft and the transcript has "${summary}" and "${cqRow}"`);
+
+  // ---- T11e. the Logbook keeps the draft; Finalise locks it
+  await s.eval(`${rail("Logbook")}.click()`);
+  await until(s, "!!document.querySelector('.logbook table.qsos tbody tr[data-state=draft]')", "the draft in the Logbook");
+  const row = await s.eval("(() => { const r = document.querySelector('.logbook tbody tr'); return { peer: r.querySelector('.peer').textContent.trim(), state: r.dataset.state, rst: r.querySelector('.rst-sent').textContent.trim() }; })()");
+  if (row.peer !== "SIM1" || row.rst !== "59") throw new Error(`Logbook row: ${JSON.stringify(row)}`);
+  await s.eval("document.querySelector('.logbook th button[data-sort=peer]').click()");
+  await s.eval("document.querySelector('.logbook tbody tr').click()");
+  await until(s, "!!document.querySelector('.logbook form.qso-form button.qso-finalise')", "the record's form");
+  await s.eval("document.querySelector('.logbook form.qso-form button.qso-finalise').click()");
+  await until(s, "document.querySelector('.logbook tbody tr')?.dataset.state === 'final' && document.querySelector('.logbook form.qso-form input[name=rstSent]').disabled", "the record finalised and read-only");
+  results.push(`PASS logbook: SIM1's record is listed as a draft with RST ${row.rst}, sortable; Finalise makes it final and read-only`);
+
+  // ---- T11f. history search finds an old message by its text
+  await s.eval(setInput("input.search", "hello"));
+  await until(s, "[...document.querySelectorAll('.search-hits .hit')].some(h => h.textContent.includes('hello') && h.textContent.includes('SIM1'))", "a history hit for 'hello'", 5000);
+  await s.eval("document.querySelector('.search-hits .hit').click()");
+  await until(s, "document.querySelector('.peer-header h1')?.textContent.trim() === 'SIM1'", "the hit opens SIM1");
+  await s.eval(setInput("input.search", "SIM"));
+  results.push("PASS search: 'hello' found the earlier message to SIM1 and opened its conversation");
 
   // ---- 8 (first half). inert keys and the context menu
   for (const init of [{ key: "F12" }, { key: "I", ctrlKey: true, shiftKey: true }, { key: "r", ctrlKey: true }, { key: "F5" }]) {

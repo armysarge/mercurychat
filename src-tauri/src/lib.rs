@@ -4,6 +4,7 @@
 //! `mc://event`.
 
 mod appearance;
+mod links;
 mod probe;
 mod startup;
 mod window_state;
@@ -56,6 +57,8 @@ impl Shell {
 #[derive(Serialize)]
 struct AppInfo {
     app_version: String,
+    /// The build: profile, OS and CPU (About).
+    build: String,
     protocol: String,
     os: String,
     arch: String,
@@ -82,6 +85,12 @@ fn app_info(shell: tauri::State<'_, Shell>) -> AppInfo {
     };
     AppInfo {
         app_version: env!("CARGO_PKG_VERSION").into(),
+        build: format!(
+            "{} · {} {}",
+            if cfg!(debug_assertions) { "debug" } else { "release" },
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        ),
         protocol: format!("MCH/{}.{} draft", mch_protocol::MAJOR, mch_protocol::MINOR),
         os: std::env::consts::OS.into(),
         arch: std::env::consts::ARCH.into(),
@@ -166,6 +175,13 @@ fn report_ipc(p50: f64, p95: f64, max: f64, samples: u32) {
 
 #[tauri::command]
 fn ping() {}
+
+/// Open one of About's named web pages in the system browser (links.rs).
+#[tauri::command]
+fn open_link(link: String) -> Result<(), String> {
+    let url = links::url_for(&link).ok_or_else(|| format!("no link named {link:?}"))?;
+    links::open(&url).map_err(|e| format!("the browser could not be started: {e}"))
+}
 
 #[derive(Serialize)]
 struct ProbeResult {
@@ -329,6 +345,7 @@ pub fn run() {
             ui_ready,
             report_ipc,
             ping,
+            open_link,
             modem_probe,
             appearance_load,
             appearance_save,

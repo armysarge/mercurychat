@@ -1,8 +1,12 @@
 <script setup lang="ts">
 // The sidebar's Chats tab: search, a callsign entry to open a new conversation, and the list.
-import { computed, ref } from "vue";
+// The search box filters the list by callsign and, from two characters, also
+// searches every conversation's messages by text or callsign (CHT-05).
+import { computed, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
-import { activeProfile, chat, linkPeer, openPeer } from "../store";
+import { describeError } from "../api";
+import type { ChatMessage } from "../bindings/ChatMessage";
+import { activeProfile, chat, linkPeer, openPeer, searchHistory } from "../store";
 
 const { t } = useI18n();
 const emit = defineEmits<{ opened: [peer: string] }>();
@@ -14,6 +18,38 @@ const shown = computed(() => {
   return q ? chat.conversations.filter((c) => c.peer.includes(q)) : chat.conversations;
 });
 const ago = (utc: string) => utc.slice(5, 10) + " " + utc.slice(11, 16) + " UTC";
+
+/** Messages matching the search, newest first (two characters or more). */
+const hits = ref<ChatMessage[]>([]);
+const searchError = ref("");
+let searchTimer: ReturnType<typeof setTimeout> | undefined;
+watch(query, (q) => {
+  clearTimeout(searchTimer);
+  const wanted = q.trim();
+  if (wanted.length < 2 || !activeProfile.value) {
+    hits.value = [];
+    return;
+  }
+  searchTimer = setTimeout(async () => {
+    try {
+      const found = await searchHistory(wanted);
+      if (query.value.trim() === wanted) {
+        hits.value = found;
+        searchError.value = "";
+      }
+    } catch (e) {
+      searchError.value = describeError(e);
+    }
+  }, 250);
+});
+onUnmounted(() => clearTimeout(searchTimer));
+/** About 60 characters of the message around the match, on one line. */
+function snippet(body: string): string {
+  const flat = body.replace(/\s+/g, " ");
+  const i = flat.toLowerCase().indexOf(query.value.trim().toLowerCase());
+  const from = Math.max(0, i - 20);
+  return (from > 0 ? "…" : "") + flat.slice(from, from + 60) + (flat.length > from + 60 ? "…" : "");
+}
 
 async function open(peer: string) {
   await openPeer(peer);
@@ -61,6 +97,21 @@ function openEntry() {
         </button>
       </li>
     </ul>
+    <section v-if="hits.length" class="search-hits" :aria-label="t('conversations.hitsAria')">
+      <span class="label">{{ t("conversations.hitsTitle", hits.length) }}</span>
+      <ul class="list">
+        <li v-for="m in hits" :key="m.direction + m.id">
+          <button class="hit item" @click="open(m.peer)">
+            <span class="row top">
+              <b class="mono">{{ m.peer }}</b>
+              <span class="small muted mono">{{ ago(m.receivedUtc ?? m.createdUtc) }}</span>
+            </span>
+            <span class="small">{{ m.direction === "out" ? t("transcript.you") + ": " : "" }}{{ snippet(m.body) }}</span>
+          </button>
+        </li>
+      </ul>
+    </section>
+    <p v-if="searchError" class="err small" role="alert">{{ searchError }}</p>
     <p v-if="!shown.length" class="muted small">{{ query ? t("conversations.noMatch") : t("conversations.none") }}</p>
     <p class="note small muted">{{ t("conversations.note") }}</p>
   </div>
@@ -76,5 +127,7 @@ function openEntry() {
 .meta { display: flex; flex-wrap: wrap; gap: 2px 8px; }
 .meta > span { white-space: nowrap; }
 .accent { color: var(--accent); }
+.search-hits { display: grid; gap: 4px; border-top: 1px solid var(--border); padding-top: var(--space); }
+.hit { overflow-wrap: anywhere; }
 .note { border-top: 1px solid var(--border); padding-top: var(--space); }
 </style>

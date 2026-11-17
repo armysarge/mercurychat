@@ -9,12 +9,15 @@ import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
 import type { HeardStation } from "./bindings/HeardStation";
+import type { MacroDef } from "./bindings/MacroDef";
+import type { Qso } from "./bindings/Qso";
+import type { QsoEdit } from "./bindings/QsoEdit";
 import { applyLanguage, rememberLanguage, t } from "./i18n";
 
 export const MAX_BYTES = 4096; // CHT-01
 export const PAGE = 50; // messages per history page
 
-export type ViewName = "operate" | "conversations" | "settings" | "diagnostics";
+export type ViewName = "operate" | "conversations" | "logbook" | "settings" | "diagnostics";
 export type Drawer = "peers" | "session" | null;
 
 export const app = reactive({
@@ -112,9 +115,11 @@ export const mirror = new Mirror((v) => (app.view = v), {
     if (discovery.activity.length > ACTIVITY_MAX) discovery.activity.length = ACTIVITY_MAX;
   },
   broadcast: (kind, outcome) => (discovery.outcome[kind] = outcome),
+  qso: upsertQso,
   resynced: () => {
     void reloadChat();
     void reloadDiscovery();
+    void reloadLogbook();
   },
 });
 
@@ -383,3 +388,107 @@ export function stopTimers() {
 
 /** The modem's state as a word in the current language (the pill and the Link panel). */
 export const modemLabel = computed(() => t(`modem.${modemState.value}`));
+
+// ---- the logbook, macros and history search (M3a Task 11)
+
+/** Records the Logbook reads (the core keeps at most 500 newest). */
+const LOGBOOK_MAX = 500;
+/** CQs and beacons transmitted, oldest first, from the core's activity log (it
+ *  outlives a window reload): the transcript's inline rows (docs/04 §8.1). The
+ *  core pins this wording (broadcast.rs, transmitted_lines_keep_the_wording_the_transcript_reads). */
+export const transmitted = computed(() =>
+  discovery.activity
+    .filter((e) => e.kind === "broadcast" && /^(cq|beacon) transmitted/i.test(e.text))
+    .map((e) => ({ kind: (e.text.toLowerCase().startsWith("cq") ? "cq" : "beacon") as BroadcastKind, utc: e.atUtc }))
+    .reverse(),
+);
+
+export const logbook = reactive({ qsos: [] as Qso[], error: "" });
+
+function upsertQso(q: Qso) {
+  const i = logbook.qsos.findIndex((x) => x.id === q.id);
+  if (i >= 0) logbook.qsos.splice(i, 1, q);
+  else logbook.qsos.unshift(q);
+}
+
+export async function reloadLogbook() {
+  if (!activeProfile.value) {
+    logbook.qsos = [];
+    return;
+  }
+  try {
+    const r = await call({ type: "qsos", limit: LOGBOOK_MAX });
+    if (r.type === "qsos") logbook.qsos = r.qsos;
+  } catch (e) {
+    logbook.error = describeError(e);
+  }
+}
+
+/** Save a draft's edits; the core answers with the record (and a qso event). */
+export async function updateQso(id: string, edit: QsoEdit): Promise<Qso | null> {
+  const r = await call({ type: "updateQso", id, edit });
+  if (r.type !== "qso") return null;
+  upsertQso(r);
+  return r;
+}
+
+export async function finaliseQso(id: string): Promise<Qso | null> {
+  const r = await call({ type: "finaliseQso", id });
+  if (r.type !== "qso") return null;
+  upsertQso(r);
+  return r;
+}
+
+export async function setFinaliseOnDisconnect(on: boolean) {
+  await call({ type: "setFinaliseOnDisconnect", on });
+  // No event carries this setting: keep the local copy in step with the core.
+  if (app.view) app.view.snapshot.finaliseOnDisconnect = on;
+}
+
+export const macros = reactive({ list: [] as MacroDef[], error: "" });
+
+export async function loadMacros() {
+  macros.error = "";
+  if (!activeProfile.value) {
+    macros.list = [];
+    return;
+  }
+  try {
+    const r = await call({ type: "macros" });
+    if (r.type === "macros") macros.list = r.macros;
+  } catch (e) {
+    macros.error = describeError(e);
+  }
+}
+
+/** Add (empty id) or change a macro; the error is the core's, field by field. */
+export async function saveMacro(def: MacroDef) {
+  await call({ type: "saveMacro", macro: def });
+  await loadMacros();
+}
+
+export async function deleteMacro(id: string) {
+  await call({ type: "deleteMacro", id });
+  await loadMacros();
+}
+
+/** A macro's text for the draft, with the tags that had no value. Nothing is sent. */
+export async function expandMacro(id: string): Promise<{ text: string; missing: string[] }> {
+  const r = await call({ type: "expandMacro", id, peer: chat.open || null, allowEmail: false });
+  if (r.type !== "expanded") throw new Error(r.type);
+  return { text: r.text, missing: r.missing };
+}
+
+/** Messages to or from anyone whose text or callsign holds `query`, newest first. */
+export async function searchHistory(query: string): Promise<ChatMessage[]> {
+  const r = await call({ type: "searchHistory", query, limit: 20 });
+  return r.type === "history" ? r.messages : [];
+}
+
+watch(
+  () => activeProfile.value?.id,
+  () => {
+    void reloadLogbook();
+    void loadMacros();
+  },
+);

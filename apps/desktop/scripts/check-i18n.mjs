@@ -221,6 +221,14 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
   const unionOf = (file) => [...binding(file).split("=").slice(1).join("=").matchAll(/"(\w+)"/g)].map((m) => m[1]);
   /** The `type` tags of a tagged union (`{ "type": "up" } | ...`). */
   const taggedOf = (file) => [...binding(file).matchAll(/"type": "(\w+)"/g)].map((m) => m[1]);
+  /** The strings of a component's `const NAME = [...] as const` list. */
+  const constOf = (file, name) => {
+    const text = readFileSync(join(src, file), "utf8");
+    const list = new RegExp(`const ${name} = \\[([^\\]]*)\\] as const`).exec(text)?.[1] ?? "";
+    const values = [...list.matchAll(/"([\w-]+)"/g)].map((m) => m[1]);
+    if (!values.length) throw new Error(`check-i18n: no \`const ${name} = [...] as const\` in ${file}`);
+    return values;
+  };
   /** Values the dynamic keys `${prefix}${x}` can take, from the app's own lists. */
   const dynamic = {
     "theme.name.": () => PRESETS.map((p) => p.id),
@@ -234,6 +242,12 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "telemetry.link.": () => taggedOf("TelemetryLinkView.ts"),
     "strip.outcome.": () => taggedOf("BroadcastOutcome.ts"),
     "broadcast.notConfirmed.": () => unionOf("NotConfirmedReason.ts"),
+    // Task 11: the lists the components iterate, read from their source.
+    "about.link.": () => constOf("components/About.vue", "LINKS"),
+    "about.credit.": () => constOf("components/About.vue", "CREDITS"),
+    "stationInfo.": () => constOf("components/StationInfo.vue", "FIELDS"),
+    "logbook.col.": () => constOf("views/Logbook.vue", "COLUMNS"),
+    "transcript.sys.": () => unionOf("BroadcastKind.ts"),
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
       const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";

@@ -594,8 +594,10 @@ async fn occupied_broadcast_port_is_logged_not_faulted() {
     }
     let line = line.unwrap();
     assert!(line.text.contains("closed"), "{line:?}");
-    // Optional plane: the modem stays up and CQ is still heard.
-    assert_eq!(snapshot(&h).await.modem, ModemState::Ready);
+    // Optional plane: the modem stays up and CQ is still heard. Listening
+    // starts by itself after attach (D18), so either idle state counts.
+    let modem = snapshot(&h).await.modem;
+    assert!(matches!(modem, ModemState::Ready | ModemState::Listening), "{modem:?}");
     net.send_control(0, &format!("CQFRAME {PEER} 500"));
     heard_event(&mut rx, PEER, 10).await;
 }

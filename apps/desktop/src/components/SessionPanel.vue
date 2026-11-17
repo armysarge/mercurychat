@@ -3,10 +3,11 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 // The right pane: whether incoming calls are answered (the Receive only switch
 // is in the window header, D18), the session, the open peer's queue, the
-// link, the modem's telemetry, beacons and the activity log (M3a Task 10). A
-// missing metric is never drawn as a value.
+// QSO record (Task 11), the link, the modem's telemetry, beacons and the
+// activity log (M3a Task 10). A missing metric is never drawn as a value.
 import ActivityDrawer from "./ActivityDrawer.vue";
 import BeaconControl from "./BeaconControl.vue";
+import QsoCard from "./QsoCard.vue";
 import TelemetryPanel from "./TelemetryPanel.vue";
 import { activeProfile, chat, modemLabel, queuedBytes, session, snapshot } from "../store";
 
@@ -45,6 +46,8 @@ function where() {
         <span class="muted">{{ t("session.queuedFor", { peer: chat.open }) }}</span><span class="mono">{{ t("session.bytesShort", queuedBytes) }}</span>
       </div>
     </section>
+
+    <QsoCard />
 
     <section class="card stack" aria-labelledby="h-link">
       <span id="h-link" class="label">{{ t("session.link") }}</span>

@@ -12,7 +12,8 @@
     "operate": "Operar",
     "conversations": "Conversas",
     "settings": "Configurações",
-    "diagnostics": "Diagnóstico"
+    "diagnostics": "Diagnóstico",
+    "logbook": "Logbook"
   },
   "modem": {
     "unavailable": "indisponível",
@@ -112,7 +113,7 @@
     "callsign": "Indicativo",
     "callsignExample": "ex.: ZS1ABC",
     "searchAria": "Pesquisar nas conversas",
-    "searchPlaceholder": "Pesquisar indicativo",
+    "searchPlaceholder": "Buscar indicativos e mensagens",
     "listAria": "Conversas",
     "onLink": "no enlace",
     "newCount": "{n} nova | {n} novas",
@@ -123,7 +124,9 @@
     "none": "Ainda não há conversas. Digite um indicativo para começar uma.",
     "note": "As estações ouvidas no ar ficam na aba Ouvidas. Ter uma conversa na lista não significa que a estação esteja disponível agora.",
     "historySearchAria": "Pesquisar neste histórico (Ctrl+F)",
-    "historySearchPlaceholder": "Pesquisar no histórico (Ctrl+F)"
+    "historySearchPlaceholder": "Pesquisar no histórico (Ctrl+F)",
+    "hitsAria": "Mensagens que correspondem",
+    "hitsTitle": "{n} mensagem encontrada | {n} mensagens encontradas"
   },
   "transcript": {
     "loadOlder": "Carregar mensagens mais antigas",
@@ -143,6 +146,16 @@
       "failed": "Falhou",
       "uncertain": "Entrega incerta",
       "received": "Recebida"
+    },
+    "sys": {
+      "seconds": "{n} s",
+      "minutes": "{m} min {s} s",
+      "freq": "{mhz} MHz ({source})",
+      "freqNone": "Frequência indisponível",
+      "bytes": "{n} byte | {n} bytes",
+      "sessionEnd": "Sessão encerrada · {freq} · {duration} · {bytes}",
+      "cq": "CQ transmitido {time} UTC",
+      "beacon": "Beacon transmitido {time} UTC"
     }
   },
   "session": {
@@ -465,5 +478,103 @@
     "spectrum": "Espectro",
     "spectrumSoon": "A visão de espectro chega numa versão posterior.",
     "telemetryUnavailable": "telemetria indisponível"
+  },
+  "qso": {
+    "title": "Registro do QSO",
+    "state": {
+      "draft": "Rascunho",
+      "final": "Final"
+    },
+    "peer": "Estação",
+    "bandwidth": "Largura de banda",
+    "bandwidthUnknown": "desconhecida",
+    "start": "Início",
+    "rstSent": "RST enviado",
+    "rstRcvd": "RST recebido",
+    "name": "Nome",
+    "qth": "QTH",
+    "myPower": "Minha potência",
+    "freqMhz": "Frequência (MHz)",
+    "notes": "Notas",
+    "save": "Salvar registro",
+    "finalise": "Finalizar",
+    "saved": "Salvo",
+    "finalNote": "Finalizado: este registro não pode mais ser alterado.",
+    "freqNone": "Frequência indisponível",
+    "freqInvalid": "Digite a frequência em MHz, por exemplo 7.105"
+  },
+  "logbook": {
+    "title": "Logbook",
+    "intro": "O registro de cada sessão. Rascunhos podem ser alterados até serem finalizados.",
+    "empty": "Ainda não há registros. Um registro começa quando uma sessão é estabelecida.",
+    "open": "Abrir o registro com {peer}",
+    "editAria": "Registro com {peer}",
+    "editTitle": "{peer}, {start} UTC",
+    "col": {
+      "start": "Início (UTC)",
+      "peer": "Estação",
+      "band": "Banda",
+      "freq": "MHz",
+      "bandwidth": "LB",
+      "rstSent": "Env.",
+      "rstRcvd": "Rec.",
+      "state": "Estado"
+    },
+    "finaliseOnDisconnect": "Finalizar o registro de uma sessão quando ela terminar",
+    "finaliseNote": "Desligado: os registros ficam como rascunho até você finalizá-los."
+  },
+  "macros": {
+    "button": "Macros",
+    "menuAria": "Inserir uma macro",
+    "none": "Nenhuma macro.",
+    "noEmail": "Esta estação não tem e-mail definido",
+    "insertEmail": "Inserir e-mail",
+    "insertedBytes": "Inserido {n} byte. | Inseridos {n} bytes.",
+    "missing": "Sem valor para {tags}: preencha em Configurações, Informações da estação.",
+    "title": "Macros",
+    "intro": "Texto que você insere pelo menu Macros do editor. Estas etiquetas são preenchidas para você:",
+    "edit": "Editar",
+    "editAria": "Editar {name}",
+    "delete": "Excluir",
+    "deleteAria": "Excluir {name}",
+    "deleteConfirm": "Excluir {name}",
+    "name": "Nome",
+    "body": "Texto",
+    "save": "Salvar macro",
+    "add": "Adicionar uma macro"
+  },
+  "stationInfo": {
+    "title": "Informações da estação {callsign}",
+    "intro": "As macros inserem estes dados nos seus rascunhos. Nada aqui é enviado sozinho.",
+    "name": "Seu nome",
+    "grid": "Localizador",
+    "qth": "QTH",
+    "rig": "Equipamento",
+    "power": "Potência",
+    "antenna": "Antena",
+    "email": "E-mail",
+    "about": "Sobre a estação",
+    "emailNote": "Seu e-mail entra num rascunho só quando você escolhe Inserir e-mail no menu Macros.",
+    "save": "Salvar informações da estação",
+    "saved": "Salvo"
+  },
+  "about": {
+    "title": "Sobre",
+    "founded": "Fundado por ZS6SHZ",
+    "licence": "Software livre sob a Licença Pública Geral GNU, versão 3 ou posterior (GPL-3.0-or-later).",
+    "link": {
+      "project": "Página do projeto",
+      "changelog": "Registro de alterações",
+      "issues": "Relatar um problema",
+      "releases": "Procurar atualizações"
+    },
+    "updatesNote": "Procurar atualizações abre a página de versões no seu navegador. O MercuryChat nunca consulta a internet sozinho.",
+    "credits": "Construído sobre",
+    "credit": {
+      "mercury": "Mercury, o modem de HF, da Rhizomatica (GPL-3.0-or-later)",
+      "hamlib": "Hamlib, controle de rádio (LGPL-2.1-or-later)",
+      "dseg": "Fonte DSEG7 Classic de keshikan (SIL Open Font License 1.1)"
+    },
+    "openFailed": "Não foi possível abrir o navegador: {reason}"
   }
 }

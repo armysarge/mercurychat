@@ -1,14 +1,18 @@
 <script setup lang="ts">
-// Settings (docs/04 §4): Appearance (language) and Station: profiles, and new
-// ones from the same forms as first use.
+// Settings (docs/04 §4): Appearance (language), the station in use (its
+// information and macros, M3a Task 11), the Logbook preference, profiles and
+// new ones from the same forms as first use, and About.
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { StationProfile } from "../bindings/StationProfile";
+import About from "../components/About.vue";
+import MacroEditor from "../components/MacroEditor.vue";
 import ProfileForms from "../components/ProfileForms.vue";
+import StationInfo from "../components/StationInfo.vue";
 import ThemePicker from "../components/ThemePicker.vue";
 import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../i18n/locale";
-import { mirror, snapshot } from "../store";
+import { activeProfile, mirror, setFinaliseOnDisconnect, snapshot } from "../store";
 
 const { t } = useI18n();
 
@@ -55,6 +59,16 @@ async function chooseLanguage(value: string) {
     languageError.value = `${t("appearance.saveFailed")}: ${describeError(e)}`;
   }
 }
+
+const finaliseError = ref("");
+async function chooseFinalise(on: boolean) {
+  finaliseError.value = "";
+  try {
+    await setFinaliseOnDisconnect(on);
+  } catch (e) {
+    finaliseError.value = describeError(e);
+  }
+}
 </script>
 
 <template>
@@ -72,6 +86,22 @@ async function chooseLanguage(value: string) {
       <p v-if="languageError" class="err" role="alert">{{ languageError }}</p>
     </section>
     <ThemePicker />
+    <StationInfo />
+    <MacroEditor />
+    <section v-if="activeProfile" class="card stack" aria-labelledby="h-logbook">
+      <h2 id="h-logbook">{{ t("logbook.title") }}</h2>
+      <label class="row toggle">
+        <input
+          type="checkbox"
+          class="finalise-on-disconnect"
+          :checked="snapshot?.finaliseOnDisconnect ?? false"
+          @change="chooseFinalise(($event.target as HTMLInputElement).checked)"
+        />
+        <span>{{ t("logbook.finaliseOnDisconnect") }}</span>
+      </label>
+      <p class="muted small">{{ t("logbook.finaliseNote") }}</p>
+      <p v-if="finaliseError" class="err" role="alert">{{ finaliseError }}</p>
+    </section>
     <section class="card stack" aria-labelledby="h-profiles">
       <h2 id="h-profiles">{{ t("settings.stationProfiles") }}</h2>
       <ul v-if="snapshot?.profiles.length" class="profiles">
@@ -101,6 +131,7 @@ async function chooseLanguage(value: string) {
     </section>
     <h2>{{ t("settings.addStation") }}</h2>
     <ProfileForms />
+    <About />
   </div>
 </template>
 

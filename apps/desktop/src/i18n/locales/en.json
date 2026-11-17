@@ -11,7 +11,8 @@
     "operate": "Operate",
     "conversations": "Conversations",
     "settings": "Settings",
-    "diagnostics": "Diagnostics"
+    "diagnostics": "Diagnostics",
+    "logbook": "Logbook"
   },
   "modem": {
     "unavailable": "unavailable",
@@ -111,7 +112,7 @@
     "callsign": "Callsign",
     "callsignExample": "e.g. ZS1ABC",
     "searchAria": "Search conversations",
-    "searchPlaceholder": "Search callsign",
+    "searchPlaceholder": "Search callsigns and messages",
     "listAria": "Conversations",
     "onLink": "on the link",
     "newCount": "{n} new | {n} new",
@@ -122,7 +123,9 @@
     "none": "No conversations yet. Type a callsign to start one.",
     "note": "Stations heard on the air are in the Heard tab. A conversation here does not mean the station is reachable now.",
     "historySearchAria": "Search this history (Ctrl+F)",
-    "historySearchPlaceholder": "Search history (Ctrl+F)"
+    "historySearchPlaceholder": "Search history (Ctrl+F)",
+    "hitsAria": "Messages that match",
+    "hitsTitle": "{n} message found | {n} messages found"
   },
   "transcript": {
     "loadOlder": "Load older messages",
@@ -142,6 +145,16 @@
       "failed": "Failed",
       "uncertain": "Delivery uncertain",
       "received": "Received"
+    },
+    "sys": {
+      "seconds": "{n} s",
+      "minutes": "{m} min {s} s",
+      "freq": "{mhz} MHz ({source})",
+      "freqNone": "Frequency unavailable",
+      "bytes": "{n} byte | {n} bytes",
+      "sessionEnd": "Session ended · {freq} · {duration} · {bytes}",
+      "cq": "CQ transmitted {time} UTC",
+      "beacon": "Beacon transmitted {time} UTC"
     }
   },
   "session": {
@@ -464,5 +477,103 @@
     "spectrum": "Spectrum",
     "spectrumSoon": "The spectrum view arrives in a later version.",
     "telemetryUnavailable": "telemetry unavailable"
+  },
+  "qso": {
+    "title": "QSO record",
+    "state": {
+      "draft": "Draft",
+      "final": "Final"
+    },
+    "peer": "Station",
+    "bandwidth": "Bandwidth",
+    "bandwidthUnknown": "unknown",
+    "start": "Started",
+    "rstSent": "RST sent",
+    "rstRcvd": "RST received",
+    "name": "Name",
+    "qth": "QTH",
+    "myPower": "My power",
+    "freqMhz": "Frequency (MHz)",
+    "notes": "Notes",
+    "save": "Save record",
+    "finalise": "Finalise",
+    "saved": "Saved",
+    "finalNote": "Finalised: this record can no longer be changed.",
+    "freqNone": "Frequency unavailable",
+    "freqInvalid": "Enter the frequency in MHz, for example 7.105"
+  },
+  "logbook": {
+    "title": "Logbook",
+    "intro": "Every session's record. Drafts can be changed until they are finalised.",
+    "empty": "No records yet. A record starts when a session is established.",
+    "open": "Open the record with {peer}",
+    "editAria": "Record with {peer}",
+    "editTitle": "{peer}, {start} UTC",
+    "col": {
+      "start": "Start (UTC)",
+      "peer": "Station",
+      "band": "Band",
+      "freq": "MHz",
+      "bandwidth": "BW",
+      "rstSent": "Sent",
+      "rstRcvd": "Rcvd",
+      "state": "State"
+    },
+    "finaliseOnDisconnect": "Finalise a session's record when it ends",
+    "finaliseNote": "Off: records stay drafts until you finalise them."
+  },
+  "macros": {
+    "button": "Macros",
+    "menuAria": "Insert a macro",
+    "none": "No macros.",
+    "noEmail": "This station has no email address set",
+    "insertEmail": "Insert email",
+    "insertedBytes": "Inserted {n} byte. | Inserted {n} bytes.",
+    "missing": "No value for {tags}: fill them in under Settings, Station information.",
+    "title": "Macros",
+    "intro": "Text you insert from the composer's Macros menu. These tags are filled in for you:",
+    "edit": "Edit",
+    "editAria": "Edit {name}",
+    "delete": "Delete",
+    "deleteAria": "Delete {name}",
+    "deleteConfirm": "Delete {name}",
+    "name": "Name",
+    "body": "Text",
+    "save": "Save macro",
+    "add": "Add a macro"
+  },
+  "stationInfo": {
+    "title": "Station information for {callsign}",
+    "intro": "Macros insert these into your drafts. Nothing here is sent by itself.",
+    "name": "Your name",
+    "grid": "Locator",
+    "qth": "QTH",
+    "rig": "Rig",
+    "power": "Power",
+    "antenna": "Antenna",
+    "email": "Email",
+    "about": "About the station",
+    "emailNote": "Your email goes into a draft only when you choose Insert email in the Macros menu.",
+    "save": "Save station information",
+    "saved": "Saved"
+  },
+  "about": {
+    "title": "About",
+    "founded": "Founded by ZS6SHZ",
+    "licence": "Free software under the GNU General Public License, version 3 or later (GPL-3.0-or-later).",
+    "link": {
+      "project": "Project page",
+      "changelog": "Changelog",
+      "issues": "Report an issue",
+      "releases": "Check for updates"
+    },
+    "updatesNote": "Check for updates opens the releases page in your browser. MercuryChat never looks online by itself.",
+    "credits": "Built on",
+    "credit": {
+      "mercury": "Mercury, the HF modem, by Rhizomatica (GPL-3.0-or-later)",
+      "hamlib": "Hamlib, radio control (LGPL-2.1-or-later)",
+      "dseg": "DSEG7 Classic font by keshikan (SIL Open Font License 1.1)"
+    },
+    "openFailed": "The browser could not be opened: {reason}"
   }
 }

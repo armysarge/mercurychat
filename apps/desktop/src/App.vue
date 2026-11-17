@@ -13,6 +13,7 @@ import {
 } from "./store";
 import Conversations from "./views/Conversations.vue";
 import Diagnostics from "./views/Diagnostics.vue";
+import Logbook from "./views/Logbook.vue";
 import Operate from "./views/Operate.vue";
 import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
@@ -29,6 +30,7 @@ let clock: ReturnType<typeof setInterval> | undefined;
 const RAIL: { page: ViewName; label: string; icon: string }[] = [
   { page: "operate", label: "nav.operate", icon: "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4" },
   { page: "conversations", label: "nav.conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
+  { page: "logbook", label: "nav.logbook", icon: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6" },
   { page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
   { page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
 ];
@@ -217,6 +219,7 @@ onUnmounted(() => {
         <Welcome v-else-if="firstUse" />
         <Operate v-else-if="app.page === 'operate'" />
         <Conversations v-else-if="app.page === 'conversations'" />
+        <Logbook v-else-if="app.page === 'logbook'" />
         <Settings v-else-if="app.page === 'settings'" />
         <Diagnostics v-else />
       </main>

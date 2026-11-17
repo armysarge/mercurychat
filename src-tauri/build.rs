@@ -11,6 +11,7 @@ fn main() {
         "ui_ready",
         "report_ipc",
         "ping",
+        "open_link",
         "modem_probe",
         "splash_status",
         "quit_app",
