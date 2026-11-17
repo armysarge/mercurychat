@@ -55,7 +55,6 @@ MercuryChat should feel like the chat apps people already use every day: a conve
 5. [Implementation roadmap and acceptance gates](docs/05-implementation-plan.md)
 6. [Evidence, risks and open decisions](docs/06-evidence-and-decisions.md)
 7. [Virtual audio and Raspberry Pi qualification](docs/07-virtual-audio-and-raspberry-pi.md)
-8. [Visual direction](design/mercurychat-concept.html) — open in a browser; illustrative data only, no modem connection.
 
 The technology selection, protocol draft, support matrix and estimates are proposals. The product choices above are confirmed; exact Pi model, memory floor and OS versions remain qualification targets. Implementation milestones are subsequent work; this phase delivers their specification.
 
