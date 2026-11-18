@@ -272,6 +272,9 @@ impl<'a> Session<'a> {
         *step = 0;
         *lost_said = false;
 
+        // The app's requests go before polls: a frequency set waits for at
+        // most the one request in flight (the actor holds a call meanwhile).
+        let mut asks: VecDeque<Queued> = VecDeque::new();
         let mut queue: VecDeque<Queued> = VecDeque::new();
         let now = Instant::now();
         let (mut next_ptt, mut next_read, mut next_meter) = (now, now, now);
@@ -285,7 +288,7 @@ impl<'a> Session<'a> {
                         }
                         *rate = r;
                     }
-                    Ok(RigClientCmd::Request { id, req }) => queue.push_back(Queued { id: Some(id), req }),
+                    Ok(RigClientCmd::Request { id, req }) => asks.push_back(Queued { id: Some(id), req }),
                     Err(mpsc::error::TryRecvError::Empty) => break,
                     Err(mpsc::error::TryRecvError::Disconnected) => return End::Stop,
                 }
@@ -308,7 +311,7 @@ impl<'a> Session<'a> {
                     }
                 }
             }
-            if let Some(q) = queue.pop_front() {
+            if let Some(q) = asks.pop_front().or_else(|| queue.pop_front()) {
                 if !self.keyed && matches!(q.req, RigRequest::GetLevel(l) if l != Level::RfPower) && q.id.is_none() {
                     continue; // unkeyed since it was queued: meters mean nothing now
                 }
@@ -337,7 +340,7 @@ impl<'a> Session<'a> {
                         }
                         *rate = r;
                     }
-                    Some(RigClientCmd::Request { id, req }) => queue.push_back(Queued { id: Some(id), req }),
+                    Some(RigClientCmd::Request { id, req }) => asks.push_back(Queued { id: Some(id), req }),
                 },
             }
         }

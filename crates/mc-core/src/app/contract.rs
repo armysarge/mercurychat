@@ -8,6 +8,8 @@ use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
+use super::rig::{RigBanner, RigChange, RigView};
+use super::rigconfig::RigConfig;
 use super::telemetry::TelemetryView;
 use crate::macros::MacroDef;
 use crate::profile::{FieldError, StationProfile};
@@ -57,6 +59,8 @@ pub struct AppSnapshot {
     pub ui_language: String,
     /// Desktop notification preferences (app settings, not per profile).
     pub notify_prefs: NotifyPrefs,
+    /// The rig as MercuryChat reads it through rigctld (M3b).
+    pub rig: Box<RigView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
@@ -194,6 +198,20 @@ pub enum AppCommand {
         query: String,
         limit: u32,
     },
+    /// The active profile's rig settings (M3b): stored, and the rig link
+    /// restarted on them.
+    SetRigConfig {
+        config: RigConfig,
+    },
+    /// Change the rig through rigctld: frequency, mode, VFO, split or RF
+    /// power. Refused while busy, with the reason (RIG-03).
+    RigSet {
+        change: RigChange,
+    },
+    /// Take a rig banner down, once it may go.
+    DismissRigBanner {
+        banner: RigBanner,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -234,6 +252,9 @@ pub enum AppError {
     /// The request does not fit the current state (e.g. no modem attached).
     #[error("{message}")]
     Conflict { message: String },
+    /// A change refused by a safety rule; `reason` is its i18n key.
+    #[error("{message}")]
+    Refused { reason: &'static str, message: String },
 }
 
 impl AppError {
@@ -247,6 +268,7 @@ impl AppError {
             AppError::Storage { .. } => "errors.storage",
             AppError::Internal { .. } => "errors.internal",
             AppError::Conflict { .. } => "errors.conflict",
+            AppError::Refused { .. } => "errors.refused",
         }
     }
 }
@@ -263,6 +285,7 @@ pub(super) enum AppErrorWire {
     Storage { key: &'static str, message: String },
     Internal { key: &'static str, message: String },
     Conflict { key: &'static str, message: String },
+    Refused { key: &'static str, reason: &'static str, message: String },
 }
 
 impl From<&AppError> for AppErrorWire {
@@ -275,6 +298,7 @@ impl From<&AppError> for AppErrorWire {
             AppError::Storage { message } => AppErrorWire::Storage { key, message: message.clone() },
             AppError::Internal { message } => AppErrorWire::Internal { key, message: message.clone() },
             AppError::Conflict { message } => AppErrorWire::Conflict { key, message: message.clone() },
+            AppError::Refused { reason, message } => AppErrorWire::Refused { key, reason, message: message.clone() },
         }
     }
 }
@@ -300,6 +324,7 @@ mod tests {
             AppError::Storage { .. } => "errors.storage",
             AppError::Internal { .. } => "errors.internal",
             AppError::Conflict { .. } => "errors.conflict",
+            AppError::Refused { .. } => "errors.refused",
         }
     }
 
@@ -311,6 +336,7 @@ mod tests {
             AppError::Storage { message: "s".into() },
             AppError::Internal { message: "i".into() },
             AppError::Conflict { message: "c".into() },
+            AppError::Refused { reason: "rig.refused.connected", message: "r".into() },
         ]
     }
 

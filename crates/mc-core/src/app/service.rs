@@ -28,6 +28,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+mod rig;
+use rig::RigSide;
+
 const ACTIVE_PROFILE: &str = "activeProfileId";
 /// The setting holding the interface language (`system` when absent).
 pub const UI_LANGUAGE_SETTING: &str = "ui.language";
@@ -172,6 +175,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         qso: None,
         mercury_listening: false,
         receive_only_shown: (false, false),
+        rig: RigSide::default(),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -180,7 +184,14 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         if let Some(p) = app.active_profile() {
             app.switch_modem(Some(p));
         }
+        // The current rigctld client's messages (none without one).
+        let mut rig_rx: Option<mpsc::Receiver<mercury_adapter::rigctl::RigMsg>> = None;
         loop {
+            if app.rig.inbox_new {
+                app.rig.inbox_new = false;
+                rig_rx = app.rig.inbox.take();
+            }
+            let rig_wake = app.rig_wake();
             let due = app.broadcasts.deadline();
             let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
             let telemetry_wake = app.telemetry.wake();
@@ -206,6 +217,17 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     }
                 }
                 Some(report) = report_rx.recv() => app.on_report(report),
+                msg = async {
+                    match rig_rx.as_mut() {
+                        Some(r) => r.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match msg {
+                    Some(msg) => app.on_rig(msg),
+                    None => rig_rx = None, // the client ended
+                },
+                // A throttled rig event or a held call is due: handled just below.
+                _ = tokio::time::sleep_until(rig_wake.unwrap_or_else(tokio::time::Instant::now)), if rig_wake.is_some() => {}
                 _ = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => {
                     let out = app.broadcasts.expired(tokio::time::Instant::now());
                     app.publish_broadcasts(out);
@@ -218,6 +240,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             }
             app.sync_beacon();
             app.sync_telemetry();
+            app.sync_rig();
         }
     });
     AppHandle { tx, events, spectrum }
@@ -263,6 +286,8 @@ struct App {
     mercury_listening: bool,
     /// Receive only as last published: (on, pending).
     receive_only_shown: (bool, bool),
+    /// Rig control (M3b): the rigctld client, the policy and the held call.
+    rig: RigSide,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -370,12 +395,17 @@ impl App {
                         self.state_word()
                     )));
                 }
-                self.command_modem(ModemCmd::Call(peer.clone()))?;
+                if !self.hold_call(&peer) {
+                    self.command_modem(ModemCmd::Call(peer.clone()))?;
+                }
                 // Answered at once: a second call is refused from here on.
                 self.set_modem(ModemState::Calling, Some(peer.as_str().to_string()));
                 Ok(CommandOk::Done)
             }
             AppCommand::CancelCall => {
+                if self.cancel_held_call() {
+                    return Ok(CommandOk::Done);
+                }
                 if self.modem != ModemState::Calling {
                     return Err(conflict("no call is being placed".into()));
                 }
@@ -388,6 +418,9 @@ impl App {
                 self.command_modem(ModemCmd::Disconnect).map(|_| CommandOk::Done)
             }
             AppCommand::Abort => {
+                if self.cancel_held_call() {
+                    return Ok(CommandOk::Done);
+                }
                 if !self.in_call() {
                     return Err(conflict("there is no call or session to abort".into()));
                 }
@@ -640,6 +673,9 @@ impl App {
                 self.pending = Some(target);
                 Ok(CommandOk::Done)
             }
+            AppCommand::SetRigConfig { config } => self.set_rig_config(config),
+            AppCommand::RigSet { change } => self.rig_set(change),
+            AppCommand::DismissRigBanner { banner } => self.dismiss_rig_banner(banner),
         }
     }
 
@@ -1003,6 +1039,7 @@ impl App {
         self.discovery.modem_changed();
         // A new active profile (or none): its stored Receive only choice.
         self.sync_receive_only();
+        self.start_rig(target.as_ref().map(|p| p.id.as_str()));
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
@@ -1032,7 +1069,7 @@ impl App {
                 let new_session =
                     session.as_ref().filter(|s| self.session.as_ref().map(|c| &c.session_id) != Some(&s.session_id));
                 if let Some(s) = new_session {
-                    let tuning = self.telemetry.tuning(now);
+                    let tuning = self.tuning(now);
                     // Before the session itself is recorded as the latest heard row (which has no grid).
                     let grid = self.heard_grid(&s.peer);
                     let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &tuning);
@@ -1056,15 +1093,17 @@ impl App {
                     Observation::Busy(on) => self.beacon.on_busy(*on, now),
                     Observation::Snr(snr) => self.telemetry.on_control_snr(*snr),
                     Observation::Buffer(n) => self.telemetry.on_buffer(*n),
+                    Observation::Ptt(on) => self.on_mercury_ptt(*on),
                     _ => {}
                 }
                 let out = self.broadcasts.observe(&o);
                 self.publish_broadcasts(out);
-                let events = self.discovery.observation(self.chat.as_mut(), o, &self.telemetry.tuning(now));
+                let tuning = self.tuning(now);
+                let events = self.discovery.observation(self.chat.as_mut(), o, &tuning);
                 self.emit_all(events);
             }
             ReportKind::Frame(f) => {
-                let tuning = self.telemetry.tuning(tokio::time::Instant::now());
+                let tuning = self.tuning(tokio::time::Instant::now());
                 let events = self.discovery.frame(self.chat.as_mut(), f, &tuning);
                 self.emit_all(events);
             }
@@ -1235,6 +1274,7 @@ impl App {
             finalise_on_disconnect: self.finalise_on_disconnect(),
             ui_language: self.ui_language(),
             notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
+            rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),
         })
     }
 }

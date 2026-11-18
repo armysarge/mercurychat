@@ -4,6 +4,7 @@ import type { DiscoveryStats } from "./DiscoveryStats";
 import type { ModemState } from "./ModemState";
 import type { NotifyPrefs } from "./NotifyPrefs";
 import type { Qso } from "./Qso";
+import type { RigView } from "./RigView";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
 import type { TelemetryView } from "./TelemetryView";
@@ -64,4 +65,8 @@ uiLanguage: string,
 /**
  * Desktop notification preferences (app settings, not per profile).
  */
-notifyPrefs: NotifyPrefs, };
+notifyPrefs: NotifyPrefs, 
+/**
+ * The rig as MercuryChat reads it through rigctld (M3b).
+ */
+rig: RigView, };

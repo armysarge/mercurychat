@@ -72,6 +72,9 @@ pub enum RigChange {
     Tune,
 }
 
+// Built only from finite values (the actor rejects NaN), so equality is total.
+impl Eq for RigChange {}
+
 impl RigChange {
     /// Changes made through rigctld (the others go through Mercury).
     fn needs_rig(&self) -> bool {
@@ -128,7 +131,7 @@ impl RigRefusal {
 }
 
 /// Banners the rig can raise.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub enum RigBanner {

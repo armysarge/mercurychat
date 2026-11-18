@@ -8,6 +8,7 @@ use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
 use super::logbook::Qso;
+use super::rig::RigView;
 use super::telemetry::TelemetryView;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -119,6 +120,11 @@ pub enum AppEvent {
     /// A QSO record was drafted, edited, ended or finalised.
     Qso {
         qso: Qso,
+    },
+    /// The rig changed (M3b): a reading, its link, a fault or a banner. At
+    /// most 2 a second; the snapshot always has the latest.
+    Rig {
+        rig: RigView,
     },
 }
 
