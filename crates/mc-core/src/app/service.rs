@@ -28,6 +28,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+mod freq;
+mod rig;
+use freq::FreqSide;
+use rig::RigSide;
+
 const ACTIVE_PROFILE: &str = "activeProfileId";
 /// The setting holding the interface language (`system` when absent).
 pub const UI_LANGUAGE_SETTING: &str = "ui.language";
@@ -55,6 +60,15 @@ pub struct AppOptions {
     /// The simulator's SIM1 calls CQ and beacons, and the simulator opens its
     /// broadcast port (the desktop app turns this on; default off).
     pub sim_peer_broadcasts: bool,
+    /// The simulator runs a fake rig behind it (M3b; the desktop app turns
+    /// this on; default off).
+    pub sim_rig: bool,
+    /// How long Tune runs before MercuryChat stops it; `None` is 30 s.
+    pub tune_limit: Option<std::time::Duration>,
+    /// The schedule's UTC clock and how often it is looked at (tests);
+    /// `None` is the real clock and 15 s.
+    pub schedule_clock: Option<fn() -> chrono::NaiveTime>,
+    pub schedule_tick: Option<std::time::Duration>,
 }
 
 impl Default for AppOptions {
@@ -67,6 +81,10 @@ impl Default for AppOptions {
             locks_dir: None,
             radio_hello_timeout: None,
             sim_peer_broadcasts: false,
+            sim_rig: false,
+            tune_limit: None,
+            schedule_clock: None,
+            schedule_tick: None,
         }
     }
 }
@@ -158,6 +176,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             slot: Default::default(),
             spectrum: Default::default(),
             sim_peer_broadcasts: opts.sim_peer_broadcasts,
+            sim_rig: opts.sim_rig,
         },
         reports,
         task: None,
@@ -172,6 +191,8 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         qso: None,
         mercury_listening: false,
         receive_only_shown: (false, false),
+        rig: RigSide::with_tune_limit(opts.tune_limit),
+        freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -180,7 +201,14 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         if let Some(p) = app.active_profile() {
             app.switch_modem(Some(p));
         }
+        // The current rigctld client's messages (none without one).
+        let mut rig_rx: Option<mpsc::Receiver<mercury_adapter::rigctl::RigMsg>> = None;
         loop {
+            if app.rig.inbox_new {
+                app.rig.inbox_new = false;
+                rig_rx = app.rig.inbox.take();
+            }
+            let rig_wake = app.rig_wake();
             let due = app.broadcasts.deadline();
             let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
             let telemetry_wake = app.telemetry.wake();
@@ -189,7 +217,15 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     let Some(req) = req else { break };
                     match req {
                         Request::Command(cmd, reply) => {
-                            let _ = reply.send(app.handle(*cmd));
+                            // The link test waits on the network: it answers from its own task.
+                            let cmd = match *cmd {
+                                AppCommand::TestRig { config } => {
+                                    app.test_rig(config, reply);
+                                    continue;
+                                }
+                                other => other,
+                            };
+                            let _ = reply.send(app.handle(cmd));
                             // A modem change is answered at once, then started.
                             if let Some(target) = app.pending.take() {
                                 app.switch_modem(target);
@@ -206,6 +242,17 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     }
                 }
                 Some(report) = report_rx.recv() => app.on_report(report),
+                msg = async {
+                    match rig_rx.as_mut() {
+                        Some(r) => r.recv().await,
+                        None => std::future::pending().await,
+                    }
+                } => match msg {
+                    Some(msg) => app.on_rig(msg),
+                    None => rig_rx = None, // the client ended
+                },
+                // A throttled rig event or a held call is due: handled just below.
+                _ = tokio::time::sleep_until(rig_wake.unwrap_or_else(tokio::time::Instant::now)), if rig_wake.is_some() => {}
                 _ = tokio::time::sleep_until(due.unwrap_or_else(tokio::time::Instant::now)), if due.is_some() => {
                     let out = app.broadcasts.expired(tokio::time::Instant::now());
                     app.publish_broadcasts(out);
@@ -218,6 +265,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             }
             app.sync_beacon();
             app.sync_telemetry();
+            app.sync_rig();
         }
     });
     AppHandle { tx, events, spectrum }
@@ -263,6 +311,9 @@ struct App {
     mercury_listening: bool,
     /// Receive only as last published: (on, pending).
     receive_only_shown: (bool, bool),
+    /// Rig control (M3b): the rigctld client, the policy and the held call.
+    rig: RigSide,
+    freq: FreqSide,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -370,12 +421,18 @@ impl App {
                         self.state_word()
                     )));
                 }
-                self.command_modem(ModemCmd::Call(peer.clone()))?;
+                self.refuse_if_tuning()?;
+                if !self.hold_call(&peer) {
+                    self.command_modem(ModemCmd::Call(peer.clone()))?;
+                }
                 // Answered at once: a second call is refused from here on.
                 self.set_modem(ModemState::Calling, Some(peer.as_str().to_string()));
                 Ok(CommandOk::Done)
             }
             AppCommand::CancelCall => {
+                if self.cancel_held_call() {
+                    return Ok(CommandOk::Done);
+                }
                 if self.modem != ModemState::Calling {
                     return Err(conflict("no call is being placed".into()));
                 }
@@ -388,6 +445,12 @@ impl App {
                 self.command_modem(ModemCmd::Disconnect).map(|_| CommandOk::Done)
             }
             AppCommand::Abort => {
+                if self.stop_tune_for_abort() {
+                    return Ok(CommandOk::Done);
+                }
+                if self.cancel_held_call() {
+                    return Ok(CommandOk::Done);
+                }
                 if !self.in_call() {
                     return Err(conflict("there is no call or session to abort".into()));
                 }
@@ -640,6 +703,23 @@ impl App {
                 self.pending = Some(target);
                 Ok(CommandOk::Done)
             }
+            AppCommand::SetRigConfig { config } => self.set_rig_config(config),
+            AppCommand::RigSet { change } => self.rig_set(change),
+            AppCommand::DismissRigBanner { banner } => self.dismiss_rig_banner(banner),
+            AppCommand::SetBandLevels { band, levels } => self.set_band_levels(band, levels),
+            AppCommand::Tune { on } => self.tune(on),
+            AppCommand::SetTuneLevel { dbfs } => self.set_tune_level(dbfs),
+            AppCommand::BandLevels => self.band_levels(),
+            AppCommand::RigSettings => self.rig_settings(),
+            // Answered from the loop (see `test_rig`), never here.
+            AppCommand::TestRig { .. } => Err(AppError::Internal { message: "the rig test runs on its own".into() }),
+            AppCommand::Frequencies => self.frequencies(),
+            AppCommand::SaveFrequency { entry } => self.save_frequency(entry),
+            AppCommand::DeleteFrequency { id } => self.delete_frequency(&id),
+            AppCommand::RestoreSuggested => self.restore_suggested(),
+            AppCommand::SetRegion { region } => self.set_region(region),
+            AppCommand::TuneToEntry { id } => self.tune_to_entry(&id),
+            AppCommand::SetSchedule { schedule } => self.set_schedule(schedule),
         }
     }
 
@@ -688,6 +768,9 @@ impl App {
     /// (DSC-02). A refusal is answered, published and logged, never queued.
     fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
         let len = (kind == BroadcastKind::Beacon).then_some(payload.len());
+        if self.rig.tune.active {
+            return Err(self.refuse_broadcast(kind, "not sent: Tune is on".into()));
+        }
         let calling = self.modem == ModemState::Calling;
         if let Err(g) = broadcast_gate(self.modem, calling, len, self.listen_mode.current()) {
             return Err(self.refuse_broadcast(kind, g.message()));
@@ -1003,6 +1086,9 @@ impl App {
         self.discovery.modem_changed();
         // A new active profile (or none): its stored Receive only choice.
         self.sync_receive_only();
+        self.rig_modem_changed();
+        self.start_rig(target.as_ref().map(|p| p.id.as_str()));
+        self.freq_profile_changed(target.as_ref().map(|p| p.id.as_str()));
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
@@ -1032,7 +1118,7 @@ impl App {
                 let new_session =
                     session.as_ref().filter(|s| self.session.as_ref().map(|c| &c.session_id) != Some(&s.session_id));
                 if let Some(s) = new_session {
-                    let tuning = self.telemetry.tuning(now);
+                    let tuning = self.tuning(now);
                     // Before the session itself is recorded as the latest heard row (which has no grid).
                     let grid = self.heard_grid(&s.peer);
                     let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &tuning);
@@ -1056,19 +1142,25 @@ impl App {
                     Observation::Busy(on) => self.beacon.on_busy(*on, now),
                     Observation::Snr(snr) => self.telemetry.on_control_snr(*snr),
                     Observation::Buffer(n) => self.telemetry.on_buffer(*n),
+                    Observation::Ptt(on) => self.on_mercury_ptt(*on),
                     _ => {}
                 }
                 let out = self.broadcasts.observe(&o);
                 self.publish_broadcasts(out);
-                let events = self.discovery.observation(self.chat.as_mut(), o, &self.telemetry.tuning(now));
+                let tuning = self.tuning(now);
+                let events = self.discovery.observation(self.chat.as_mut(), o, &tuning);
                 self.emit_all(events);
             }
             ReportKind::Frame(f) => {
-                let tuning = self.telemetry.tuning(tokio::time::Instant::now());
+                let tuning = self.tuning(tokio::time::Instant::now());
                 let events = self.discovery.frame(self.chat.as_mut(), f, &tuning);
                 self.emit_all(events);
             }
+            ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
+            ReportKind::Tune(result) => self.tune_report(result),
+            ReportKind::SimRig(addr) => self.rig_sim(addr),
             ReportKind::Telemetry(msg) => {
+                self.rig_telemetry_msg(&msg);
                 let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
                 // Ruling P2: the gate prefers telemetry's live listen mode.
                 self.listen_mode.set_live(self.telemetry.live_listen_mode());
@@ -1235,6 +1327,9 @@ impl App {
             finalise_on_disconnect: self.finalise_on_disconnect(),
             ui_language: self.ui_language(),
             notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
+            rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),
+            tune: self.rig.tune.view(),
+            schedule_next: self.schedule_next(),
         })
     }
 }

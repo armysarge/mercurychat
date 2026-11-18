@@ -4,9 +4,12 @@ import type { DiscoveryStats } from "./DiscoveryStats";
 import type { ModemState } from "./ModemState";
 import type { NotifyPrefs } from "./NotifyPrefs";
 import type { Qso } from "./Qso";
+import type { RigView } from "./RigView";
+import type { ScheduleNext } from "./ScheduleNext";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
 import type { TelemetryView } from "./TelemetryView";
+import type { TuneView } from "./TuneView";
 
 export type AppSnapshot = { seq: number, generation: number, modem: ModemState, 
 /**
@@ -64,4 +67,16 @@ uiLanguage: string,
 /**
  * Desktop notification preferences (app settings, not per profile).
  */
-notifyPrefs: NotifyPrefs, };
+notifyPrefs: NotifyPrefs, 
+/**
+ * The rig as MercuryChat reads it through rigctld (M3b).
+ */
+rig: RigView, 
+/**
+ * Mercury's tuning carrier (M3b).
+ */
+tune: TuneView, 
+/**
+ * The next scheduled QSY, while the schedule is on (M3b).
+ */
+scheduleNext: ScheduleNext | null, };

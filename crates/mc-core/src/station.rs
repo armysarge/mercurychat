@@ -413,6 +413,12 @@ impl Station {
         self.cmd(Command::CqFrame { source: self.cfg.callsign.clone(), bw: self.cfg.bandwidth }).await
     }
 
+    /// Mercury's tuning carrier (M3b): a level, the query, or off. A WRONG
+    /// is `StationError::Wrong` (no TUNE, out of range, or a link is up).
+    pub async fn tune(&mut self, arg: mercury_adapter::TuneArg) -> Result<(), StationError> {
+        self.cmd(Command::Tune(arg)).await
+    }
+
     pub async fn set_listen(&mut self, on: bool) -> Result<(), StationError> {
         self.cmd(Command::Listen(on)).await
     }

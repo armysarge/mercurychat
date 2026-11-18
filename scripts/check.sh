@@ -23,6 +23,8 @@ node apps/desktop/scripts/check-colours.mjs
 node --test apps/desktop/scripts/apply.test.mjs
 # Desktop notifications: the pure decision (notify.ts).
 node --test apps/desktop/scripts/notify.test.mjs
+# The station strip's tuning arithmetic (freqStep.ts).
+node --test apps/desktop/scripts/freqStep.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

@@ -43,6 +43,19 @@
 //        window reload; after the disconnect a QSO summary row is in the transcript
 //   T11e the record is a draft in the Logbook; Finalise locks it
 //   T11f history search finds an old message by its text
+// M3b Task 10 (the station strip as the rig panel; the simulator runs a fake rigctld):
+//   R1 the strip shows the sim rig's frequency in DSEG7; ArrowUp on the 1 kHz digit moves it 1 kHz
+//   R2 picking a frequency-list entry moves the rig there
+//   R3 Tune asks to confirm the first time, then shows Stop with a countdown; Stop ends it
+//   R4 with SIM1 connected the digits take no focus and say "not while connected"
+//   R5 the strip is at most 60 px tall at 1280 and 1024 px wide
+//   R6 the Rig button's panel has no Split when the rig cannot split, and has one when it can
+// M3b Task 11 (Settings in tabs; Settings → Rig):
+//   S1 every Settings tab opens its panel; arrow keys move between tabs
+//   S2 Rig shows the sim rig's address, and Test lists six steps, all passing
+//   S3 a custom entry added in Settings appears in the strip's frequency list
+//   S4 a suggested entry deleted comes back with Restore suggested (added 1)
+//   S5 the chosen tab survives a window reload
 // Usage: node lab/windows/m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -193,7 +206,7 @@ try {
   await s.eval(`${heardRow}.querySelector('.star').click()`);
   await until(s, `${heardRow}.querySelector('.star').getAttribute('aria-pressed') === 'true'`, "SIM1 starred");
 
-  // ---- T10c. CQ shows "transmitted"; telemetry reads unavailable; the strip shows dashes
+  // ---- T10c. CQ shows "transmitted"; telemetry reads unavailable; the strip shows the sim rig's frequency
   await s.eval(click("Call CQ"));
   await until(s, "/CQ: transmitted/.test(document.querySelector('.strip .cq-outcome')?.textContent ?? '')", "CQ transmitted", 10000);
   const tel = await s.eval("[...document.querySelectorAll('.telemetry .stat')].map(e => e.className.split(' ').pop() + '=' + e.lastElementChild.textContent.trim())");
@@ -202,7 +215,7 @@ try {
   }
   if (!tel.some((x) => x.startsWith("link=") && x.endsWith("Not configured"))) throw new Error(`telemetry link: ${tel.join(", ")}`);
   const freq = await s.eval("({ text: document.querySelector('.strip .freq-digits').textContent.trim(), aria: document.querySelector('.strip .freq-digits').getAttribute('aria-label'), font: getComputedStyle(document.querySelector('.strip .freq-digits')).fontFamily })");
-  if (freq.text !== "--.---.---" || freq.aria !== "Frequency unavailable" || !/DSEG7/.test(freq.font)) throw new Error(`strip frequency: ${JSON.stringify(freq)}`);
+  if (!/^\d{1,2}\.\d{3}\.\d{3}$/.test(freq.text) || !/ MHz$/.test(freq.aria ?? "") || !/DSEG7/.test(freq.font)) throw new Error(`strip frequency: ${JSON.stringify(freq)}`);
   const channel = await s.eval("document.querySelector('.beacon .channel').textContent.trim()");
   if (channel !== "Channel occupancy unknown") throw new Error(`channel: ${channel}`);
 
@@ -224,7 +237,115 @@ try {
   await until(s, "/Beacon: transmitted/.test(document.querySelector('.strip .beacon-outcome')?.textContent ?? '')", "Beacon now transmitted", 10000);
   const ptt = await s.eval("[...document.querySelectorAll('.activity .line[data-kind=ptt]')].map(l => l.querySelector('.text').textContent)");
   if (!ptt.includes("PTT on") || !ptt.includes("PTT off")) throw new Error(`no PTT lines in the activity drawer: ${JSON.stringify(ptt)}`);
-  results.push(`PASS operate: Call CQ -> "transmitted"; telemetry rows read "unavailable" (link Not configured); strip frequency "--.---.---" in DSEG7, aria "Frequency unavailable"; "${channel}"; beacons on -> "${cd[0]}" (card ${cd[1]}); Beacon now -> "transmitted"; the activity drawer lists ${ptt.length} PTT lines`);
+  results.push(`PASS operate: Call CQ -> "transmitted"; telemetry rows read "unavailable" (link Not configured); strip frequency "${freq.text}" (the sim rig) in DSEG7, aria "${freq.aria}"; "${channel}"; beacons on -> "${cd[0]}" (card ${cd[1]}); Beacon now -> "transmitted"; the activity drawer lists ${ptt.length} PTT lines`);
+
+  // ---- R1. the digits tune the sim rig
+  const hz = () => s.eval("Number(document.querySelector('.strip .freq-digits').getAttribute('aria-label').replace(' MHz', '')) * 1e6");
+  await until(s, "document.querySelectorAll('.strip .digit[tabindex=\"0\"]').length >= 7", "tunable digits");
+  const hz0 = Math.round(await hz());
+  await s.eval("(() => { const d = document.querySelector('.strip .digit[data-place=\"3\"]'); d.focus(); d.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true })); })()");
+  await until(s, `Math.round(Number(document.querySelector('.strip .freq-digits').getAttribute('aria-label').replace(' MHz', '')) * 1e6) === ${hz0 + 1000}`, "the frequency 1 kHz up", 5000);
+  // The rig, not only the display: the snapshot's rig frequency follows (the digits show the rig's own once it arrives).
+  await sleep(2500);
+  const hz1 = Math.round(await hz());
+  if (hz1 !== hz0 + 1000) throw new Error(`digit 3 ArrowUp: ${hz0} -> ${hz1}`);
+  results.push(`PASS digits: ArrowUp on the 1 kHz digit tuned the sim rig ${hz0} -> ${hz1} Hz`);
+
+  // ---- R2. a frequency-list pick moves the rig
+  const pick = await s.eval(`(() => {
+    const sel = document.querySelector('.strip select.freq-list');
+    const opt = [...sel.options].find(o => /40 m/.test(o.textContent));
+    if (!opt) throw new Error('no 40 m entry in the list');
+    sel.value = opt.value; sel.dispatchEvent(new Event('change'));
+    return opt.textContent;
+  })()`);
+  await until(s, "/^7\\./.test(document.querySelector('.strip .freq-digits').textContent.trim())", "the rig on 40 m", 5000);
+  const band40 = await s.eval("document.querySelector('.strip .band-chip')?.textContent.trim()");
+  if (band40 !== "40m") throw new Error(`band chip after the pick: ${band40}`);
+  results.push(`PASS list: picking "${pick}" moved the rig to ${await s.eval("document.querySelector('.strip .freq-digits').textContent.trim()")} (band chip ${band40})`);
+
+  // ---- R3. Tune: confirm once, Stop with a countdown, then stop
+  await s.eval("document.querySelector('.strip button.tune').click()");
+  await until(s, "!!document.querySelector('.popover button.tune-confirm')", "the Tune confirmation");
+  const ask = await s.eval("document.querySelector('.popover').textContent.trim()");
+  if (!/30 s/.test(ask)) throw new Error(`Tune confirmation: ${ask}`);
+  await s.eval("document.querySelector('.popover button.tune-confirm').click()");
+  await until(s, "/^Stop \\d\\d:\\d\\d$/.test(document.querySelector('.strip button.tune').textContent.trim())", "Stop with a countdown", 5000);
+  const stop = await s.eval("document.querySelector('.strip button.tune').textContent.trim()");
+  await s.eval("document.querySelector('.strip button.tune').click()");
+  await until(s, "document.querySelector('.strip button.tune').textContent.trim() === 'Tune'", "Tune stopped", 5000);
+  results.push(`PASS tune: the first Tune asked "${ask}", then showed "${stop}"; Stop ended it`);
+
+  // ---- R5. one row, at most 60 px, at 1280 and 1024 px
+  const heights = [];
+  for (const w of [1280, 1024]) {
+    await s.send("Emulation.setDeviceMetricsOverride", { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
+    await sleep(300);
+    heights.push(await s.eval("document.querySelector('.strip').getBoundingClientRect().height"));
+  }
+  await s.send("Emulation.clearDeviceMetricsOverride", {});
+  await sleep(600); // the resize this causes closes any open popover: let it land first
+  if (heights.some((h) => h > 60)) throw new Error(`strip heights ${heights.join(", ")}`);
+  results.push(`PASS strip height: ${heights.join(" / ")} px at 1280 / 1024 px wide`);
+
+  // ---- R6. the Rig panel shows Split only when the rig has it (the sim's dummy rig can split)
+  await s.eval("document.querySelector('.strip button.rig-more').click()");
+  await until(s, "!!document.querySelector('.popover input.rf-power, .popover input.tx-level')", "the Rig panel");
+  const panel = await s.eval("({ split: !!document.querySelector('.popover .split') })");
+  const canSplit = await s.eval("(async () => (await window.__TAURI_INTERNALS__.invoke('app_call', { cmd: { type: 'snapshot' } })).rig.caps.canSplit)()");
+  if (panel.split !== canSplit) throw new Error(`Split shown ${panel.split} but the rig's caps say ${canSplit}`);
+  await s.eval("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
+  results.push(`PASS rig panel: Split ${panel.split ? "shown" : "hidden"} as the rig's caps say (canSplit ${canSplit})`);
+
+  // ---- S1. Settings in tabs
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, "document.querySelectorAll('.settings [role=tab]').length >= 6", "the Settings tabs");
+  const tabs = await s.eval("[...document.querySelectorAll('.settings [role=tab]')].map(b => b.id.replace('tab-', ''))");
+  for (const name of tabs) {
+    await s.eval(`document.getElementById('tab-${name}').click()`);
+    await until(s, `getComputedStyle(document.getElementById('panel-${name}')).display !== 'none' && document.getElementById('tab-${name}').getAttribute('aria-selected') === 'true'`, `the ${name} tab`);
+    const shown = await s.eval("[...document.querySelectorAll('.settings [role=tabpanel]')].filter(p => getComputedStyle(p).display !== 'none').length");
+    if (shown !== 1) throw new Error(`${shown} panels shown on the ${name} tab`);
+  }
+  await s.eval("(() => { const t = document.getElementById('tab-station'); t.click(); t.focus(); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); })()");
+  await until(s, "document.activeElement?.id === 'tab-profiles' && document.getElementById('tab-profiles').getAttribute('aria-selected') === 'true'", "ArrowRight to the next tab");
+  const wide = await s.eval("document.querySelector('.settings').scrollWidth <= document.querySelector('.settings').clientWidth");
+  if (!wide) throw new Error("Settings scrolls sideways");
+  results.push(`PASS settings tabs: ${tabs.join(", ")} each open their own panel; ArrowRight moves to the next tab; no sideways scroll`);
+
+  // ---- S2. Rig: the sim rig's address and the link test
+  await s.eval("document.getElementById('tab-rig').click()");
+  await until(s, "!!document.querySelector('.rig-settings input.rig-port')?.value", "the rig address");
+  await s.eval("document.querySelector('.rig-settings button.rig-test').click()");
+  await until(s, "document.querySelectorAll('.rig-test-steps li').length === 6", "six test steps", 15000);
+  const stepsShown = await s.eval("[...document.querySelectorAll('.rig-test-steps li')].map(l => l.dataset.step + ':' + l.className.split(' ').pop())");
+  if (stepsShown.some((x) => !x.endsWith(":ok"))) throw new Error(`rig test: ${stepsShown.join(", ")}`);
+  results.push(`PASS rig test: ${stepsShown.join(", ")}`);
+
+  // ---- S3. a custom entry reaches the strip's list
+  await s.eval(setInput(".freq-list-editor input.entry-name", "UI check net"));
+  await s.eval(setInput(".freq-list-editor input.entry-freq", "7.110"));
+  await s.eval("document.querySelector('.freq-list-editor button.entry-save').click()");
+  await until(s, "[...document.querySelectorAll('.strip select.freq-list option')].some(o => /UI check net/.test(o.textContent))", "the custom entry in the strip");
+  results.push("PASS frequency list: \"UI check net\" (7.110) added in Settings is in the strip's list");
+
+  // ---- S4. delete a suggestion, then restore it
+  const rows = await s.eval("document.querySelectorAll('.freq-list-editor tbody tr').length");
+  await s.eval("document.querySelector('.freq-list-editor tbody tr.suggested button.delete').click()");
+  await until(s, `document.querySelectorAll('.freq-list-editor tbody tr').length === ${rows - 1}`, "a suggestion deleted");
+  await s.eval("document.querySelector('.freq-list-editor button.restore-suggested').click()");
+  await until(s, `document.querySelector('.freq-list-editor .restored')?.textContent.trim() === 'Suggested entries added: 1' && document.querySelectorAll('.freq-list-editor tbody tr').length === ${rows}`, "the suggestion restored");
+  results.push(`PASS restore: a deleted suggestion came back ("Suggested entries added: 1", ${rows} rows)`);
+
+  // ---- S5. the chosen tab survives a reload
+  await s.eval("location.reload()");
+  await sleep(1500);
+  await until(s, `!!${rail("Settings")}`, "the window after a reload", 20000);
+  await s.eval(`${rail("Settings")}.click()`);
+  await until(s, "document.getElementById('tab-rig')?.getAttribute('aria-selected') === 'true'", "the Rig tab remembered");
+  results.push("PASS remembered tab: Rig is still chosen after a window reload");
+  await s.eval("document.getElementById('tab-station').click()");
+  await s.eval(`${rail("Operate")}.click()`);
 
   // ---- 3. the antenna icon
   const d = await s.eval(`${rail("Operate")}.querySelector('path').getAttribute('d')`);
@@ -352,6 +473,15 @@ try {
   await s.eval(click("Call"));
   await until(s, `${pill} === 'connected'`, "connected to SIM1", 20000);
   await until(s, "document.querySelector('section.qso-card .qso-peer')?.textContent.trim() === 'SIM1' && !!document.querySelector('section.qso-card .qso-bw')?.textContent.trim()", "the QSO card with peer and bandwidth");
+  // ---- R4. rig controls are disabled, with the reason, while connected
+  const busy = await s.eval(`({
+    tab: [...document.querySelectorAll('.strip .digit')].map(d => d.tabIndex),
+    title: document.querySelector('.strip .freq-digits')?.title ?? '',
+    list: document.querySelector('.strip select.freq-list')?.disabled,
+    tune: document.querySelector('.strip button.tune')?.disabled,
+  })`);
+  if (!busy.tab.length || busy.tab.some((n) => n !== -1) || busy.title !== "not while connected" || !busy.list || !busy.tune) throw new Error(`rig controls while connected: ${JSON.stringify(busy)}`);
+  results.push(`PASS rig busy: with SIM1 connected the ${busy.tab.length} digits take no focus, title "${busy.title}"; the list and Tune are disabled`);
   const bw = await s.eval("document.querySelector('section.qso-card .qso-bw').textContent.trim()");
   await s.eval(setInput("section.qso-card input[name=rstSent]", "59"));
   await s.eval(setInput("section.qso-card textarea[name=notes]", "first M3a QSO"));
@@ -366,7 +496,7 @@ try {
   await until(s, `['ready','listening'].includes(${pill})`, "the session ended", 20000);
   await until(s, "!!document.querySelector('.transcript li.sys[data-kind=session-end]')", "the QSO summary row");
   const summary = await s.eval("document.querySelector('.transcript li.sys[data-kind=session-end]').textContent.replace(/\\s+/g, ' ').trim()");
-  if (!/Frequency unavailable/.test(summary) || !/\d+ s|\d+ min/.test(summary) || !/9 bytes|\d+ bytes/.test(summary)) throw new Error(`summary row: ${summary}`);
+  if (!/Frequency unavailable|MHz/.test(summary) || !/\d+ s|\d+ min/.test(summary) || !/9 bytes|\d+ bytes/.test(summary)) throw new Error(`summary row: ${summary}`);
   if (!(await s.eval("!!document.querySelector('section.qso-card') && document.querySelector('section.qso-card .qso-state').textContent.trim() === 'Draft'"))) throw new Error("the last session's card is gone before it was finalised");
   const cqRow = await s.eval("document.querySelector('.transcript li.sys[data-kind=cq]')?.textContent.trim() ?? ''");
   if (!/CQ transmitted/.test(cqRow)) throw new Error(`no CQ row in the transcript: "${cqRow}"`);
@@ -474,6 +604,7 @@ try {
   // The composer's frame is a control edge: it uses the 3:1 control border, not the decorative divider.
   await s.eval(`${rail("Operate")}.click()`);
   await until(s, "!!document.querySelector('.composer-box')", `the composer on Operate (page: ${await s.eval("document.querySelector('.rail button.selected')?.getAttribute('aria-label') ?? 'none'")})`);
+  if (!(await s.eval("!!document.querySelector('.composer-box')"))) throw new Error("themes: the composer box is gone");
   const frame = await s.eval(`({ edge: getComputedStyle(document.querySelector('.composer-box')).borderTopColor, strong: ${cssVar("border-strong")} })`);
   if (frame.edge !== rgb(frame.strong)) throw new Error(`composer frame ${frame.edge} is not --border-strong ${frame.strong}`);
   await s.eval(`${rail("Settings")}.click()`);
@@ -482,6 +613,8 @@ try {
   for (const id of ["system", "midnight", "daylight", "night-red", "high-contrast-dark", "high-contrast-light", "ocean", "slate", "amber-terminal"]) {
     if (!picks.split(",").includes(id)) throw new Error(`the picker lacks ${id}: ${picks}`);
   }
+  const missing = await s.eval("['aside.sidebar', '.rail'].filter(q => !document.querySelector(q))");
+  if (missing.length) throw new Error(`themes: no ${missing.join(", ")} on Settings`);
   const themeBefore = await s.eval(`({ side: ${bg("aside.sidebar")}, rail: ${bg(".rail")}, out: ${cssVar("bubble-out")}, cq: ${cssVar("badge-cq")} })`);
   await s.eval("document.querySelector('[data-theme-id=\"night-red\"]').click()");
   await until(s, `${cssVar("canvas")} === ${JSON.stringify(night.canvas)}`, "Night Red applied without a restart");

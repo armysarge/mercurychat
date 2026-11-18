@@ -107,6 +107,34 @@ mkdir -p lab/run/rig-N && MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD/lab/bin:/m
 
 Results: `lab/run/rig-N/report.md` (checks and findings), `report.json` (PTT timelines, control transcripts), Mercury and rigctld logs per station. About two minutes.
 
+### M3b rig control: the app against a shared rigctld (dummy rig)
+
+`crates/mc-core/examples/rig_lab.rs` runs the real service actor headless (no window) as station A, against two patched Mercury modems (0001–0003, in `lab/bin-patched`) that key the Hamlib dummy rig through rigctld. Station B is answered by the program's own headless peer. A third Mercury, set to a serial Hamlib model on a pseudo-terminal pair (`pty-pair.py`, a TS-2000 emulated by `rigctlcom`), is used for the two-owner check. No real serial device or radio is used.
+
+Build the program for Linux (the `mercurychat-app-build:amd64` image from section 4), then run the lab:
+
+```bash
+MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/src:ro" -v mc-app-build-amd64:/build -v "$PWD/lab/bin/rig-lab:/out" -v "$PWD/lab/docker/rig:/scripts:ro" mercurychat-app-build:amd64 bash /scripts/build-rig-lab.sh
+```
+
+```bash
+mkdir -p lab/run/m3b-rig-N && MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD/lab/bin-patched:/mercury:ro" -v "$PWD/lab/bin/rig-lab:/lab:ro" -v "$PWD/lab/run/m3b-rig-N:/out" -v "$PWD/lab/docker/rig:/scripts:ro" mercurychat-lab:rig bash /scripts/run-m3b-lab.sh
+```
+
+It checks:
+
+1. Mercury keys through the shared rigctld and the PTT cross-check agrees, with no fault;
+2. the app sets frequency and mode while idle and Mercury's telemetry follows (the time is reported; Mercury polls the rig every few seconds);
+3. a frequency change is refused while connected, and no `F` reaches rigctld (read from its `-vvvv` log);
+4. rigctld killed while keyed raises "lost while keyed", and after the restart there is at most one PTT off, none while Mercury reports PTT on;
+5. rigctld killed while idle leaves the modem listening and the frequency falls back to telemetry;
+6. the TX level for a band is applied and confirmed;
+7. Tune keys the rig and stops by itself after about 30 s;
+8. rigctld without `-P` turns the PTT check off, raises no fault and refuses Tune;
+9. a Mercury with its own CAT connection is refused as a second owner, with the reason.
+
+Results: `report.txt` (one PASS or FAIL line per check), `activity.txt`, and the rigctld and Mercury logs. About three minutes.
+
 ## 4. Desktop shell
 
 ```bash

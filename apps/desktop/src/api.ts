@@ -192,6 +192,15 @@ export class Mirror {
       case "telemetry":
         v.snapshot.telemetry = ev.telemetry;
         break;
+      case "rig":
+        v.snapshot.rig = ev.rig;
+        break;
+      case "tune":
+        v.snapshot.tune = ev.tune;
+        break;
+      case "scheduleNext":
+        v.snapshot.scheduleNext = ev.next;
+        break;
       case "qso":
         // The card follows the latest session's record; an edit of an older one (Logbook) leaves it.
         if (!v.snapshot.currentQso || v.snapshot.currentQso.id === ev.qso.id || ev.qso.startUtc >= v.snapshot.currentQso.startUtc) {

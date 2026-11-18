@@ -61,7 +61,12 @@
     "dismiss": "Fermer",
     "otherSession": "Session avec {peer} ({direction}).",
     "open": "Ouvrir",
-    "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}"
+    "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}",
+    "rig": {
+      "pttNotFollowing": "Le poste ne suit pas le PTT de Mercury. Vérifiez la radio et ses réglages CAT et PTT.",
+      "lostWhileKeyed": "La liaison avec le poste a été perdue pendant l'émission. Si la radio émet toujours, coupez l'émission à la main.",
+      "restartModem": "Mercury dit émettre mais le poste n'est pas en émission depuis le retour de rigctld : redémarrez le modem."
+    }
   },
   "broadcast": {
     "notConfirmed": {
@@ -220,7 +225,16 @@
     "cancel": "Annuler",
     "stopUsing": "Ne plus utiliser",
     "use": "Utiliser",
-    "addStation": "Ajouter une station"
+    "addStation": "Ajouter une station",
+    "tabs": {
+      "aria": "Sections des réglages",
+      "station": "Station",
+      "profiles": "Profils",
+      "rig": "Poste",
+      "notifications": "Notifications",
+      "appearance": "Apparence",
+      "about": "À propos"
+    }
   },
   "appearance": {
     "title": "Apparence",
@@ -342,7 +356,8 @@
     "notFound": "Rien trouvé avec l'identifiant {id}.",
     "storage": "La base de données locale a signalé un problème : {message}",
     "internal": "Un problème est survenu dans l'application : {message}",
-    "conflict": "Impossible pour le moment : {message}"
+    "conflict": "Impossible pour le moment : {message}",
+    "refused": "Pas modifié : {message}"
   },
   "splash": {
     "opening": "Ouverture des données de la station…",
@@ -476,7 +491,30 @@
       "refused": "non envoyé : {reason}"
     },
     "spectrum": "Spectre",
-    "telemetryUnavailable": "télémesure indisponible"
+    "telemetryUnavailable": "télémesure indisponible",
+    "digit": "Chiffre des {place}",
+    "freqInput": "Fréquence : tapez 7.105 (MHz), 7105 (kHz) ou 7105000 (Hz), puis Entrée",
+    "bandMenu": "Liste de fréquences sur {band}",
+    "bandEmpty": "Aucune entrée de la liste sur cette bande",
+    "modeMenu": "Mode",
+    "freqList": "Liste de fréquences",
+    "freqListPick": "Accorder sur…",
+    "entry": "{name} · {mhz}",
+    "tune": "Accord",
+    "tuneTitle": "Émettre la porteuse d'accord de Mercury pour une boîte d'accord (s'arrête seule après 30 s)",
+    "tuneStop": "Arrêter {time}",
+    "tuneNoSupport": "Ce Mercury n'a pas d'accord : mettez Mercury à jour pour accorder d'ici",
+    "tuneUnknown": "En attente du modem pour savoir s'il peut accorder",
+    "tuneConfirm": "L'accord émet une porteuse jusqu'à 30 s. Continuer ?",
+    "tuneConfirmYes": "Émettre",
+    "cancel": "Annuler",
+    "rig": "Poste",
+    "rigMore": "VFO, split, puissance, niveaux et mesures",
+    "pttFault": "Défaut PTT",
+    "pttFaultTitle": "Mercury et le poste ne sont pas d'accord sur l'émission : vérifiez la radio",
+    "pttCheckOff": "Contrôle PTT désactivé",
+    "pttCheckOffTitle": "Le PTT du poste ne peut pas être lu, les émissions ne sont donc pas contrôlées. Lancez rigctld avec le type de PTT de la radio (par exemple -P RIG) pour activer le contrôle.",
+    "nextQsy": "Prochain QSY {time} UTC : {name}"
   },
   "qso": {
     "title": "Fiche du QSO",
@@ -643,5 +681,120 @@
       "more": "{n} autre balise non envoyée | {n} autres balises non envoyées"
     },
     "reason": "{reason}"
+  },
+  "rig": {
+    "refused": {
+      "calling": "pas pendant un appel",
+      "connected": "pas pendant une connexion",
+      "draining": "pas tant que le modem émet encore",
+      "tuning": "pas pendant l’accord",
+      "broadcasting": "pas pendant l’envoi d’un CQ ou d’une balise",
+      "pttOn": "pas pendant l’émission",
+      "pttUnknown": "le PTT de la radio est illisible, l’émission ne pourrait donc pas être vérifiée",
+      "linkDown": "la liaison avec la radio est coupée",
+      "unsupported": "non pris en charge par cette radio",
+      "notAttached": "le modem n’est pas connecté"
+    }
+  },
+  "rigPanel": {
+    "title": "Poste",
+    "vfo": "VFO",
+    "split": "Split",
+    "rfPower": "Puissance HF",
+    "percent": "{pct} %",
+    "txLevel": "Niveau TX ({band})",
+    "txLevelNoBand": "Niveau TX (bande inconnue)",
+    "tuneLevel": "Niveau d'accord",
+    "db": "{db} dB",
+    "dbfs": "{db} dBFS",
+    "meters": "Mesures",
+    "metersIdle": "Les mesures s'affichent pendant l'émission",
+    "swr": "ROS {value}",
+    "alc": "ALC {value}",
+    "power": "Puissance {value}",
+    "txApplied": "Niveau TX pour {band} appliqué : {db} dB",
+    "txPending": "Niveau TX pour {band} : en attente de Mercury",
+    "txNotApplied": "Niveau TX pour {band} non appliqué : {reason}"
+  },
+  "rigSettings": {
+    "title": "Poste",
+    "noStation": "Choisissez une station pour régler son poste.",
+    "arrangement": "Comment MercuryChat lit le poste",
+    "arrangementOpt": {
+      "none": "Aucun",
+      "rigctld": "rigctld, partagé avec Mercury",
+      "mercury": "Mercury seul (fréquence, lecture seule)"
+    },
+    "hint": "Avec rigctld, MercuryChat et Mercury partagent un rigctld que vous lancez : Mercury passe en émission par lui (Hamlib modèle 2) et MercuryChat vérifie que le poste suit.",
+    "host": "Hôte",
+    "port": "Port",
+    "restore": "Revenir à la dernière fréquence quand la liaison avec le poste s'établit",
+    "save": "Enregistrer",
+    "saved": "Enregistré",
+    "test": "Tester",
+    "testing": "Test en cours…",
+    "testHint": "Le test ouvre sa propre connexion et ne fait que lire le poste.",
+    "region": "Région IARU (pour les fréquences suggérées)",
+    "regionOpt": "Région {n}",
+    "step": {
+      "connect": "Connexion",
+      "caps": "Capacités",
+      "frequency": "Fréquence",
+      "mode": "Mode",
+      "ptt": "Lecture du PTT",
+      "owner": "PTT de Mercury"
+    }
+  },
+  "freqList": {
+    "title": "Liste de fréquences",
+    "hint": "Partagée par toutes les stations. Les entrées suggérées sont un point de départ tiré des plans de bande de l'IARU, pas des fréquences d'appel officielles.",
+    "name": "Nom",
+    "freq": "Fréquence",
+    "mode": "Mode",
+    "band": "Bande",
+    "purpose": "Usage",
+    "notes": "Notes",
+    "actions": "Actions",
+    "suggested": "suggérée",
+    "outOfBand": "Hors bande",
+    "purposeOpt": {
+      "beacon": "Balise",
+      "cq": "CQ",
+      "chat": "Discussion"
+    },
+    "add": "Ajouter",
+    "update": "Enregistrer les modifications",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "up": "Monter",
+    "down": "Descendre",
+    "cancel": "Annuler",
+    "restore": "Restaurer les suggestions",
+    "restored": "Entrées suggérées ajoutées : {n}",
+    "freqInvalid": "Saisissez une fréquence comme 7.105",
+    "mhz": "{mhz} MHz",
+    "empty": "La liste est vide."
+  },
+  "bandLevels": {
+    "title": "Niveaux TX et d'accord par bande",
+    "hint": "Appliqués quand le poste passe sur la bande et que la station est libre. Le niveau d'accord est à la carte son (dBFS) et ignore le niveau TX.",
+    "band": "Bande",
+    "tx": "Niveau TX (dB)",
+    "tune": "Niveau d'accord (dBFS)",
+    "txAria": "Niveau TX pour {band}",
+    "tuneAria": "Niveau d'accord pour {band}",
+    "saved": "Enregistré pour {band}"
+  },
+  "schedule": {
+    "title": "Programme de QSY",
+    "hint": "Les heures sont en UTC. Le poste ne change que lorsqu'un changement est dû et que la station est libre ; un changement impossible avant le suivant est sauté.",
+    "enabled": "Suivre le programme",
+    "time": "Début (UTC)",
+    "entry": "Entrée",
+    "add": "Ajouter un changement",
+    "remove": "Retirer",
+    "save": "Enregistrer le programme",
+    "saved": "Programme enregistré",
+    "needEntries": "Ajoutez d'abord des entrées à la liste de fréquences."
   }
 }

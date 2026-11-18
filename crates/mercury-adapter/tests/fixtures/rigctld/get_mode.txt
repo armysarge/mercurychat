@@ -1,0 +1,4 @@
+get_mode:
+Mode: FM
+Passband: 15000
+RPRT 0

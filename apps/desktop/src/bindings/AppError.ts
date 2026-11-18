@@ -5,4 +5,4 @@ import type { FieldError } from "./FieldError";
  * What `AppError` serialises to, and the source of the generated TypeScript
  * `AppError`: the old shape plus `key`.
  */
-export type AppError = { "code": "validation", key: string, errors: Array<FieldError>, } | { "code": "busy", key: string, message: string, } | { "code": "notFound", key: string, id: string, } | { "code": "storage", key: string, message: string, } | { "code": "internal", key: string, message: string, } | { "code": "conflict", key: string, message: string, };
+export type AppError = { "code": "validation", key: string, errors: Array<FieldError>, } | { "code": "busy", key: string, message: string, } | { "code": "notFound", key: string, id: string, } | { "code": "storage", key: string, message: string, } | { "code": "internal", key: string, message: string, } | { "code": "conflict", key: string, message: string, } | { "code": "refused", key: string, reason: string, message: string, };

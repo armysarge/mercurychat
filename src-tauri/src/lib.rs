@@ -289,6 +289,7 @@ fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
         locks_dir: Some(locks_dir.clone()),
         // The simulator's SIM1 calls CQ and beacons, so Heard has stations without RF.
         sim_peer_broadcasts: true,
+        sim_rig: true,
         ..AppOptions::default()
     };
     // spawn_app needs a runtime context; Tauri's runtime keeps the actor alive.

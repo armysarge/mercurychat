@@ -54,7 +54,7 @@ fn migration_4_upgrades_an_m2_database() {
     drop(s);
 
     let mut s = Store::open(&path).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 5);
+    assert_eq!(s.schema_version().unwrap(), MIGRATIONS.last().unwrap().to);
     let rows = s.messages("ZS6ABC").unwrap();
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].body, "hello");

@@ -1,8 +1,10 @@
 <script setup lang="ts">
-// Settings (docs/04 §4): Appearance (language), the station in use (its
-// information and macros, M3a Task 11), the Logbook preference, profiles and
-// new ones from the same forms as first use, and About.
-import { computed, ref } from "vue";
+// Settings (docs/04 §4), in tabs (owner request, 18 Nov): Station (its
+// information, macros and the Logbook preference), Profiles (and new ones from
+// the same forms as first use), Rig (M3b), Notifications, Appearance and
+// About. The tab chosen is remembered in this window's storage. Areas built
+// after 1.0 (email, AI, GPS, EmComm) get their own tabs when they exist.
+import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { StationProfile } from "../bindings/StationProfile";
@@ -10,6 +12,7 @@ import About from "../components/About.vue";
 import MacroEditor from "../components/MacroEditor.vue";
 import NotificationSettings from "../components/NotificationSettings.vue";
 import ProfileForms from "../components/ProfileForms.vue";
+import RigSettings from "../components/RigSettings.vue";
 import StationInfo from "../components/StationInfo.vue";
 import ThemePicker from "../components/ThemePicker.vue";
 import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../i18n/locale";
@@ -17,6 +20,39 @@ import { activeProfile, mirror, setFinaliseOnDisconnect, snapshot } from "../sto
 import Switch from "../components/Switch.vue";
 
 const { t } = useI18n();
+
+const TABS = ["station", "profiles", "rig", "notifications", "appearance", "about"] as const;
+type Tab = (typeof TABS)[number];
+const TAB_KEY = "mc.settingsTab";
+const tab = ref<Tab>(
+  (() => {
+    try {
+      const v = localStorage.getItem(TAB_KEY);
+      return (TABS as readonly string[]).includes(v ?? "") ? (v as Tab) : "station";
+    } catch {
+      return "station";
+    }
+  })(),
+);
+watch(tab, (v) => {
+  try {
+    localStorage.setItem(TAB_KEY, v);
+  } catch {
+    // Storage may be unavailable: the tab then lasts for this run only.
+  }
+});
+const tabList = ref<HTMLElement | null>(null);
+/** Arrow keys, Home and End move between tabs (and choose them). */
+async function onTabKey(e: KeyboardEvent) {
+  const i = TABS.indexOf(tab.value);
+  const moves: Record<string, number> = { ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: TABS.length - 1 };
+  const next = moves[e.key];
+  if (next === undefined) return;
+  e.preventDefault();
+  tab.value = TABS[(next + TABS.length) % TABS.length];
+  await nextTick();
+  tabList.value?.querySelector<HTMLElement>(`[aria-selected="true"]`)?.focus();
+}
 
 const error = ref("");
 const working = ref(false);
@@ -76,6 +112,20 @@ async function chooseFinalise(on: boolean) {
 <template>
   <div class="settings">
     <h1>{{ t("settings.title") }}</h1>
+    <div ref="tabList" class="tabs" role="tablist" :aria-label="t('settings.tabs.aria')" @keydown="onTabKey">
+      <button
+        v-for="name in TABS"
+        :id="`tab-${name}`"
+        :key="name"
+        role="tab"
+        :class="['tab', `tab-${name}`]"
+        :aria-selected="tab === name"
+        :aria-controls="`panel-${name}`"
+        :tabindex="tab === name ? 0 : -1"
+        @click="tab = name"
+      >{{ t(`settings.tabs.${name}`) }}</button>
+    </div>
+    <div v-show="tab === 'appearance'" id="panel-appearance" class="panel" role="tabpanel" aria-labelledby="tab-appearance">
     <section class="card stack" aria-labelledby="h-appearance">
       <h2 id="h-appearance">{{ t("appearance.title") }}</h2>
       <label class="lang">
@@ -88,6 +138,8 @@ async function chooseFinalise(on: boolean) {
       <p v-if="languageError" class="err" role="alert">{{ languageError }}</p>
     </section>
     <ThemePicker />
+    </div>
+    <div v-show="tab === 'station'" id="panel-station" class="panel" role="tabpanel" aria-labelledby="tab-station">
     <StationInfo />
     <MacroEditor />
     <section v-if="activeProfile" class="card stack" aria-labelledby="h-logbook">
@@ -99,6 +151,8 @@ async function chooseFinalise(on: boolean) {
       <p class="muted small">{{ t("logbook.finaliseNote") }}</p>
       <p v-if="finaliseError" class="err" role="alert">{{ finaliseError }}</p>
     </section>
+    </div>
+    <div v-show="tab === 'profiles'" id="panel-profiles" class="panel" role="tabpanel" aria-labelledby="tab-profiles">
     <section class="card stack" aria-labelledby="h-profiles">
       <h2 id="h-profiles">{{ t("settings.stationProfiles") }}</h2>
       <ul v-if="snapshot?.profiles.length" class="profiles">
@@ -128,13 +182,25 @@ async function chooseFinalise(on: boolean) {
     </section>
     <h2>{{ t("settings.addStation") }}</h2>
     <ProfileForms />
-    <NotificationSettings />
-    <About />
+    </div>
+    <div v-show="tab === 'rig'" id="panel-rig" class="panel" role="tabpanel" aria-labelledby="tab-rig">
+      <RigSettings />
+    </div>
+    <div v-show="tab === 'notifications'" id="panel-notifications" class="panel" role="tabpanel" aria-labelledby="tab-notifications">
+      <NotificationSettings />
+    </div>
+    <div v-show="tab === 'about'" id="panel-about" class="panel" role="tabpanel" aria-labelledby="tab-about">
+      <About />
+    </div>
   </div>
 </template>
 
 <style scoped>
-.settings { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); overflow-y: auto; height: 100%; align-content: start; }
+.settings { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); overflow-y: auto; overflow-x: hidden; height: 100%; align-content: start; min-width: 0; }
+.tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); }
+.tab { border: 1px solid transparent; border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; background: transparent; padding: 4px 12px; color: var(--text-2); }
+.tab[aria-selected="true"] { border-color: var(--border); background: var(--surface); color: var(--text); font-weight: 600; margin-bottom: -1px; }
+.panel { display: grid; gap: calc(var(--space) * 2); align-content: start; min-width: 0; }
 h1 { font-size: calc(20px * var(--font-scale)); }
 .profiles { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .profiles li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); padding: 6px 8px; border-radius: 8px; background: var(--raised); }

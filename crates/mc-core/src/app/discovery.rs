@@ -5,7 +5,7 @@
 //! station's own UTC at receipt (no sender clock).
 
 use super::events::{AppEvent, ModemState};
-use super::telemetry::{Tuning, TELEMETRY_SOURCE};
+use super::telemetry::Tuning;
 use crate::band::band_for;
 use crate::station::Observation;
 use mc_storage::{now_utc, HeardRow, HeardSummaryRow, StorageError, Store};
@@ -391,7 +391,7 @@ impl Discovery {
         let freq = tuning.freq.as_ref().and_then(|f| Some((i64::try_from(f.value).ok()?, f)));
         let mut row = HeardRow {
             freq_hz: freq.map(|(hz, _)| hz),
-            freq_source: freq.map(|_| TELEMETRY_SOURCE.to_string()),
+            freq_source: freq.map(|(_, f)| f.source.clone()),
             freq_age_ms: freq.and_then(|(_, f)| f.age_ms).and_then(|a| i64::try_from(a).ok()),
             ..row
         };

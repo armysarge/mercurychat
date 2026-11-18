@@ -1,5 +1,15 @@
 # Planning changes
 
+## 0.8 — 18 November 2026 (M3b rig control)
+
+- Built M3b on branch `m3b`. **Connect-only:** MercuryChat is a second client of the rigctld the operator runs; Mercury keys PTT through the same rigctld (Hamlib model 2). A link test in Settings checks each step (connect, capabilities, frequency, mode, PTT read-back, Mercury's PTT owner) using reads only, and explains rigctld's `RPRT -11` (start it with `-P`). A Mercury with its own CAT connection is refused as a second owner, with the reason.
+- **The station strip is the rig panel:** digit tuning (click a digit, scroll or use the arrows, or type), band and mode chips, a frequency-list dropdown, the passband, Tune (first-use confirmation, a 30 s stop), and a popover for VFO/split, RF power and meters. Controls the rig cannot do are hidden. Every change is refused while busy, with the reason shown inline.
+- **PTT safety:** MercuryChat never sends `T 1`. After the rig link returns it sends at most one `T 0`, never while Mercury reports PTT on. PTT is cross-checked against Mercury's own PTT events; a contradiction must persist for the whole window before it is a fault, because Mercury unkeys the rig just before it reports PTT off. When PTT cannot be read, only Tune and transmitting actions are refused.
+- **Frequency list** shared by every station, with suggested entries per IARU region (drafted, marked for review before release), per-band TX levels per profile, and an optional time-of-day QSY schedule that never runs during a session. Settings is now in tabs (Station, Profiles, Rig, Notifications, Appearance, About), and the chosen tab is remembered.
+- The simulator gets a fake rig, so the app and the screenshots show rig control without hardware.
+- **Rig lab** (the headless service against two patched Mercury modems keying a Hamlib dummy rig in Docker, no RF): 9 of 9 checks pass. It found one bug, fixed with a test: the PTT cross-check faulted when Mercury unkeyed the rig about 100 ms before its PTT OFF event.
+- Still open: the Raspberry Pi smoke test, a real rig on a real serial port, and a review of the suggested frequencies against the current IARU band plans. Next: M3c, operator extras. Details: docs/M3b-progress.md.
+
 ## 0.7 — 17 November 2026 (M3a discovery and operator tools)
 
 - Built M3a on branch `m3a`. **Discovery:** the heard list, kept from CQs, MCB/1 beacons and sessions, shows where each SNR, frequency and offset came from, with favourites and a 30-day retention. Malformed and foreign broadcasts are counted, never shown as stations. **CQ and Beacon now** go through an idle-only, capacity-limited broadcast gate, and the result is "transmitted", never "delivered". **Periodic beacons** are off by default and jittered. They are suppressed during calls, sessions, draining, faults and a busy channel, never replayed in a burst, and never re-armed by a restart or recovery.

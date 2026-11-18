@@ -1,0 +1,3 @@
+get_ptt:
+PTT: 1
+RPRT 0

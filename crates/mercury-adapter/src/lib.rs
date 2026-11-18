@@ -8,11 +8,14 @@ pub mod control;
 #[cfg(feature = "fake")]
 pub mod fake;
 #[cfg(feature = "fake")]
+pub mod fake_rig;
+#[cfg(feature = "fake")]
 pub mod fake_ws;
 pub mod kiss;
 pub mod monitor;
+pub mod rigctl;
 pub mod telemetry;
 
 pub use client::{Ack, AdapterEvent, AttachError, Attachment, CommandError, Endpoint, MercuryClient, Timeouts};
-pub use command::{Bandwidth, Callsign, Command};
+pub use command::{Bandwidth, Callsign, Command, TuneArg};
 pub use control::ControlEvent;

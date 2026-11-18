@@ -1,0 +1,4 @@
+get_split_vfo:
+Split: 0
+TX VFO: None
+RPRT 0
