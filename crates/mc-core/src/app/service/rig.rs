@@ -125,6 +125,8 @@ pub(super) struct RigSide {
     tx_wait: Option<(String, f32, Instant)>,
     pub(super) tune: TuneState,
     tune_limit: Duration,
+    /// The simulator's fake rigctld, while the simulator runs.
+    sim: Option<std::net::SocketAddr>,
 }
 
 impl RigSide {
@@ -159,6 +161,7 @@ impl Default for RigSide {
             tx_wait: None,
             tune: TuneState { shown: Some(TuneView::default()), ..TuneState::default() },
             tune_limit: TUNE_LIMIT,
+            sim: None,
         }
     }
 }
@@ -260,7 +263,16 @@ impl App {
 
     /// Start (or stop) the rig link for a profile's settings. `None`: no profile.
     pub(super) fn start_rig(&mut self, profile_id: Option<&str>) {
-        let cfg = profile_id.map(|id| RigConfig::load(&self.store, id)).unwrap_or_default();
+        let cfg = match (self.rig.sim, profile_id) {
+            // The simulator's own rig, whatever the profile stores.
+            (Some(addr), Some(_)) => RigConfig {
+                arrangement: RigArrangement::Rigctld,
+                host: addr.ip().to_string(),
+                port: addr.port(),
+                restore_on_startup: false,
+            },
+            _ => profile_id.map(|id| RigConfig::load(&self.store, id)).unwrap_or_default(),
+        };
         let r = &mut self.rig;
         r.task = None;
         r.tx = None;
@@ -591,8 +603,19 @@ impl App {
         [event, held, tx, tune, self.freq.wake()].into_iter().flatten().min()
     }
 
+    /// The simulator's rig is up: link to it, with Mercury keying through it
+    /// as the simulator's PTT does (Hamlib model 2 at its address).
+    pub(super) fn rig_sim(&mut self, addr: std::net::SocketAddr) {
+        self.rig.sim = Some(addr);
+        self.rig.radio_list =
+            Some(RadioList { ptt_method: "hamlib".into(), selected_model: Some(2), device_path: addr.to_string() });
+        let id = self.rig.profile_id.clone();
+        self.start_rig(id.as_deref());
+    }
+
     /// A new modem (or none): its telemetry client, and what it said, are gone.
     pub(super) fn rig_modem_changed(&mut self) {
+        self.rig.sim = None;
         self.rig.tele_tx = None;
         self.rig.radio_list = None;
         self.rig.tx_wait = None;

@@ -47,6 +47,9 @@ pub struct ModemOptions {
     /// beacons after attach and every minute (the desktop app; tests that
     /// pin event sequences leave it off).
     pub sim_peer_broadcasts: bool,
+    /// The simulator runs a fake rigctld its PTT keys (M3b; the desktop app
+    /// turns this on, default off).
+    pub sim_rig: bool,
 }
 
 /// The latest valid spectrum from Mercury's telemetry, shared by every modem
@@ -147,6 +150,8 @@ pub enum ReportKind {
     Telemetry(TelemetryMsg),
     /// What became of a TUNE command, or the probe after attach.
     Tune(TuneResult),
+    /// The simulator's fake rigctld listens here (M3b).
+    SimRig(std::net::SocketAddr),
     /// Where to send commands for this modem's telemetry client (M3b: the
     /// per-band TX level). Sent once, when the client starts.
     TelemetryCmds(mpsc::Sender<TelemetryCmd>),
@@ -546,7 +551,7 @@ async fn run(
         }
         ModemTarget::Simulator => {
             let on_air = opts.sim_peer_broadcasts;
-            simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air).await
+            simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air, opts.sim_rig).await
         }
     }
 }
@@ -560,6 +565,7 @@ async fn simulator(
     r: Reporter,
     forwarders: &mut Forwarders,
     on_air: bool,
+    with_rig: bool,
 ) {
     r.state(ModemState::Attaching, None).await;
     let peer_dir = station_dir.join("sim-peer");
@@ -592,6 +598,20 @@ async fn simulator(
         _ = stopped(&mut cmds, &r) => return,
     }
     let mut sim = sim;
+    // The rig a Mercury keys through: it follows our side's PTT.
+    let rig = match with_rig {
+        true => Some(std::sync::Arc::new(mercury_adapter::fake_rig::FakeRigctld::start().await)),
+        false => None,
+    };
+    if let Some(rig) = &rig {
+        let weak = std::sync::Arc::downgrade(rig);
+        sim.net.on_ptt(0, move |on| {
+            if let Some(rig) = weak.upgrade() {
+                rig.set_ptt(on);
+            }
+        });
+        r.send(ReportKind::SimRig(rig.addr)).await;
+    }
     probe_tune(&mut sim.station, &r).await;
     r.send(ReportKind::ListenMode(sim.station.listen_mode())).await;
     r.state(ModemState::Ready, Some("simulator".into())).await;
@@ -611,6 +631,7 @@ async fn simulator(
     r: Reporter,
     _forwarders: &mut Forwarders,
     _on_air: bool,
+    _with_rig: bool,
 ) {
     r.fault("the simulator is not part of this build".into()).await;
 }

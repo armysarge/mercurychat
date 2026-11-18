@@ -60,6 +60,9 @@ pub struct AppOptions {
     /// The simulator's SIM1 calls CQ and beacons, and the simulator opens its
     /// broadcast port (the desktop app turns this on; default off).
     pub sim_peer_broadcasts: bool,
+    /// The simulator runs a fake rig behind it (M3b; the desktop app turns
+    /// this on; default off).
+    pub sim_rig: bool,
     /// How long Tune runs before MercuryChat stops it; `None` is 30 s.
     pub tune_limit: Option<std::time::Duration>,
     /// The schedule's UTC clock and how often it is looked at (tests);
@@ -78,6 +81,7 @@ impl Default for AppOptions {
             locks_dir: None,
             radio_hello_timeout: None,
             sim_peer_broadcasts: false,
+            sim_rig: false,
             tune_limit: None,
             schedule_clock: None,
             schedule_tick: None,
@@ -172,6 +176,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             slot: Default::default(),
             spectrum: Default::default(),
             sim_peer_broadcasts: opts.sim_peer_broadcasts,
+            sim_rig: opts.sim_rig,
         },
         reports,
         task: None,
@@ -1141,6 +1146,7 @@ impl App {
             }
             ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
             ReportKind::Tune(result) => self.tune_report(result),
+            ReportKind::SimRig(addr) => self.rig_sim(addr),
             ReportKind::Telemetry(msg) => {
                 self.rig_telemetry_msg(&msg);
                 let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());

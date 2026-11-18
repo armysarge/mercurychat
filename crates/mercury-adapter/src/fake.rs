@@ -13,8 +13,13 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{mpsc, Notify};
 
+/// Called with each `PTT ON` (true) / `PTT OFF` (false) a station is sent.
+type PttHook = std::sync::Arc<dyn Fn(bool) + Send + Sync>;
+
 #[derive(Default)]
 struct Station {
+    /// The simulator's rig follows this station's PTT.
+    ptt_hook: Option<PttHook>,
     mycall: Option<String>,
     listen: bool,
     ctrl_tx: Option<mpsc::UnboundedSender<String>>,
@@ -192,6 +197,12 @@ impl FakeNet {
     }
 
     /// Make station `i` answer `MODE n` with WRONG (an unsupported mode).
+    /// Call `hook` with every PTT change station `i` is told of, as a radio
+    /// keyed by that station's Mercury would follow it (the simulator's rig).
+    pub fn on_ptt(&self, i: usize, hook: impl Fn(bool) + Send + Sync + 'static) {
+        self.shared.lock().unwrap().st[i].ptt_hook = Some(std::sync::Arc::new(hook));
+    }
+
     /// Make station `i` an older Mercury without TUNE.
     pub fn set_no_tune(&self, i: usize, on: bool) {
         self.shared.lock().unwrap().st[i].no_tune = on;
@@ -287,6 +298,13 @@ impl FakeNet {
 fn send_line(s: &Shared, i: usize, line: &str) {
     if let Some(tx) = &s.st[i].ctrl_tx {
         let _ = tx.send(format!("{line}\r"));
+    }
+    if let Some(hook) = &s.st[i].ptt_hook {
+        match line {
+            "PTT ON" => hook(true),
+            "PTT OFF" => hook(false),
+            _ => {}
+        }
     }
 }
 
