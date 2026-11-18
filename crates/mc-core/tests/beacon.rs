@@ -493,6 +493,10 @@ mod service {
             done(&h, AppCommand::SetBeacon { on: true }).await;
             assert!(beacon(&h).await.active);
         } // the app stops
+        // Let it close its connections before the next app attaches: the
+        // fake Mercury serves one host at a time, and under load the next
+        // attach raced the teardown (the gate, 18 Nov).
+        tokio::time::sleep(Duration::from_millis(500)).await;
         let h = spawn_app(Store::open(&db).unwrap(), opts(dir.path()));
         let mut rx = h.subscribe();
         state(&mut rx, ModemState::Ready).await;
