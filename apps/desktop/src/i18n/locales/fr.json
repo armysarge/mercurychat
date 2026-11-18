@@ -342,7 +342,8 @@
     "notFound": "Rien trouvé avec l'identifiant {id}.",
     "storage": "La base de données locale a signalé un problème : {message}",
     "internal": "Un problème est survenu dans l'application : {message}",
-    "conflict": "Impossible pour le moment : {message}"
+    "conflict": "Impossible pour le moment : {message}",
+    "refused": "Pas modifié : {message}"
   },
   "splash": {
     "opening": "Ouverture des données de la station…",
@@ -643,5 +644,19 @@
       "more": "{n} autre balise non envoyée | {n} autres balises non envoyées"
     },
     "reason": "{reason}"
+  },
+  "rig": {
+    "refused": {
+      "calling": "pas pendant un appel",
+      "connected": "pas pendant une connexion",
+      "draining": "pas tant que le modem émet encore",
+      "tuning": "pas pendant l’accord",
+      "broadcasting": "pas pendant l’envoi d’un CQ ou d’une balise",
+      "pttOn": "pas pendant l’émission",
+      "pttUnknown": "le PTT de la radio est illisible, l’émission ne pourrait donc pas être vérifiée",
+      "linkDown": "la liaison avec la radio est coupée",
+      "unsupported": "non pris en charge par cette radio",
+      "notAttached": "le modem n’est pas connecté"
+    }
   }
 }

@@ -341,7 +341,8 @@
     "notFound": "Nothing found with id {id}.",
     "storage": "The local database reported a problem: {message}",
     "internal": "Something went wrong inside the app: {message}",
-    "conflict": "That cannot be done right now: {message}"
+    "conflict": "That cannot be done right now: {message}",
+    "refused": "Not changed: {message}"
   },
   "splash": {
     "opening": "Opening station data…",
@@ -642,5 +643,19 @@
       "more": "{n} more beacon not sent | {n} more beacons not sent"
     },
     "reason": "{reason}"
+  },
+  "rig": {
+    "refused": {
+      "calling": "not while calling",
+      "connected": "not while connected",
+      "draining": "not while the modem is still sending",
+      "tuning": "not while tuning",
+      "broadcasting": "not while a CQ or beacon is going out",
+      "pttOn": "not while transmitting",
+      "pttUnknown": "the rig's PTT cannot be read, so the transmission could not be checked",
+      "linkDown": "the rig link is down",
+      "unsupported": "not supported by this rig",
+      "notAttached": "the modem is not attached"
+    }
   }
 }

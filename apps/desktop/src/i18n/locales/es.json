@@ -342,7 +342,8 @@
     "notFound": "No se encontró nada con el id {id}.",
     "storage": "La base de datos local informó de un problema: {message}",
     "internal": "Algo falló dentro de la aplicación: {message}",
-    "conflict": "Ahora no se puede hacer: {message}"
+    "conflict": "Ahora no se puede hacer: {message}",
+    "refused": "Sin cambios: {message}"
   },
   "splash": {
     "opening": "Abriendo los datos de la estación…",
@@ -643,5 +644,19 @@
       "more": "{n} baliza más no enviada | {n} balizas más no enviadas"
     },
     "reason": "{reason}"
+  },
+  "rig": {
+    "refused": {
+      "calling": "no mientras se llama",
+      "connected": "no mientras hay una conexión",
+      "draining": "no mientras el módem aún transmite",
+      "tuning": "no mientras se sintoniza",
+      "broadcasting": "no mientras sale un CQ o una baliza",
+      "pttOn": "no mientras se transmite",
+      "pttUnknown": "no se puede leer el PTT de la radio, así que no se podría comprobar la transmisión",
+      "linkDown": "el enlace con la radio está caído",
+      "unsupported": "esta radio no lo admite",
+      "notAttached": "el módem no está conectado"
+    }
   }
 }

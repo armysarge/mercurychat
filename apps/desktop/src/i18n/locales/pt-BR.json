@@ -342,7 +342,8 @@
     "notFound": "Nada encontrado com o id {id}.",
     "storage": "O banco de dados local relatou um problema: {message}",
     "internal": "Algo deu errado dentro do aplicativo: {message}",
-    "conflict": "Não é possível agora: {message}"
+    "conflict": "Não é possível agora: {message}",
+    "refused": "Não alterado: {message}"
   },
   "splash": {
     "opening": "Abrindo os dados da estação…",
@@ -643,5 +644,19 @@
       "more": "Mais {n} beacon não enviado | Mais {n} beacons não enviados"
     },
     "reason": "{reason}"
+  },
+  "rig": {
+    "refused": {
+      "calling": "não durante uma chamada",
+      "connected": "não durante uma conexão",
+      "draining": "não enquanto o modem ainda transmite",
+      "tuning": "não durante a sintonia",
+      "broadcasting": "não enquanto um CQ ou beacon está saindo",
+      "pttOn": "não durante a transmissão",
+      "pttUnknown": "o PTT do rádio não pode ser lido, então a transmissão não poderia ser verificada",
+      "linkDown": "o link com o rádio caiu",
+      "unsupported": "não suportado por este rádio",
+      "notAttached": "o modem não está conectado"
+    }
   }
 }
