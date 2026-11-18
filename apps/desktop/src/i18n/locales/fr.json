@@ -61,7 +61,12 @@
     "dismiss": "Fermer",
     "otherSession": "Session avec {peer} ({direction}).",
     "open": "Ouvrir",
-    "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}"
+    "receiveOnlyFailed": "Impossible de changer Réception seule : {reason}",
+    "rig": {
+      "pttNotFollowing": "Le poste ne suit pas le PTT de Mercury. Vérifiez la radio et ses réglages CAT et PTT.",
+      "lostWhileKeyed": "La liaison avec le poste a été perdue pendant l'émission. Si la radio émet toujours, coupez l'émission à la main.",
+      "restartModem": "Mercury dit émettre mais le poste n'est pas en émission depuis le retour de rigctld : redémarrez le modem."
+    }
   },
   "broadcast": {
     "notConfirmed": {
@@ -477,7 +482,30 @@
       "refused": "non envoyé : {reason}"
     },
     "spectrum": "Spectre",
-    "telemetryUnavailable": "télémesure indisponible"
+    "telemetryUnavailable": "télémesure indisponible",
+    "digit": "Chiffre des {place}",
+    "freqInput": "Fréquence : tapez 7.105 (MHz), 7105 (kHz) ou 7105000 (Hz), puis Entrée",
+    "bandMenu": "Liste de fréquences sur {band}",
+    "bandEmpty": "Aucune entrée de la liste sur cette bande",
+    "modeMenu": "Mode",
+    "freqList": "Liste de fréquences",
+    "freqListPick": "Accorder sur…",
+    "entry": "{name} · {mhz}",
+    "tune": "Accord",
+    "tuneTitle": "Émettre la porteuse d'accord de Mercury pour une boîte d'accord (s'arrête seule après 30 s)",
+    "tuneStop": "Arrêter {time}",
+    "tuneNoSupport": "Ce Mercury n'a pas d'accord : mettez Mercury à jour pour accorder d'ici",
+    "tuneUnknown": "En attente du modem pour savoir s'il peut accorder",
+    "tuneConfirm": "L'accord émet une porteuse jusqu'à 30 s. Continuer ?",
+    "tuneConfirmYes": "Émettre",
+    "cancel": "Annuler",
+    "rig": "Poste",
+    "rigMore": "VFO, split, puissance, niveaux et mesures",
+    "pttFault": "Défaut PTT",
+    "pttFaultTitle": "Mercury et le poste ne sont pas d'accord sur l'émission : vérifiez la radio",
+    "pttCheckOff": "Contrôle PTT désactivé",
+    "pttCheckOffTitle": "Le PTT du poste ne peut pas être lu, les émissions ne sont donc pas contrôlées. Lancez rigctld avec le type de PTT de la radio (par exemple -P RIG) pour activer le contrôle.",
+    "nextQsy": "Prochain QSY {time} UTC : {name}"
   },
   "qso": {
     "title": "Fiche du QSO",
@@ -658,5 +686,25 @@
       "unsupported": "non pris en charge par cette radio",
       "notAttached": "le modem n’est pas connecté"
     }
+  },
+  "rigPanel": {
+    "title": "Poste",
+    "vfo": "VFO",
+    "split": "Split",
+    "rfPower": "Puissance HF",
+    "percent": "{pct} %",
+    "txLevel": "Niveau TX ({band})",
+    "txLevelNoBand": "Niveau TX (bande inconnue)",
+    "tuneLevel": "Niveau d'accord",
+    "db": "{db} dB",
+    "dbfs": "{db} dBFS",
+    "meters": "Mesures",
+    "metersIdle": "Les mesures s'affichent pendant l'émission",
+    "swr": "ROS {value}",
+    "alc": "ALC {value}",
+    "power": "Puissance {value}",
+    "txApplied": "Niveau TX pour {band} appliqué : {db} dB",
+    "txPending": "Niveau TX pour {band} : en attente de Mercury",
+    "txNotApplied": "Niveau TX pour {band} non appliqué : {reason}"
   }
 }

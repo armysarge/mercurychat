@@ -737,3 +737,16 @@ async fn a_slot_blocked_by_activity_waits_then_skips() {
     let next = snapshot(&h).await.schedule_next.expect("a next change");
     assert_eq!((next.at_utc.as_str(), next.entry_name.as_str()), ("10:10", "C"));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn band_levels_read_back_what_was_stored() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    let levels = BandLevels { tx_gain_db: -2.5, tune_dbfs: -30.0 };
+    h.call(AppCommand::SetBandLevels { band: "40m".into(), levels }).await.unwrap();
+    let CommandOk::BandLevels { levels: all } = h.call(AppCommand::BandLevels).await.unwrap() else { panic!() };
+    assert_eq!(all.get("40m"), Some(&levels));
+    assert_eq!(all.len(), 1);
+}

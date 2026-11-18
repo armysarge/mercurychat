@@ -701,6 +701,7 @@ impl App {
             AppCommand::SetBandLevels { band, levels } => self.set_band_levels(band, levels),
             AppCommand::Tune { on } => self.tune(on),
             AppCommand::SetTuneLevel { dbfs } => self.set_tune_level(dbfs),
+            AppCommand::BandLevels => self.band_levels(),
             AppCommand::Frequencies => self.frequencies(),
             AppCommand::SaveFrequency { entry } => self.save_frequency(entry),
             AppCommand::DeleteFrequency { id } => self.delete_frequency(&id),

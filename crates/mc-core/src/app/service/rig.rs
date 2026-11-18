@@ -808,6 +808,11 @@ impl App {
         self.rig.dirty = true;
     }
 
+    pub(super) fn band_levels(&self) -> Result<CommandOk, AppError> {
+        let id = self.active_profile().map(|p| p.id).ok_or_else(|| conflict("no station is selected".into()))?;
+        Ok(CommandOk::BandLevels { levels: BandLevels::load_all(&self.store, &id) })
+    }
+
     pub(super) fn set_band_levels(&mut self, band: String, levels: BandLevels) -> Result<CommandOk, AppError> {
         let Some(id) = self.active_profile().map(|p| p.id) else {
             return Err(conflict("no station is selected".into()));

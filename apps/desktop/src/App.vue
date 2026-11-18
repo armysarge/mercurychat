@@ -23,6 +23,8 @@ import ContextMenu from "./components/ContextMenu.vue";
 import Sidebar from "./components/Sidebar.vue";
 import StationStrip from "./components/StationStrip.vue";
 import WindowControls from "./components/WindowControls.vue";
+import type { RigBanner } from "./bindings/RigBanner";
+import { dismissRigBanner, rigView } from "./rig";
 
 const startupError = ref("");
 const now = ref(new Date());
@@ -35,6 +37,18 @@ const RAIL: { page: ViewName; label: string; icon: string }[] = [
   { page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
   { page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
 ];
+
+/** The rig's banners (M3b): each is dismissible only once it is safe to. */
+const rigBanners = computed(() => {
+  const r = rigView.value;
+  if (!r) return [];
+  return r.banners.map((b: RigBanner) => ({
+    banner: b,
+    tone: b === "lostWhileKeyed" ? "err" : "warn",
+    text: t(`banner.rig.${b}`),
+    canDismiss: b === "lostWhileKeyed" ? r.ptt === "off" : b === "pttNotFollowing" ? r.fault !== "pttNotFollowing" : true,
+  }));
+});
 
 const firstUse = computed(() => snapshot.value !== null && snapshot.value.profiles.length === 0);
 const utc = computed(() => now.value.toISOString().slice(11, 19) + " UTC");
@@ -187,6 +201,10 @@ onUnmounted(() => {
       <button class="quiet" @click="rxError = ''">{{ t("banner.dismiss") }}</button>
     </p>
     <p v-if="banner" :class="['banner', banner.tone]" :role="banner.role">{{ banner.text }}</p>
+    <p v-for="b in rigBanners" :key="b.banner" :class="['banner', 'rig-banner', b.banner, b.tone]" role="alert">
+      {{ b.text }}
+      <button v-if="b.canDismiss" class="quiet" @click="dismissRigBanner(b.banner)">{{ t("banner.dismiss") }}</button>
+    </p>
     <p v-if="app.view?.callFailed" class="banner err" role="alert">
       {{ t("banner.callFailed", { reason: app.view.callFailed }) }}
       <button class="quiet" @click="app.view && (app.view.callFailed = null)">{{ t("banner.dismiss") }}</button>

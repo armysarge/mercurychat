@@ -8,7 +8,7 @@ import type { RigMeters } from "./RigMeters";
 import type { RigPttView } from "./RigPttView";
 import type { TxLevelResult } from "./TxLevelResult";
 
-export type RigView = { link: RigLinkView, frequency: Reading<bigint> | null, mode: string | null, passbandHz: number | null, vfo: string | null, split: boolean | null, rfPower: Reading<number> | null, ptt: RigPttView, 
+export type RigView = { link: RigLinkView, frequency: Reading<number> | null, mode: string | null, passbandHz: number | null, vfo: string | null, split: boolean | null, rfPower: Reading<number> | null, ptt: RigPttView, 
 /**
  * The rig's PTT has read unknown for a while with the link up: the
  * cross-check cannot run (e.g. rigctld started without `-P`).

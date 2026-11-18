@@ -231,6 +231,7 @@ impl Eq for TxLevelResult {}
 #[ts(export)]
 pub struct RigView {
     pub link: RigLinkView,
+    #[ts(type = "Reading<number> | null")]
     pub frequency: Option<Reading<u64>>,
     pub mode: Option<String>,
     pub passband_hz: Option<i32>,

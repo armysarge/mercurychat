@@ -233,6 +233,8 @@ pub enum AppCommand {
     SetTuneLevel {
         dbfs: f32,
     },
+    /// The active profile's stored TX and Tune levels, by band.
+    BandLevels,
     /// The frequency list (shared by every profile), by sort then frequency.
     Frequencies,
     /// Add (empty id) or change an entry; answered with the whole list.
@@ -275,6 +277,7 @@ pub enum CommandOk {
     Activity { entries: Vec<ActivityEntry> },
     Frequencies { entries: Vec<FrequencyEntry> },
     Restored { added: u32 },
+    BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },
     Qsos { qsos: Vec<Qso> },
     Qso(Qso),
     Macros { macros: Vec<MacroDef> },

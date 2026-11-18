@@ -60,7 +60,12 @@
     "dismiss": "Dismiss",
     "otherSession": "Session with {peer} ({direction}).",
     "open": "Open",
-    "receiveOnlyFailed": "Could not change Receive only: {reason}"
+    "receiveOnlyFailed": "Could not change Receive only: {reason}",
+    "rig": {
+      "pttNotFollowing": "The rig is not following Mercury's PTT. Check the radio and its CAT and PTT settings.",
+      "lostWhileKeyed": "The rig link was lost while transmitting. If the radio is still transmitting, unkey the radio by hand.",
+      "restartModem": "Mercury says it is transmitting but the rig is not keyed after rigctld came back: restart the modem."
+    }
   },
   "broadcast": {
     "notConfirmed": {
@@ -476,7 +481,30 @@
       "refused": "not sent: {reason}"
     },
     "spectrum": "Spectrum",
-    "telemetryUnavailable": "telemetry unavailable"
+    "telemetryUnavailable": "telemetry unavailable",
+    "digit": "{place} digit",
+    "freqInput": "Frequency: type 7.105 (MHz), 7105 (kHz) or 7105000 (Hz), then Enter",
+    "bandMenu": "Frequency list on {band}",
+    "bandEmpty": "No frequency-list entries on this band",
+    "modeMenu": "Mode",
+    "freqList": "Frequency list",
+    "freqListPick": "Tune to…",
+    "entry": "{name} · {mhz}",
+    "tune": "Tune",
+    "tuneTitle": "Transmit Mercury's tuning carrier for an antenna tuner (stops by itself after 30 s)",
+    "tuneStop": "Stop {time}",
+    "tuneNoSupport": "This Mercury has no Tune: update Mercury to tune from here",
+    "tuneUnknown": "Waiting for the modem to say whether it can tune",
+    "tuneConfirm": "Tune transmits a carrier for up to 30 s. Continue?",
+    "tuneConfirmYes": "Transmit",
+    "cancel": "Cancel",
+    "rig": "Rig",
+    "rigMore": "VFO, split, power, levels and meters",
+    "pttFault": "PTT fault",
+    "pttFaultTitle": "Mercury and the rig disagree about transmitting: check the radio",
+    "pttCheckOff": "PTT check off",
+    "pttCheckOffTitle": "The rig's PTT cannot be read, so transmissions are not checked. Start rigctld with the radio's PTT type (for example -P RIG) to turn the check on.",
+    "nextQsy": "Next QSY {time} UTC: {name}"
   },
   "qso": {
     "title": "QSO record",
@@ -657,5 +685,25 @@
       "unsupported": "not supported by this rig",
       "notAttached": "the modem is not attached"
     }
+  },
+  "rigPanel": {
+    "title": "Rig",
+    "vfo": "VFO",
+    "split": "Split",
+    "rfPower": "RF power",
+    "percent": "{pct} %",
+    "txLevel": "TX level ({band})",
+    "txLevelNoBand": "TX level (band unknown)",
+    "tuneLevel": "Tune level",
+    "db": "{db} dB",
+    "dbfs": "{db} dBFS",
+    "meters": "Meters",
+    "metersIdle": "Meters show while transmitting",
+    "swr": "SWR {value}",
+    "alc": "ALC {value}",
+    "power": "Power {value}",
+    "txApplied": "TX level for {band} applied: {db} dB",
+    "txPending": "TX level for {band}: waiting for Mercury",
+    "txNotApplied": "TX level for {band} not applied: {reason}"
   }
 }

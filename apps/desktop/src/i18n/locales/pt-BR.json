@@ -61,7 +61,12 @@
     "dismiss": "Dispensar",
     "otherSession": "Sessão com {peer} ({direction}).",
     "open": "Abrir",
-    "receiveOnlyFailed": "Não foi possível alterar Somente recepção: {reason}"
+    "receiveOnlyFailed": "Não foi possível alterar Somente recepção: {reason}",
+    "rig": {
+      "pttNotFollowing": "O rádio não está seguindo o PTT do Mercury. Verifique o rádio e suas configurações de CAT e PTT.",
+      "lostWhileKeyed": "O link com o rádio caiu durante a transmissão. Se o rádio ainda estiver transmitindo, desligue a transmissão manualmente.",
+      "restartModem": "O Mercury diz que está transmitindo, mas o rádio não está em transmissão depois que o rigctld voltou: reinicie o modem."
+    }
   },
   "broadcast": {
     "notConfirmed": {
@@ -477,7 +482,30 @@
       "refused": "não enviado: {reason}"
     },
     "spectrum": "Espectro",
-    "telemetryUnavailable": "telemetria indisponível"
+    "telemetryUnavailable": "telemetria indisponível",
+    "digit": "Dígito de {place}",
+    "freqInput": "Frequência: digite 7.105 (MHz), 7105 (kHz) ou 7105000 (Hz) e tecle Enter",
+    "bandMenu": "Lista de frequências em {band}",
+    "bandEmpty": "Nenhuma entrada da lista nesta banda",
+    "modeMenu": "Modo",
+    "freqList": "Lista de frequências",
+    "freqListPick": "Sintonizar…",
+    "entry": "{name} · {mhz}",
+    "tune": "Sintonia",
+    "tuneTitle": "Transmitir a portadora de sintonia do Mercury para um acoplador de antena (para sozinha após 30 s)",
+    "tuneStop": "Parar {time}",
+    "tuneNoSupport": "Este Mercury não tem sintonia: atualize o Mercury para sintonizar daqui",
+    "tuneUnknown": "Aguardando o modem dizer se pode sintonizar",
+    "tuneConfirm": "A sintonia transmite uma portadora por até 30 s. Continuar?",
+    "tuneConfirmYes": "Transmitir",
+    "cancel": "Cancelar",
+    "rig": "Rádio",
+    "rigMore": "VFO, split, potência, níveis e medidores",
+    "pttFault": "Falha de PTT",
+    "pttFaultTitle": "O Mercury e o rádio discordam sobre a transmissão: verifique o rádio",
+    "pttCheckOff": "Verificação de PTT desligada",
+    "pttCheckOffTitle": "O PTT do rádio não pode ser lido, então as transmissões não são verificadas. Inicie o rigctld com o tipo de PTT do rádio (por exemplo -P RIG) para ligar a verificação.",
+    "nextQsy": "Próximo QSY {time} UTC: {name}"
   },
   "qso": {
     "title": "Registro do QSO",
@@ -658,5 +686,25 @@
       "unsupported": "não suportado por este rádio",
       "notAttached": "o modem não está conectado"
     }
+  },
+  "rigPanel": {
+    "title": "Rádio",
+    "vfo": "VFO",
+    "split": "Split",
+    "rfPower": "Potência de RF",
+    "percent": "{pct} %",
+    "txLevel": "Nível de TX ({band})",
+    "txLevelNoBand": "Nível de TX (banda desconhecida)",
+    "tuneLevel": "Nível de sintonia",
+    "db": "{db} dB",
+    "dbfs": "{db} dBFS",
+    "meters": "Medidores",
+    "metersIdle": "Os medidores aparecem durante a transmissão",
+    "swr": "ROE {value}",
+    "alc": "ALC {value}",
+    "power": "Potência {value}",
+    "txApplied": "Nível de TX para {band} aplicado: {db} dB",
+    "txPending": "Nível de TX para {band}: aguardando o Mercury",
+    "txNotApplied": "Nível de TX para {band} não aplicado: {reason}"
   }
 }
