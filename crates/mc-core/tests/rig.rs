@@ -184,6 +184,77 @@ async fn frequency_set_racing_a_call_never_lands_after_connect() {
     }
 }
 
+/// Wait for the first `CONNECT` Mercury is sent; its time, or None by `secs`.
+async fn connect_sent(net: &FakeNet, secs: u64) -> Option<Instant> {
+    let end = Instant::now() + Duration::from_secs(secs);
+    while Instant::now() < end {
+        if net.log().iter().any(|l| l.contains("CONNECT ")) {
+            return Some(Instant::now());
+        }
+        tokio::time::sleep(Duration::from_millis(2)).await;
+    }
+    None
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_frequency_set_the_rig_never_confirms_fails_the_held_call() {
+    // Final review #2: a set that times out may still land later; calling
+    // anyway would QSY the rig mid-call. The call fails instead.
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    rig.delay(Duration::from_millis(1500));
+    set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap();
+    h.call(AppCommand::Call { peer: "ZS6XYZ".into() }).await.unwrap();
+    assert_eq!(connect_sent(&net, 3).await, None, "called with the frequency change unconfirmed: {:?}", net.log());
+    wait_for(&h, 3, "the call given up", |s| s.modem == ModemState::Listening).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_list_pick_holds_a_call_until_the_mode_is_set_too() {
+    // Final review #3: a list pick sends F then M; the call waits for both.
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    let entry = match h.call(AppCommand::Frequencies).await.unwrap() {
+        CommandOk::Frequencies { entries } => entries.into_iter().next().expect("a suggested entry"),
+        other => panic!("{other:?}"),
+    };
+    rig.delay(Duration::from_millis(400));
+    let t0 = Instant::now();
+    h.call(AppCommand::TuneToEntry { id: entry.id.clone() }).await.unwrap();
+    h.call(AppCommand::Call { peer: "ZS6XYZ".into() }).await.unwrap();
+    let at = connect_sent(&net, 5).await.expect("a CONNECT");
+    let waited = at.saturating_duration_since(t0);
+    assert!(
+        waited >= Duration::from_millis(700),
+        "CONNECT after {waited:?}: before the mode set (2 x 400 ms) finished"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn saving_rig_settings_while_the_rig_may_be_keyed_keeps_the_safety_state() {
+    // Final review #5: saving the rig settings restarts the link; it must not
+    // forget the critical banner or the one recovery PTT-off. (Save stays
+    // allowed: the operator may need it to point at a moved rigctld.)
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    rig.set_ptt(true);
+    net.send_control(0, "PTT ON");
+    wait_for(&h, 3, "the rig keyed", |s| s.rig.ptt == RigPttView::On).await;
+    net.send_control(0, "PTT OFF");
+    rig.kill();
+    wait_for(&h, 5, "the critical banner", |s| s.rig.banners.contains(&RigBanner::LostWhileKeyed)).await;
+    h.call(AppCommand::SetRigConfig { config: rigctld(&rig) }).await.unwrap();
+    assert!(snapshot(&h).await.rig.banners.contains(&RigBanner::LostWhileKeyed), "the banner stays");
+    rig.restart().await;
+    wait_for(&h, 20, "the recovery PTT-off", |_| count(&rig.log(), "+T 0") == 1).await;
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn mercury_ptt_on_with_rig_unkeyed_raises_fault() {
     let dir = tempfile::tempdir().unwrap();
@@ -544,6 +615,31 @@ async fn call_and_cq_are_refused_while_tuning() {
     assert!(h.call(AppCommand::SendCq).await.is_err(), "no CQ while tuning");
     assert_eq!(refusal(&set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap_err()), "rig.refused.tuning");
     tune(&h, false).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_stops_when_the_rig_link_is_lost() {
+    // Final review #6: no carrier without the cross-check.
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    rig.set_ptt(true);
+    tune(&h, true).await.unwrap();
+    wait_for(&h, 3, "tuning", |s| s.tune.active && net.tuning(0).is_some()).await;
+    rig.kill();
+    wait_for(&h, 5, "Tune stopped", |s| !s.tune.active && net.tuning(0).is_none()).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_stops_on_a_ptt_fault() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    tune(&h, true).await.unwrap(); // Mercury keys; the rig does not
+    wait_for(&h, 3, "the PTT fault", |s| s.rig.fault == Some(RigBanner::PttNotFollowing)).await;
+    wait_for(&h, 3, "Tune stopped", |s| !s.tune.active && net.tuning(0).is_none()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]

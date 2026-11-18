@@ -108,7 +108,8 @@ pub(super) struct RigSide {
     pub(super) inbox_new: bool,
     rate: Option<PollRate>,
     seq: u64,
-    in_flight: Option<(u64, RigChange)>,
+    /// Changes sent and not yet answered; a call waits for all of them.
+    in_flight: Vec<(u64, RigChange)>,
     held_call: Option<HeldCall>,
     dirty: bool,
     emitted_at: Option<Instant>,
@@ -149,7 +150,7 @@ impl Default for RigSide {
             inbox_new: false,
             rate: None,
             seq: 0,
-            in_flight: None,
+            in_flight: Vec::new(),
             held_call: None,
             dirty: false,
             emitted_at: None,
@@ -280,12 +281,16 @@ impl App {
         r.task = None;
         r.tx = None;
         r.rate = None;
-        r.in_flight = None;
+        r.in_flight.clear();
+        let same_station = profile_id.is_some() && r.profile_id.as_deref() == profile_id;
         r.profile_id = profile_id.map(String::from);
         let configured = profile_id.is_some() && cfg.arrangement == RigArrangement::Rigctld;
         // No rig before and none now: nothing to tell the UI.
         let was_configured = r.policy.configured();
-        r.policy = RigPolicy::new(configured);
+        let old = std::mem::replace(&mut r.policy, RigPolicy::new(configured));
+        if same_station && configured && was_configured {
+            r.policy.carry_safety(&old);
+        }
         r.policy.set_activity(Activity::Idle);
         let check = owner_check(&cfg, r.radio_list.as_ref());
         let refused = matches!(check, OwnerCheck::Refused { .. });
@@ -383,14 +388,11 @@ impl App {
             rig_gate(activity, &self.rig.policy, change, self.attached()).map_err(refused)?;
             request_for(change).ok_or_else(|| invalid("change", "not a rig change"))?;
         }
-        let mut first = None;
         for change in changes {
             let req = request_for(change).ok_or_else(|| invalid("change", "not a rig change"))?;
             let id = self.rig_request(req).ok_or_else(|| conflict("the rig link is not accepting commands".into()))?;
-            first.get_or_insert((id, change.clone()));
-        }
-        if first.is_some() {
-            self.rig.in_flight = first;
+            // Tracked as soon as it is sent, so a later failure leaves none untracked.
+            self.rig.in_flight.push((id, change.clone()));
         }
         Ok(CommandOk::Done)
     }
@@ -406,11 +408,11 @@ impl App {
         Ok(CommandOk::Done)
     }
 
-    /// A call arrives: hold it while a frequency change is on its way to the
-    /// rig, so the change never lands after `CONNECT` (Review Focus 1).
+    /// A call arrives: hold it while rig changes are on their way to the
+    /// rig, so none lands after `CONNECT` (Review Focus 1).
     /// Returns true if it was held (the caller then only shows Calling).
     pub(super) fn hold_call(&mut self, peer: &Callsign) -> bool {
-        if self.rig.in_flight.is_none() {
+        if self.rig.in_flight.is_empty() {
             return false;
         }
         self.rig.held_call =
@@ -425,14 +427,21 @@ impl App {
         true
     }
 
-    fn release_held_call(&mut self, late: bool) {
+    /// The rig changes a held call waited for are done. `failed`: the rig
+    /// did not confirm one (it may still land later), so the call is given
+    /// up rather than made with the rig possibly retuning under it.
+    fn release_held_call(&mut self, failed: Option<&str>) {
         let Some(h) = self.rig.held_call.take() else { return };
-        if late {
-            let line = self.discovery.note("rig", "the frequency change had not finished after 1 s; calling anyway");
-            self.emit(line);
-        }
         if self.modem != ModemState::Calling {
             return; // the state moved on (a fault, a new selection)
+        }
+        if let Some(why) = failed {
+            self.set_modem(h.before, None);
+            let reason = format!("the rig did not confirm the frequency change ({why}); call again");
+            let line = self.discovery.note("rig", format!("call to {} not made: {reason}", h.peer.as_str()));
+            self.emit(line);
+            self.emit(AppEvent::CallFailed { peer: h.peer.as_str().to_string(), reason });
+            return;
         }
         if self.command_modem(ModemCmd::Call(h.peer.clone())).is_err() {
             self.set_modem(h.before, None);
@@ -450,8 +459,12 @@ impl App {
             self.rig_done(*id, result.clone(), now);
         }
         let came_up = matches!(msg, RigMsg::Link(RigLink::Up));
+        let lost = matches!(msg, RigMsg::Link(RigLink::Lost { .. }));
         let actions = self.rig.policy.on_msg(&msg, now);
         self.rig_actions(actions);
+        if lost {
+            self.stop_tune_unchecked("the rig link was lost");
+        }
         if came_up && self.rig.restore_pending {
             self.rig.restore_pending = false;
             self.restore_last();
@@ -470,11 +483,8 @@ impl App {
     }
 
     fn rig_done(&mut self, id: u64, result: Result<RigReply, String>, now: Instant) {
-        let Some((want, change)) = self.rig.in_flight.take() else { return };
-        if want != id {
-            self.rig.in_flight = Some((want, change));
-            return;
-        }
+        let Some(i) = self.rig.in_flight.iter().position(|(want, _)| *want == id) else { return };
+        let (_, change) = self.rig.in_flight.remove(i);
         match result {
             Ok(_) => {
                 // The operator's own choice is the "last frequency", stored at once.
@@ -501,9 +511,15 @@ impl App {
             Err(e) => {
                 let line = self.discovery.note("rig", format!("the rig did not take the change ({e})"));
                 self.emit(line);
+                // A timed-out change may still land: never call after it.
+                self.rig.in_flight.clear();
+                self.release_held_call(Some(&e));
+                return;
             }
         }
-        self.release_held_call(false);
+        if self.rig.in_flight.is_empty() {
+            self.release_held_call(None);
+        }
     }
 
     fn rig_actions(&mut self, actions: Vec<RigAction>) {
@@ -518,6 +534,7 @@ impl App {
                     }
                 }
                 RigAction::Banner(RigBanner::PttNotFollowing) => {
+                    self.stop_tune_unchecked("the rig's PTT does not follow the modem");
                     "the rig's PTT does not follow the modem: check the radio and its CAT link".into()
                 }
                 RigAction::Banner(RigBanner::LostWhileKeyed) => {
@@ -549,9 +566,14 @@ impl App {
             self.emit(line);
             return;
         }
-        self.rig_request(RigRequest::SetFreq(last.freq_hz));
+        if let Some(id) = self.rig_request(RigRequest::SetFreq(last.freq_hz)) {
+            self.rig.in_flight.push((id, change));
+        }
         if let (Some(mode), Some(pb)) = (last.mode, last.passband_hz) {
-            self.rig_request(RigRequest::SetMode { mode, passband_hz: pb });
+            let change = RigChange::Mode { mode: mode.clone(), passband_hz: pb };
+            if let Some(id) = self.rig_request(RigRequest::SetMode { mode, passband_hz: pb }) {
+                self.rig.in_flight.push((id, change));
+            }
         }
         let line = self.discovery.note("rig", format!("restored the last frequency, {} Hz", last.freq_hz));
         self.emit(line);
@@ -605,8 +627,8 @@ impl App {
     pub(super) fn sync_rig(&mut self) {
         let now = Instant::now();
         if self.rig.held_call.as_ref().is_some_and(|h| now >= h.until) {
-            self.rig.in_flight = None;
-            self.release_held_call(true);
+            self.rig.in_flight.clear();
+            self.release_held_call(Some("no answer within 1 s"));
         }
         self.sync_tx_level(now);
         self.sync_tune(now);
@@ -677,6 +699,15 @@ impl App {
             return Err(refused(RigRefusal::Tuning));
         }
         Ok(())
+    }
+
+    /// Tune keys a carrier only while the cross-check can watch it: a lost
+    /// rig link or a PTT fault stops it.
+    fn stop_tune_unchecked(&mut self, why: &str) {
+        if self.rig.tune.active && self.tune(false).is_ok() {
+            let line = self.discovery.note("rig", format!("Tune stopped: {why}"));
+            self.emit(line);
+        }
     }
 
     /// Abort also stops Tune. True if it did.

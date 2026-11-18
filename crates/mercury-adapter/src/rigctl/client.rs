@@ -394,6 +394,26 @@ impl<'a> Session<'a> {
     /// request (an `RPRT` error, garbage, a timeout); `Err(End)` ends the
     /// connection.
     async fn request(&mut self, req: &RigRequest, limit: Duration) -> Result<Result<RigReply, String>, End> {
+        // One request in flight (design §5): a slow rigctld still owes the
+        // replies to requests that timed out. Wait for them before sending
+        // more, so its queue never grows (and Mercury's own PTT commands on
+        // the same rigctld are not stuck behind ours).
+        if self.late > 0 {
+            let deadline = Instant::now() + REQUEST_TIMEOUT;
+            loop {
+                while self.late > 0 && self.take_block().is_some() {
+                    self.late -= 1;
+                    self.timeouts = 0; // it is answering, only slowly
+                }
+                if self.late == 0 {
+                    break;
+                }
+                if !self.read_more(deadline).await? {
+                    self.timeouts += 1;
+                    return Ok(Err("rigctld is still answering an earlier request".into()));
+                }
+            }
+        }
         if let Err(e) = self.conn.write_all(req.wire().as_bytes()).await {
             return Err(End::Lost(format!("write to rigctld failed: {e}")));
         }
@@ -417,22 +437,28 @@ impl<'a> Session<'a> {
                     });
                 }
             }
-            let mut chunk = [0u8; 4096];
-            match tokio::time::timeout_at(deadline, self.conn.read(&mut chunk)).await {
-                Err(_) => {
-                    self.timeouts += 1;
-                    self.late += 1;
-                    return Ok(Err(format!("no reply within {} ms", limit.as_millis())));
-                }
-                Ok(Ok(0)) => return Err(End::Lost("rigctld closed the connection".into())),
-                Ok(Ok(n)) => {
-                    self.buf.push_str(&String::from_utf8_lossy(&chunk[..n]));
-                    if self.buf.len() > 1 << 20 {
-                        return Err(End::Lost("rigctld sent more than 1 MiB without a reply end".into()));
-                    }
-                }
-                Ok(Err(e)) => return Err(End::Lost(format!("read from rigctld failed: {e}"))),
+            if !self.read_more(deadline).await? {
+                self.timeouts += 1;
+                self.late += 1;
+                return Ok(Err(format!("no reply within {} ms", limit.as_millis())));
             }
+        }
+    }
+
+    /// Read what rigctld sent into the buffer. `Ok(false)`: nothing by `deadline`.
+    async fn read_more(&mut self, deadline: Instant) -> Result<bool, End> {
+        let mut chunk = [0u8; 4096];
+        match tokio::time::timeout_at(deadline, self.conn.read(&mut chunk)).await {
+            Err(_) => Ok(false),
+            Ok(Ok(0)) => Err(End::Lost("rigctld closed the connection".into())),
+            Ok(Ok(n)) => {
+                self.buf.push_str(&String::from_utf8_lossy(&chunk[..n]));
+                if self.buf.len() > 1 << 20 {
+                    return Err(End::Lost("rigctld sent more than 1 MiB without a reply end".into()));
+                }
+                Ok(true)
+            }
+            Ok(Err(e)) => Err(End::Lost(format!("read from rigctld failed: {e}"))),
         }
     }
 

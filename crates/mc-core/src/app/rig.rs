@@ -288,7 +288,7 @@ enum Check {
     Contradicted { want: bool, since: Instant },
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 struct Recovery {
     /// The link was lost while keyed (or unknown during activity).
     lost_while_keyed: bool,
@@ -402,6 +402,19 @@ impl RigPolicy {
         }
     }
 
+    /// The link restarts for the same station (its settings were saved):
+    /// what keeps the radio safe carries over from the old policy, so the
+    /// critical banner, a PTT fault and the one recovery PTT-off survive.
+    pub fn carry_safety(&mut self, old: &RigPolicy) {
+        self.banners = old.banners.clone();
+        self.fault = old.fault;
+        self.mercury_ptt = old.mercury_ptt;
+        self.recovery = old.recovery.clone();
+        if matches!(old.link, RigLinkView::Lost { .. }) {
+            self.link = old.link.clone();
+        }
+    }
+
     /// Mercury's `PTT ON` / `PTT OFF` control event, as it arrives.
     pub fn on_mercury_ptt(&mut self, on: bool, now: Instant) -> Vec<RigAction> {
         self.mercury_ptt = Some(on);
@@ -410,6 +423,10 @@ impl RigPolicy {
         if !on && r.awaiting_mercury_off {
             r.awaiting_mercury_off = false;
             r.check_after = Some(now + PTT_WINDOW);
+        } else if on && r.check_after.is_some() {
+            // Mercury keyed again before the rig was read: wait for its next OFF.
+            r.check_after = None;
+            r.awaiting_mercury_off = true;
         }
         vec![]
     }
@@ -418,7 +435,10 @@ impl RigPolicy {
     pub fn on_msg(&mut self, msg: &RigMsg, now: Instant) -> Vec<RigAction> {
         match msg {
             RigMsg::Link(RigLink::Connecting) => {
-                self.link = RigLinkView::Connecting;
+                // A lost link stays lost (with its time and reason) until it is up.
+                if !matches!(self.link, RigLinkView::Lost { .. }) {
+                    self.link = RigLinkView::Connecting;
+                }
                 vec![]
             }
             RigMsg::Link(RigLink::Up) => self.link_up_again(),
@@ -527,7 +547,7 @@ impl RigPolicy {
         if let Some(after) = self.recovery.check_after {
             if now >= after {
                 self.recovery.check_after = None;
-                if keyed && !self.recovery.ptt_off_sent {
+                if keyed && !self.recovery.ptt_off_sent && self.mercury_ptt != Some(true) {
                     self.recovery.ptt_off_sent = true;
                     actions.push(RigAction::SendPttOff);
                 }
@@ -1025,6 +1045,28 @@ mod tests {
         q.on_mercury_ptt(false, t0 + 2000 * MS);
         assert!(reading(&mut q, false, t0 + 2600 * MS).is_empty());
         assert!(reading(&mut q, false, t0 + 2900 * MS).is_empty());
+    }
+
+    #[test]
+    fn mercury_keying_again_after_its_off_postpones_the_recovery_ptt_off() {
+        // Final review #1: after Mercury's OFF the restarted rigctld answers
+        // nothing useful for a while, Mercury keys its next frame, and the
+        // first good (keyed) reading must not cut that transmission.
+        let t0 = Instant::now();
+        let mut p = up(Some(true), t0);
+        p.on_mercury_ptt(true, t0);
+        reading(&mut p, true, t0 + 100 * MS);
+        lost(&mut p, t0 + 200 * MS);
+        back(&mut p, t0 + 1000 * MS);
+        p.on_mercury_ptt(false, t0 + 2000 * MS);
+        p.on_mercury_ptt(true, t0 + 2600 * MS);
+        let a = reading(&mut p, true, t0 + 2800 * MS);
+        assert!(!a.contains(&RigAction::SendPttOff), "never while Mercury transmits: {a:?}");
+        // Mercury's next OFF re-arms the one PTT-off.
+        p.on_mercury_ptt(false, t0 + 4000 * MS);
+        assert!(!reading(&mut p, true, t0 + 4200 * MS).contains(&RigAction::SendPttOff), "inside the window");
+        let a = reading(&mut p, true, t0 + 4600 * MS);
+        assert_eq!(a.iter().filter(|x| **x == RigAction::SendPttOff).count(), 1, "{a:?}");
     }
 
     #[test]

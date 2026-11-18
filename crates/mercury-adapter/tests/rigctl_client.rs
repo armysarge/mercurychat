@@ -107,6 +107,23 @@ async fn a_slow_reply_is_unknown_not_off() {
 }
 
 #[tokio::test]
+async fn a_slow_rigctld_is_never_overloaded_into_a_lost_link() {
+    // Final review #4: one request in flight per client (design §5). A
+    // rigctld answering in 300 ms during activity must not build a backlog
+    // until the link is taken as lost.
+    let mut rig = start().await;
+    up(&mut rig).await;
+    rig.fake.delay(Duration::from_millis(300));
+    rig.cmds.send(RigClientCmd::Rate(PollRate::Active)).await.unwrap();
+    let msgs = collect(&mut rig, Duration::from_secs(10)).await;
+    assert!(!msgs.iter().any(|m| matches!(m, RigMsg::Link(RigLink::Lost { .. }))), "{msgs:?}");
+    // No backlog: a request now is answered within its own timeout.
+    rig.cmds.send(RigClientCmd::Request { id: 99, req: RigRequest::GetFreq }).await.unwrap();
+    let done = until(&mut rig, Duration::from_secs(2), |m| matches!(m, RigMsg::Done { id: 99, .. })).await;
+    assert!(matches!(done, RigMsg::Done { result: Ok(RigReply::Freq(_)), .. }), "{done:?}");
+}
+
+#[tokio::test]
 async fn rprt_to_t_is_unknown() {
     let mut rig = start().await;
     up(&mut rig).await;
