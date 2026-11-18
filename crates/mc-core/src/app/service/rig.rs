@@ -173,12 +173,14 @@ impl App {
         r.in_flight = None;
         r.profile_id = profile_id.map(String::from);
         let configured = profile_id.is_some() && cfg.arrangement == RigArrangement::Rigctld;
+        // No rig before and none now: nothing to tell the UI.
+        let was_configured = r.policy.configured();
         r.policy = RigPolicy::new(configured);
         r.policy.set_activity(Activity::Idle);
         r.restore_pending = configured && cfg.restore_on_startup;
         r.inbox_new = true;
         r.inbox = None;
-        r.dirty = true;
+        r.dirty = configured || was_configured;
         if configured {
             let (cmd_tx, cmd_rx) = mpsc::channel(32);
             let (out_tx, out_rx) = mpsc::channel(256);
@@ -297,7 +299,7 @@ impl App {
     pub(super) fn on_mercury_ptt(&mut self, on: bool) {
         let actions = self.rig.policy.on_mercury_ptt(on, Instant::now());
         self.rig_actions(actions);
-        self.rig.dirty = true;
+        self.rig.dirty |= self.rig.policy.configured();
     }
 
     fn rig_done(&mut self, id: u64, result: Result<RigReply, String>, now: Instant) {
