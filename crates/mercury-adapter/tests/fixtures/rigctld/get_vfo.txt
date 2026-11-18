@@ -1,0 +1,3 @@
+get_vfo:
+VFO: VFOA
+RPRT 0

@@ -1,0 +1,3 @@
+get_freq:
+Frequency: 145000000
+RPRT 0

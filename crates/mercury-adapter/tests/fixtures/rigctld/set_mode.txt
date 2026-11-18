@@ -1,0 +1,2 @@
+set_mode: PKTUSB 3000
+RPRT 0
