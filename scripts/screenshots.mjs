@@ -36,6 +36,7 @@ const SHOTS = [
   { name: "operate-light", view: "operate", theme: "daylight", setup: ["session"], side: "chats" },
   { name: "settings-station", view: "settings", theme: "midnight", setup: ["stationInfo"], scroll: "form.station-info" },
   { name: "logbook", view: "logbook", theme: "midnight", setup: ["disconnect"] },
+  { name: "settings-rig", view: "settings", theme: "midnight", setup: ["disconnect", "rigTest"], scroll: ".rig-settings" },
 ];
 
 const args = process.argv.slice(2);
@@ -107,6 +108,14 @@ const STEPS = {
     await s.eval("document.querySelector('form.station-info button[type=submit]').click()");
     await until(s, "/\\S/.test(document.querySelector('form.station-info .saved')?.textContent ?? '')", "station information saved");
     await until(s, "document.querySelectorAll('.macro-editor .macro').length >= 3", "the macros");
+  },
+  async rigTest(s) {
+    await s.eval(`${rail("Settings")}.click()`);
+    await until(s, "!!document.getElementById('tab-rig')", "the Settings tabs");
+    await s.eval("document.getElementById('tab-rig').click()");
+    await until(s, "!!document.querySelector('.rig-settings button.rig-test')", "the rig link test");
+    await s.eval("document.querySelector('.rig-settings button.rig-test').click()");
+    await until(s, "document.querySelectorAll('.rig-test-steps li').length === 6", "the six test steps", 15000);
   },
   async disconnect(s) {
     if ((await s.eval(pill)) !== "connected") return;

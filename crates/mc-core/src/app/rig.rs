@@ -282,6 +282,10 @@ enum Check {
     Pending { want: bool, since: Instant },
     /// The rig followed.
     Agreed { want: bool },
+    /// It followed, then read the other way at `since`: a fault only if that
+    /// holds for the window too. Mercury unkeys the rig before its `PTT OFF`
+    /// reaches us (lab m3b-rig-2), so one reading is not enough.
+    Contradicted { want: bool, since: Instant },
 }
 
 #[derive(Debug, Default)]
@@ -485,7 +489,20 @@ impl RigPolicy {
                     now.saturating_duration_since(since) >= PTT_WINDOW
                 }
             }
-            Check::Agreed { want } => keyed != want,
+            Check::Agreed { want } => {
+                if keyed != want {
+                    self.check = Check::Contradicted { want, since: now };
+                }
+                false
+            }
+            Check::Contradicted { want, since } => {
+                if keyed == want {
+                    self.check = Check::Agreed { want };
+                    false
+                } else {
+                    now.saturating_duration_since(since) >= PTT_WINDOW
+                }
+            }
         };
         if contradicts {
             self.agree = 0;
@@ -899,7 +916,26 @@ mod tests {
         let mut p = up(Some(false), t0);
         p.on_mercury_ptt(false, t0);
         reading(&mut p, false, t0 + 100 * MS);
-        assert_eq!(reading(&mut p, true, t0 + 5000 * MS), vec![RigAction::Banner(RigBanner::PttNotFollowing)]);
+        // A contradiction after agreeing must hold for the window too (lab m3b-rig-2).
+        assert!(reading(&mut p, true, t0 + 5000 * MS).is_empty());
+        assert!(reading(&mut p, true, t0 + 5250 * MS).is_empty());
+        assert_eq!(reading(&mut p, true, t0 + 5500 * MS), vec![RigAction::Banner(RigBanner::PttNotFollowing)]);
+    }
+
+    #[test]
+    fn mercury_unkeying_the_rig_before_it_reports_off_is_no_fault() {
+        // Lab m3b-rig-2: Mercury sends `T 0` to rigctld, and its `PTT OFF`
+        // reaches MercuryChat about 100 ms after the rig already reads off.
+        let t0 = Instant::now();
+        let mut p = up(Some(false), t0);
+        p.on_mercury_ptt(true, t0);
+        reading(&mut p, true, t0 + 250 * MS);
+        assert!(reading(&mut p, false, t0 + 3700 * MS).is_empty());
+        p.on_mercury_ptt(false, t0 + 3810 * MS);
+        assert!(reading(&mut p, false, t0 + 3950 * MS).is_empty());
+        assert!(reading(&mut p, false, t0 + 4500 * MS).is_empty());
+        assert_eq!(p.view(t0 + 4500 * MS).fault, None);
+        assert!(p.view(t0).banners.is_empty());
     }
 
     #[test]
