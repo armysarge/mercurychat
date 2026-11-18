@@ -28,7 +28,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+mod freq;
 mod rig;
+use freq::FreqSide;
 use rig::RigSide;
 
 const ACTIVE_PROFILE: &str = "activeProfileId";
@@ -60,6 +62,10 @@ pub struct AppOptions {
     pub sim_peer_broadcasts: bool,
     /// How long Tune runs before MercuryChat stops it; `None` is 30 s.
     pub tune_limit: Option<std::time::Duration>,
+    /// The schedule's UTC clock and how often it is looked at (tests);
+    /// `None` is the real clock and 15 s.
+    pub schedule_clock: Option<fn() -> chrono::NaiveTime>,
+    pub schedule_tick: Option<std::time::Duration>,
 }
 
 impl Default for AppOptions {
@@ -73,6 +79,8 @@ impl Default for AppOptions {
             radio_hello_timeout: None,
             sim_peer_broadcasts: false,
             tune_limit: None,
+            schedule_clock: None,
+            schedule_tick: None,
         }
     }
 }
@@ -179,6 +187,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         mercury_listening: false,
         receive_only_shown: (false, false),
         rig: RigSide::with_tune_limit(opts.tune_limit),
+        freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -291,6 +300,7 @@ struct App {
     receive_only_shown: (bool, bool),
     /// Rig control (M3b): the rigctld client, the policy and the held call.
     rig: RigSide,
+    freq: FreqSide,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -686,6 +696,13 @@ impl App {
             AppCommand::SetBandLevels { band, levels } => self.set_band_levels(band, levels),
             AppCommand::Tune { on } => self.tune(on),
             AppCommand::SetTuneLevel { dbfs } => self.set_tune_level(dbfs),
+            AppCommand::Frequencies => self.frequencies(),
+            AppCommand::SaveFrequency { entry } => self.save_frequency(entry),
+            AppCommand::DeleteFrequency { id } => self.delete_frequency(&id),
+            AppCommand::RestoreSuggested => self.restore_suggested(),
+            AppCommand::SetRegion { region } => self.set_region(region),
+            AppCommand::TuneToEntry { id } => self.tune_to_entry(&id),
+            AppCommand::SetSchedule { schedule } => self.set_schedule(schedule),
         }
     }
 
@@ -1054,6 +1071,7 @@ impl App {
         self.sync_receive_only();
         self.rig_modem_changed();
         self.start_rig(target.as_ref().map(|p| p.id.as_str()));
+        self.freq_profile_changed(target.as_ref().map(|p| p.id.as_str()));
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
@@ -1293,6 +1311,7 @@ impl App {
             notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
             rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),
             tune: self.rig.tune.view(),
+            schedule_next: self.schedule_next(),
         })
     }
 }

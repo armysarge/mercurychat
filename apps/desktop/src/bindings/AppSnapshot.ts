@@ -5,6 +5,7 @@ import type { ModemState } from "./ModemState";
 import type { NotifyPrefs } from "./NotifyPrefs";
 import type { Qso } from "./Qso";
 import type { RigView } from "./RigView";
+import type { ScheduleNext } from "./ScheduleNext";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
 import type { TelemetryView } from "./TelemetryView";
@@ -74,4 +75,8 @@ rig: RigView,
 /**
  * Mercury's tuning carrier (M3b).
  */
-tune: TuneView, };
+tune: TuneView, 
+/**
+ * The next scheduled QSY, while the schedule is on (M3b).
+ */
+scheduleNext: ScheduleNext | null, };

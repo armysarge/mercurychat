@@ -7,11 +7,13 @@ mod chat;
 mod contract;
 mod discovery;
 mod events;
+mod frequencies;
 mod logbook;
 mod modem;
 mod notify;
 mod rig;
 mod rigconfig;
+pub mod schedule;
 mod service;
 mod telemetry;
 
@@ -27,14 +29,17 @@ pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MES
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
 pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
+pub use frequencies::{FrequencyEntry, DEFAULT_MODES, MAX_ENTRY_HZ, PURPOSES, SEEDED_SETTING};
 pub use logbook::{Qso, QsoEdit, FINALISE_SETTING, OPERATOR_SOURCE};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
 pub use notify::{NotifyPrefs, NOTIFY_SETTING};
 pub use rig::{
     rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigCapsView, RigChange, RigLinkView, RigMeters, RigPolicy,
-    RigPttView, RigRefusal, RigView, TxLevelResult, AGREE_TO_CLEAR, PTT_CHECK_OFF_AFTER, PTT_WINDOW, RIG_SOURCE,
+    RigPttView, RigRefusal, RigView, TuneView, TxLevelResult, AGREE_TO_CLEAR, PTT_CHECK_OFF_AFTER, PTT_WINDOW,
+    RIG_SOURCE,
 };
 pub use rigconfig::{BandLevels, RigArrangement, RigConfig, TUNE_RANGE, TX_GAIN_RANGE};
+pub use schedule::{Schedule, ScheduleNext, ScheduleSlot, MAX_SLOTS};
 pub use service::{spawn_app, AppHandle, AppOptions};
 pub use telemetry::{
     AudioView, TelemetryLinkView, TelemetryView, Tuning, CONTROL_SOURCE, EVENT_GAP, FREQ_FRESH_MS, OFFSET_FRESH_MS,

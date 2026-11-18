@@ -6,10 +6,12 @@ use super::beacon::BeaconStatus;
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
+use super::frequencies::FrequencyEntry;
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
 use super::rig::{RigBanner, RigChange, RigView, TuneView};
 use super::rigconfig::{BandLevels, RigConfig};
+use super::schedule::{Schedule, ScheduleNext};
 use super::telemetry::TelemetryView;
 use crate::macros::MacroDef;
 use crate::profile::{FieldError, StationProfile};
@@ -63,6 +65,8 @@ pub struct AppSnapshot {
     pub rig: Box<RigView>,
     /// Mercury's tuning carrier (M3b).
     pub tune: TuneView,
+    /// The next scheduled QSY, while the schedule is on (M3b).
+    pub schedule_next: Option<ScheduleNext>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
@@ -229,6 +233,30 @@ pub enum AppCommand {
     SetTuneLevel {
         dbfs: f32,
     },
+    /// The frequency list (shared by every profile), by sort then frequency.
+    Frequencies,
+    /// Add (empty id) or change an entry; answered with the whole list.
+    SaveFrequency {
+        entry: FrequencyEntry,
+    },
+    DeleteFrequency {
+        id: String,
+    },
+    /// Add back the region's suggestions that are missing; custom entries
+    /// and edited suggestions are left alone.
+    RestoreSuggested,
+    /// The active profile's IARU region (1, 2 or 3) for suggestions.
+    SetRegion {
+        region: u8,
+    },
+    /// Tune the rig to an entry: frequency, then mode, one refusal for both.
+    TuneToEntry {
+        id: String,
+    },
+    /// The active profile's QSY schedule (off by default).
+    SetSchedule {
+        schedule: Schedule,
+    },
 }
 
 // Every float in a command is validated finite before use.
@@ -245,6 +273,8 @@ pub enum CommandOk {
     History { messages: Vec<ChatMessage> },
     Heard { stations: Vec<HeardStation> },
     Activity { entries: Vec<ActivityEntry> },
+    Frequencies { entries: Vec<FrequencyEntry> },
+    Restored { added: u32 },
     Qsos { qsos: Vec<Qso> },
     Qso(Qso),
     Macros { macros: Vec<MacroDef> },

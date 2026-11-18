@@ -322,12 +322,27 @@ impl App {
     }
 
     pub(super) fn rig_set(&mut self, change: RigChange) -> Result<CommandOk, AppError> {
-        validate(&change)?;
+        self.rig_set_all(std::slice::from_ref(&change))
+    }
+
+    /// Several changes as one: every one is checked before any is sent, so
+    /// there is one refusal for all. The first is the one a call waits for.
+    pub(super) fn rig_set_all(&mut self, changes: &[RigChange]) -> Result<CommandOk, AppError> {
         let activity = self.activity();
-        rig_gate(activity, &self.rig.policy, &change, self.attached()).map_err(refused)?;
-        let req = request_for(&change).ok_or_else(|| invalid("change", "not a rig change"))?;
-        let id = self.rig_request(req).ok_or_else(|| conflict("the rig link is not accepting commands".into()))?;
-        self.rig.in_flight = Some((id, change));
+        for change in changes {
+            validate(change)?;
+            rig_gate(activity, &self.rig.policy, change, self.attached()).map_err(refused)?;
+            request_for(change).ok_or_else(|| invalid("change", "not a rig change"))?;
+        }
+        let mut first = None;
+        for change in changes {
+            let req = request_for(change).ok_or_else(|| invalid("change", "not a rig change"))?;
+            let id = self.rig_request(req).ok_or_else(|| conflict("the rig link is not accepting commands".into()))?;
+            first.get_or_insert((id, change.clone()));
+        }
+        if first.is_some() {
+            self.rig.in_flight = first;
+        }
         Ok(CommandOk::Done)
     }
 
@@ -547,6 +562,7 @@ impl App {
         self.sync_tx_level(now);
         self.sync_tune(now);
         self.emit_tune();
+        self.sync_schedule(now);
         let activity = self.activity();
         self.rig.policy.set_activity(activity);
         let rate = self.rig.policy.poll_rate(activity);
@@ -572,7 +588,7 @@ impl App {
         let held = self.rig.held_call.as_ref().map(|h| h.until);
         let tx = self.rig.tx_wait.as_ref().map(|w| w.2);
         let tune = self.rig.tune.until.as_ref().filter(|_| !self.rig.tune.off_sent).map(|u| u.0);
-        [event, held, tx, tune].into_iter().flatten().min()
+        [event, held, tx, tune, self.freq.wake()].into_iter().flatten().min()
     }
 
     /// A new modem (or none): its telemetry client, and what it said, are gone.

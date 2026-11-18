@@ -2,15 +2,18 @@
 //! the fake Mercury (or the simulator, where a session is needed).
 #![cfg(feature = "sim")]
 
+use chrono::NaiveTime;
 use mc_core::app::{
-    spawn_app, AppCommand, AppError, AppEvent, AppHandle, AppOptions, AppSnapshot, CommandOk, EventEnvelope,
-    ModemState, RigArrangement, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView, RIG_SOURCE,
+    spawn_app, ActivityEntry, AppCommand, AppError, AppEvent, AppHandle, AppOptions, AppSnapshot, CommandOk,
+    EventEnvelope, FrequencyEntry, ModemState, RigArrangement, RigBanner, RigChange, RigConfig, RigLinkView,
+    RigPttView, Schedule, ScheduleSlot, RIG_SOURCE,
 };
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_storage::Store;
 use mercury_adapter::fake::FakeNet;
 use mercury_adapter::fake_rig::FakeRigctld;
 use std::path::Path;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 use tokio::sync::broadcast::Receiver;
 use tokio::time::Instant;
@@ -572,4 +575,165 @@ async fn tune_level_follows_the_band_and_can_change_live() {
     tune(&h, false).await.unwrap();
     wait_for(&h, 3, "stopped", |s| !s.tune.active).await;
     assert!(h.call(AppCommand::SetTuneLevel { dbfs: -25.0 }).await.is_err(), "only while tuning");
+}
+
+// ---- Task 8: frequency list, region presets and the QSY schedule ----
+
+fn entry(name: &str, hz: u64) -> FrequencyEntry {
+    FrequencyEntry { name: name.into(), freq_hz: hz, mode: "PKTUSB".into(), ..FrequencyEntry::default() }
+}
+
+async fn frequencies(h: &AppHandle) -> Vec<FrequencyEntry> {
+    match h.call(AppCommand::Frequencies).await.unwrap() {
+        CommandOk::Frequencies { entries } => entries,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// Save `e` and return it as stored (with its id).
+async fn save_entry(h: &AppHandle, e: FrequencyEntry) -> FrequencyEntry {
+    let name = e.name.clone();
+    match h.call(AppCommand::SaveFrequency { entry: e }).await.unwrap() {
+        CommandOk::Frequencies { entries } => entries.into_iter().find(|x| x.name == name).expect("saved"),
+        other => panic!("{other:?}"),
+    }
+}
+
+async fn restore(h: &AppHandle) -> u32 {
+    match h.call(AppCommand::RestoreSuggested).await.unwrap() {
+        CommandOk::Restored { added } => added,
+        other => panic!("{other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn first_run_seeds_presets_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    let list = frequencies(&h).await;
+    assert_eq!(list.len(), 9, "region 1's suggestions: {list:?}");
+    assert!(list.iter().all(|e| e.suggested && e.region == Some(1) && e.band.is_some()));
+    assert_eq!(list.iter().find(|e| e.freq_hz == 7_047_000).and_then(|e| e.band.as_deref()), Some("40m"));
+    for e in &list {
+        h.call(AppCommand::DeleteFrequency { id: e.id.clone() }).await.unwrap();
+    }
+    // Selecting the station again does not bring them back.
+    let id = snapshot(&h).await.active_profile_id.unwrap();
+    h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    assert!(frequencies(&h).await.is_empty());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn restore_suggested_reports_added_count() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    let mine = save_entry(&h, entry("Club net", 7_110_000)).await;
+    assert!(!mine.suggested);
+    let list = frequencies(&h).await;
+    for e in list.iter().filter(|e| e.suggested).take(2) {
+        h.call(AppCommand::DeleteFrequency { id: e.id.clone() }).await.unwrap();
+    }
+    assert_eq!(restore(&h).await, 2);
+    assert_eq!(restore(&h).await, 0);
+    assert!(frequencies(&h).await.iter().any(|e| e.id == mine.id), "custom entries are left alone");
+    // Another region's suggestions are added beside them.
+    h.call(AppCommand::SetRegion { region: 2 }).await.unwrap();
+    assert_eq!(restore(&h).await, 9);
+    assert!(h.call(AppCommand::SetRegion { region: 4 }).await.is_err());
+}
+
+async fn bad(h: &AppHandle, e: FrequencyEntry) {
+    let err = h.call(AppCommand::SaveFrequency { entry: e }).await.unwrap_err();
+    assert!(matches!(err, AppError::Validation { .. }), "{err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn entry_validation_rejects_control_chars_and_long_names() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    bad(&h, entry("bell\u{7}", 7_047_000)).await;
+    bad(&h, entry(&"x".repeat(65), 7_047_000)).await;
+    bad(&h, entry("  ", 7_047_000)).await;
+    bad(&h, entry("Broadcast", 6_000_000)).await; // outside every band, not marked
+    bad(&h, FrequencyEntry { mode: "XYZ".into(), ..entry("Odd", 7_047_000) }).await;
+    let ok = save_entry(&h, FrequencyEntry { out_of_band: true, ..entry("MARS", 6_000_000) }).await;
+    assert_eq!(ok.band, None);
+    assert!(ok.out_of_band);
+    save_entry(&h, entry(&"y".repeat(64), 14_090_000)).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_to_entry_sets_freq_and_mode() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    let e =
+        save_entry(&h, FrequencyEntry { mode: "USB".into(), passband_hz: Some(2700), ..entry("Net", 7_110_000) }).await;
+    h.call(AppCommand::TuneToEntry { id: e.id.clone() }).await.unwrap();
+    wait_for(&h, 3, "the entry", |_| rig.freq() == 7_110_000 && rig.mode() == ("USB".to_string(), 2700)).await;
+    assert!(h.call(AppCommand::TuneToEntry { id: "nope".into() }).await.is_err());
+}
+
+static CLOCK_MIN: AtomicU32 = AtomicU32::new(0);
+
+fn test_clock() -> NaiveTime {
+    let m = CLOCK_MIN.load(Ordering::SeqCst);
+    NaiveTime::from_hms_opt(m / 60, m % 60, 0).unwrap()
+}
+
+fn at(h: u32, m: u32) {
+    CLOCK_MIN.store(h * 60 + m, Ordering::SeqCst);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slot_blocked_by_activity_waits_then_skips() {
+    let dir = tempfile::tempdir().unwrap();
+    let rig = FakeRigctld::start().await;
+    at(9, 59);
+    let o = AppOptions {
+        schedule_clock: Some(test_clock),
+        schedule_tick: Some(Duration::from_millis(50)),
+        ..opts(dir.path())
+    };
+    let (h, mut rx) = ready_opts(StationProfile::new_simulator("ZS6ABC"), rigctld(&rig), o).await;
+    let a = save_entry(&h, entry("A", 7_047_000)).await;
+    let b = save_entry(&h, entry("B", 14_090_000)).await;
+    let c = save_entry(&h, entry("C", 21_095_000)).await;
+    let slot = |t: &str, e: &FrequencyEntry| ScheduleSlot { start_utc: t.into(), entry_id: e.id.clone() };
+    let schedule = Schedule { enabled: true, slots: vec![slot("10:00", &a), slot("10:05", &b), slot("10:10", &c)] };
+    h.call(AppCommand::SetSchedule { schedule }).await.unwrap();
+    let next = snapshot(&h).await.schedule_next.expect("a next change");
+    assert_eq!((next.at_utc.as_str(), next.entry_name.as_str()), ("10:00", "A"));
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!rig.log().iter().any(|l| l.starts_with("+F")), "no QSY on enabling: {:?}", rig.log());
+
+    h.call(AppCommand::Call { peer: "SIM1".into() }).await.unwrap();
+    until_state(&mut rx, ModemState::Connected, 15).await;
+    at(10, 0); // A is due, but the session is up: it waits
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    at(10, 5); // B starts: A is skipped, B waits
+    let skipped =
+        |entries: &[ActivityEntry]| entries.iter().any(|e| e.text.contains("skipped") && e.text.contains('A'));
+    let end = Instant::now() + Duration::from_secs(3);
+    loop {
+        let CommandOk::Activity { entries } = h.call(AppCommand::Activity).await.unwrap() else { panic!() };
+        if skipped(&entries) {
+            break;
+        }
+        assert!(Instant::now() < end, "A was not reported skipped: {entries:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    h.call(AppCommand::Disconnect).await.unwrap();
+    wait_for(&h, 15, "B once idle", |_| rig.freq() == 14_090_000).await;
+    assert!(!rig.log().iter().any(|l| l == "+F 7047000"), "A never reached the rig: {:?}", rig.log());
+    let next = snapshot(&h).await.schedule_next.expect("a next change");
+    assert_eq!((next.at_utc.as_str(), next.entry_name.as_str()), ("10:10", "C"));
 }

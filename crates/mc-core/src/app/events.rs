@@ -9,6 +9,7 @@ use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
 use super::logbook::Qso;
 use super::rig::{RigView, TuneView};
+use super::schedule::ScheduleNext;
 use super::telemetry::TelemetryView;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -129,6 +130,12 @@ pub enum AppEvent {
     /// Mercury's tuning carrier: whether it has TUNE, on or off, its level.
     Tune {
         tune: TuneView,
+    },
+    /// The frequency list changed: read it again.
+    FrequenciesChanged,
+    /// The next scheduled QSY changed (or the schedule was turned off).
+    ScheduleNext {
+        next: Option<ScheduleNext>,
     },
 }
 
