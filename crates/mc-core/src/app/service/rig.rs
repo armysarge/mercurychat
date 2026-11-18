@@ -96,7 +96,7 @@ impl Default for RigSide {
 }
 
 fn refused(r: crate::app::rig::RigRefusal) -> AppError {
-    AppError::Refused { reason: r.key(), message: format!("not changed: {}", r.message()) }
+    AppError::Refused { reason: r.key(), message: r.message().to_string() }
 }
 
 fn invalid(field: &str, message: &str) -> AppError {
