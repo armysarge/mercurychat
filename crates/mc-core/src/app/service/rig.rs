@@ -7,17 +7,18 @@ use super::{conflict, storage, App};
 use crate::app::contract::{AppError, CommandOk};
 use crate::app::discovery::Reading;
 use crate::app::events::{AppEvent, ModemState};
-use crate::app::modem::ModemCmd;
+use crate::app::modem::{ModemCmd, TuneResult};
 use crate::app::rig::{
-    rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, TxLevelResult, RIG_SOURCE,
+    rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, RigRefusal, TuneView, TxLevelResult,
+    RIG_SOURCE,
 };
-use crate::app::rigconfig::{rig_key, BandLevels, RigArrangement, RigConfig};
+use crate::app::rigconfig::{rig_key, BandLevels, RigArrangement, RigConfig, TUNE_RANGE};
 use crate::app::telemetry::Tuning;
 use crate::band::{band_for, BANDS};
 use mc_storage::now_utc;
 use mercury_adapter::rigctl::{Level, PollRate, RigClient, RigClientCmd, RigLink, RigMsg, RigReply, RigRequest};
 use mercury_adapter::telemetry::{RadioList, TelemetryCmd, TelemetryMsg};
-use mercury_adapter::Callsign;
+use mercury_adapter::{Callsign, TuneArg};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 use tokio::sync::mpsc;
@@ -36,6 +37,9 @@ pub const LAST_SAVE_GAP: Duration = Duration::from_secs(5);
 pub const TX_LEVEL_CONFIRM: Duration = Duration::from_secs(5);
 /// Two levels this close are the same.
 pub const TX_LEVEL_TOLERANCE: f32 = 0.01;
+/// MercuryChat stops Tune after this (RIG-05); Mercury's own stop is 60 s.
+pub const TUNE_LIMIT: Duration = Duration::from_secs(30);
+
 /// Highest frequency a rig change may ask for (6 m tops out at 54 MHz).
 pub const MAX_FREQ_HZ: u64 = 60_000_000;
 
@@ -60,6 +64,35 @@ struct LastTuning {
     freq_hz: u64,
     mode: Option<String>,
     passband_hz: Option<i32>,
+}
+
+/// Mercury's tuning carrier, as the actor tracks it.
+#[derive(Default)]
+pub(super) struct TuneState {
+    supported: Option<bool>,
+    pub(super) active: bool,
+    level: Option<f32>,
+    /// When MercuryChat stops it, and that wall-clock time for the UI.
+    until: Option<(Instant, String)>,
+    off_sent: bool,
+    shown: Option<TuneView>,
+}
+
+impl TuneState {
+    pub(super) fn view(&self) -> TuneView {
+        TuneView {
+            supported: self.supported,
+            active: self.active,
+            ends_utc: self.until.as_ref().map(|u| u.1.clone()),
+            level_dbfs: self.level.unwrap_or(TuneView::default().level_dbfs),
+        }
+    }
+
+    fn stopped(&mut self) {
+        self.active = false;
+        self.until = None;
+        self.off_sent = false;
+    }
 }
 
 pub(super) struct RigSide {
@@ -90,6 +123,14 @@ pub(super) struct RigSide {
     tx_pending: Option<(String, f32)>,
     /// A TX level sent, awaiting Mercury's status: (band, dB, deadline).
     tx_wait: Option<(String, f32, Instant)>,
+    pub(super) tune: TuneState,
+    tune_limit: Duration,
+}
+
+impl RigSide {
+    pub(super) fn with_tune_limit(limit: Option<Duration>) -> RigSide {
+        RigSide { tune_limit: limit.unwrap_or(TUNE_LIMIT), ..RigSide::default() }
+    }
 }
 
 impl Default for RigSide {
@@ -116,6 +157,8 @@ impl Default for RigSide {
             band: None,
             tx_pending: None,
             tx_wait: None,
+            tune: TuneState { shown: Some(TuneView::default()), ..TuneState::default() },
+            tune_limit: TUNE_LIMIT,
         }
     }
 }
@@ -196,6 +239,7 @@ impl App {
             ModemState::Connected => Activity::Connected,
             ModemState::Draining | ModemState::Recovering => Activity::Draining,
             _ if self.rig.held_call.is_some() => Activity::Calling,
+            _ if self.rig.tune.active => Activity::Tuning,
             _ if self.broadcasts.deadline().is_some() => Activity::Broadcasting,
             _ => Activity::Idle,
         }
@@ -501,6 +545,8 @@ impl App {
             self.release_held_call(true);
         }
         self.sync_tx_level(now);
+        self.sync_tune(now);
+        self.emit_tune();
         let activity = self.activity();
         self.rig.policy.set_activity(activity);
         let rate = self.rig.policy.poll_rate(activity);
@@ -525,7 +571,8 @@ impl App {
         let event = self.rig.dirty.then(|| self.rig.emitted_at.map(|t| t + RIG_EVENT_GAP)).flatten();
         let held = self.rig.held_call.as_ref().map(|h| h.until);
         let tx = self.rig.tx_wait.as_ref().map(|w| w.2);
-        [event, held, tx].into_iter().flatten().min()
+        let tune = self.rig.tune.until.as_ref().filter(|_| !self.rig.tune.off_sent).map(|u| u.0);
+        [event, held, tx, tune].into_iter().flatten().min()
     }
 
     /// A new modem (or none): its telemetry client, and what it said, are gone.
@@ -536,6 +583,131 @@ impl App {
         self.rig.tx_pending = None;
         self.rig.band = None;
         self.rig.policy.set_tx_level(None);
+        // The new modem is asked again; the old one's Tune ends with it
+        // (and Mercury stops it by itself after 60 s regardless).
+        self.rig.tune.supported = None;
+        self.rig.tune.stopped(); // published at the end of the turn, after the state
+    }
+
+    /// Calls and broadcasts wait while Tune is on.
+    pub(super) fn refuse_if_tuning(&self) -> Result<(), AppError> {
+        if self.rig.tune.active {
+            return Err(refused(RigRefusal::Tuning));
+        }
+        Ok(())
+    }
+
+    /// Abort also stops Tune. True if it did.
+    pub(super) fn stop_tune_for_abort(&mut self) -> bool {
+        self.rig.tune.active && self.tune(false).is_ok()
+    }
+
+    /// Publish the Tune state if it changed.
+    fn emit_tune(&mut self) {
+        let tune = self.rig.tune.view();
+        if self.rig.tune.shown.as_ref() != Some(&tune) {
+            self.rig.tune.shown = Some(tune.clone());
+            self.emit(AppEvent::Tune { tune });
+        }
+    }
+
+    /// The tune level for the band the rig is on, or the default.
+    fn band_tune_level(&self) -> (Option<String>, f32) {
+        let band = self.tuning(Instant::now()).freq.and_then(|f| band_for(f.value)).map(String::from);
+        let level = match (self.rig.profile_id.as_deref(), band.as_deref()) {
+            (Some(id), Some(b)) => BandLevels::for_band(&self.store, id, b).tune_dbfs,
+            _ => BandLevels::default().tune_dbfs,
+        };
+        (band, level)
+    }
+
+    pub(super) fn tune(&mut self, on: bool) -> Result<CommandOk, AppError> {
+        if !on {
+            // Always allowed, and sent even if MercuryChat thinks it is off.
+            self.command_modem(ModemCmd::Tune(TuneArg::Off))?;
+            if self.rig.tune.active {
+                self.rig.tune.off_sent = true;
+            }
+            return Ok(CommandOk::Done);
+        }
+        if self.rig.tune.active {
+            return Err(conflict("Tune is already on".into()));
+        }
+        rig_gate(self.activity(), &self.rig.policy, &RigChange::Tune, self.attached()).map_err(refused)?;
+        match self.rig.tune.supported {
+            Some(true) => {}
+            Some(false) => {
+                return Err(conflict("this Mercury has no TUNE: update Mercury to tune from MercuryChat".into()))
+            }
+            None => return Err(conflict("not yet: the modem has not said whether it can tune".into())),
+        }
+        let (_, level) = self.band_tune_level();
+        self.command_modem(ModemCmd::Tune(TuneArg::Level(level)))?;
+        let limit = self.rig.tune_limit;
+        let ahead = chrono::Duration::from_std(limit).unwrap_or_default();
+        let ends = (chrono::Utc::now() + ahead).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+        let t = &mut self.rig.tune;
+        t.active = true;
+        t.level = Some(level);
+        t.until = Some((Instant::now() + limit, ends));
+        t.off_sent = false;
+        self.emit_tune();
+        Ok(CommandOk::Done)
+    }
+
+    pub(super) fn set_tune_level(&mut self, dbfs: f32) -> Result<CommandOk, AppError> {
+        if !self.rig.tune.active {
+            return Err(conflict("Tune is not on".into()));
+        }
+        if !dbfs.is_finite() || !(TUNE_RANGE.0..=TUNE_RANGE.1).contains(&dbfs) {
+            let m = format!("Tune level must be {} to {} dBFS", TUNE_RANGE.0, TUNE_RANGE.1);
+            return Err(invalid("dbfs", &m));
+        }
+        self.command_modem(ModemCmd::Tune(TuneArg::Level(dbfs)))?;
+        self.rig.tune.level = Some(dbfs);
+        // Remembered for the band, as the Settings levels table shows.
+        if let (Some(id), (Some(band), _)) = (self.rig.profile_id.clone(), self.band_tune_level()) {
+            let levels = BandLevels { tune_dbfs: dbfs, ..BandLevels::for_band(&self.store, &id, &band) };
+            BandLevels::save(&mut self.store, &id, &band, levels).map_err(|message| AppError::Storage { message })?;
+        }
+        self.emit_tune();
+        Ok(CommandOk::Done)
+    }
+
+    /// What became of a TUNE command, or the probe.
+    pub(super) fn tune_report(&mut self, result: TuneResult) {
+        match result {
+            TuneResult::Supported(s) => self.rig.tune.supported = Some(s),
+            TuneResult::Started => {}
+            TuneResult::Stopped => self.rig.tune.stopped(),
+            TuneResult::Refused(why) => {
+                let line = self.discovery.note("rig", format!("Tune refused: {why}"));
+                self.emit(line);
+                if self.rig.tune.active && !self.rig.tune.off_sent {
+                    // It may still be on at the old level: never leave it.
+                    let _ = self.command_modem(ModemCmd::Tune(TuneArg::Off));
+                }
+                self.rig.tune.stopped();
+            }
+        }
+        self.emit_tune();
+    }
+
+    /// Stop Tune once its time is up.
+    fn sync_tune(&mut self, now: Instant) {
+        let t = &self.rig.tune;
+        if !t.active || t.off_sent || t.until.as_ref().is_none_or(|u| now < u.0) {
+            return;
+        }
+        let secs = self.rig.tune_limit.as_secs_f32();
+        let line = self.discovery.note("rig", format!("Tune stopped after {secs:.0} s"));
+        self.emit(line);
+        if self.command_modem(ModemCmd::Tune(TuneArg::Off)).is_ok() {
+            self.rig.tune.off_sent = true;
+        } else {
+            self.rig.tune.stopped();
+            self.emit_tune();
+        }
     }
 
     /// The modem's telemetry client takes commands here.

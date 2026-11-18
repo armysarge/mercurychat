@@ -408,3 +408,168 @@ async fn no_radio_list_is_unknown() {
     tokio::time::sleep(Duration::from_millis(1500)).await;
     assert_eq!(snapshot(&h).await.rig.owner_check, OwnerCheck::Unknown);
 }
+
+// ---- Task 7: Tune through Mercury ----
+
+async fn tune(h: &AppHandle, on: bool) -> Result<CommandOk, AppError> {
+    h.call(AppCommand::Tune { on }).await
+}
+
+/// As `ready`, with the given options.
+async fn ready_opts(profile: StationProfile, rig: RigConfig, o: AppOptions) -> (AppHandle, Receiver<EventEnvelope>) {
+    let h = spawn_app(Store::open_in_memory().unwrap(), o);
+    let id = match h.call(AppCommand::SaveProfile { profile }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    until_state(&mut rx, ModemState::Listening, 15).await;
+    h.call(AppCommand::SetRigConfig { config: rig }).await.unwrap();
+    wait_for(&h, 5, "the rig link", |s| s.rig.link == RigLinkView::Up && s.rig.ptt != RigPttView::Unknown).await;
+    (h, rx)
+}
+
+/// An app whose rig follows Mercury's PTT, as a working radio does.
+async fn tune_ready(dir: &Path, net: &FakeNet, rig: &FakeRigctld) -> (AppHandle, Receiver<EventEnvelope>) {
+    let (h, rx) = ready(dir, existing(net), rigctld(rig)).await;
+    wait_for(&h, 5, "the TUNE probe", |s| s.tune.supported.is_some()).await;
+    (h, rx)
+}
+
+fn refusal(err: &AppError) -> &'static str {
+    match err {
+        AppError::Refused { reason, .. } => reason,
+        other => panic!("not a refusal: {other:?}"),
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_probe_sets_supported_and_tune_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    assert_eq!(snapshot(&h).await.tune.supported, Some(true));
+    assert!(net.log().iter().any(|l| l == "A> TUNE ?"));
+    rig.set_ptt(true); // the radio keys with Mercury
+    tune(&h, true).await.unwrap();
+    wait_for(&h, 3, "tuning", |s| s.tune.active && s.tune.ends_utc.is_some() && net.tuning(0).is_some()).await;
+    assert_eq!(net.tuning(0).as_deref(), Some("-20"), "the default tune level");
+    rig.set_ptt(false);
+    tune(&h, false).await.unwrap();
+    wait_for(&h, 3, "stopped", |s| !s.tune.active).await;
+    assert_eq!(net.tuning(0), None);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wrong_to_probe_hides_tune() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    net.set_no_tune(0, true);
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    assert_eq!(snapshot(&h).await.tune.supported, Some(false));
+    let err = tune(&h, true).await.unwrap_err();
+    assert!(matches!(&err, AppError::Conflict { message } if message.contains("no TUNE")), "{err:?}");
+    assert!(!net.log().iter().any(|l| l.starts_with("A> TUNE -")));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn wrong_to_a_level_is_a_refusal_not_unsupported() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    net.set_tune_wrong(0, true);
+    tune(&h, true).await.unwrap();
+    wait_for(&h, 3, "the refusal", |s| !s.tune.active).await;
+    assert_eq!(snapshot(&h).await.tune.supported, Some(true), "still supported");
+    let CommandOk::Activity { entries } = h.call(AppCommand::Activity).await.unwrap() else { panic!() };
+    assert!(entries.iter().any(|e| e.text.contains("Tune refused")), "{entries:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_stops_after_its_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let o = AppOptions { tune_limit: Some(Duration::from_millis(1000)), ..opts(dir.path()) };
+    let (h, _rx) = ready_opts(existing(&net), rigctld(&rig), o).await;
+    wait_for(&h, 5, "the TUNE probe", |s| s.tune.supported == Some(true)).await;
+    rig.set_ptt(true);
+    tune(&h, true).await.unwrap();
+    wait_for(&h, 2, "tuning", |_| net.tuning(0).is_some()).await;
+    rig.set_ptt(false);
+    wait_for(&h, 3, "the stop", |s| !s.tune.active && net.tuning(0).is_none()).await;
+    assert!(net.log().iter().any(|l| l == "A> TUNE OFF"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_refused_when_ptt_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    rig.ptt_error(Some(-11));
+    wait_for(&h, 3, "PTT unknown", |s| s.rig.ptt == RigPttView::Unknown).await;
+    assert_eq!(refusal(&tune(&h, true).await.unwrap_err()), "rig.refused.pttUnknown");
+    // Idle tuning of the frequency is still allowed (owner, 18 Nov).
+    set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_refused_while_connected() {
+    let dir = tempfile::tempdir().unwrap();
+    let rig = FakeRigctld::start().await;
+    let (h, mut rx) = ready(dir.path(), StationProfile::new_simulator("ZS6ABC"), rigctld(&rig)).await;
+    h.call(AppCommand::Call { peer: "SIM1".into() }).await.unwrap();
+    until_state(&mut rx, ModemState::Connected, 15).await;
+    assert_eq!(refusal(&tune(&h, true).await.unwrap_err()), "rig.refused.connected");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn call_and_cq_are_refused_while_tuning() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    rig.set_ptt(true);
+    tune(&h, true).await.unwrap();
+    let err = h.call(AppCommand::Call { peer: "ZS6XYZ".into() }).await.unwrap_err();
+    assert_eq!(refusal(&err), "rig.refused.tuning");
+    assert!(h.call(AppCommand::SendCq).await.is_err(), "no CQ while tuning");
+    assert_eq!(refusal(&set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap_err()), "rig.refused.tuning");
+    tune(&h, false).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn cross_check_runs_during_tune() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    tune(&h, true).await.unwrap(); // Mercury keys; the rig does not
+    wait_for(&h, 3, "the PTT fault", |s| s.rig.fault == Some(RigBanner::PttNotFollowing)).await;
+    tune(&h, false).await.unwrap();
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_level_follows_the_band_and_can_change_live() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = tune_ready(dir.path(), &net, &rig).await;
+    let levels = BandLevels { tx_gain_db: 0.0, tune_dbfs: -30.0 };
+    h.call(AppCommand::SetBandLevels { band: "20m".into(), levels }).await.unwrap();
+    rig.set_ptt(true);
+    tune(&h, true).await.unwrap();
+    wait_for(&h, 3, "tuning at -30", |_| net.tuning(0).as_deref() == Some("-30")).await;
+    h.call(AppCommand::SetTuneLevel { dbfs: -25.0 }).await.unwrap();
+    wait_for(&h, 3, "tuning at -25", |_| net.tuning(0).as_deref() == Some("-25")).await;
+    assert!(h.call(AppCommand::SetTuneLevel { dbfs: 3.0 }).await.is_err(), "out of range");
+    rig.set_ptt(false);
+    tune(&h, false).await.unwrap();
+    wait_for(&h, 3, "stopped", |s| !s.tune.active).await;
+    assert!(h.call(AppCommand::SetTuneLevel { dbfs: -25.0 }).await.is_err(), "only while tuning");
+}

@@ -58,6 +58,8 @@ pub struct AppOptions {
     /// The simulator's SIM1 calls CQ and beacons, and the simulator opens its
     /// broadcast port (the desktop app turns this on; default off).
     pub sim_peer_broadcasts: bool,
+    /// How long Tune runs before MercuryChat stops it; `None` is 30 s.
+    pub tune_limit: Option<std::time::Duration>,
 }
 
 impl Default for AppOptions {
@@ -70,6 +72,7 @@ impl Default for AppOptions {
             locks_dir: None,
             radio_hello_timeout: None,
             sim_peer_broadcasts: false,
+            tune_limit: None,
         }
     }
 }
@@ -175,7 +178,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         qso: None,
         mercury_listening: false,
         receive_only_shown: (false, false),
-        rig: RigSide::default(),
+        rig: RigSide::with_tune_limit(opts.tune_limit),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -395,6 +398,7 @@ impl App {
                         self.state_word()
                     )));
                 }
+                self.refuse_if_tuning()?;
                 if !self.hold_call(&peer) {
                     self.command_modem(ModemCmd::Call(peer.clone()))?;
                 }
@@ -418,6 +422,9 @@ impl App {
                 self.command_modem(ModemCmd::Disconnect).map(|_| CommandOk::Done)
             }
             AppCommand::Abort => {
+                if self.stop_tune_for_abort() {
+                    return Ok(CommandOk::Done);
+                }
                 if self.cancel_held_call() {
                     return Ok(CommandOk::Done);
                 }
@@ -677,6 +684,8 @@ impl App {
             AppCommand::RigSet { change } => self.rig_set(change),
             AppCommand::DismissRigBanner { banner } => self.dismiss_rig_banner(banner),
             AppCommand::SetBandLevels { band, levels } => self.set_band_levels(band, levels),
+            AppCommand::Tune { on } => self.tune(on),
+            AppCommand::SetTuneLevel { dbfs } => self.set_tune_level(dbfs),
         }
     }
 
@@ -725,6 +734,9 @@ impl App {
     /// (DSC-02). A refusal is answered, published and logged, never queued.
     fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
         let len = (kind == BroadcastKind::Beacon).then_some(payload.len());
+        if self.rig.tune.active {
+            return Err(self.refuse_broadcast(kind, "not sent: Tune is on".into()));
+        }
         let calling = self.modem == ModemState::Calling;
         if let Err(g) = broadcast_gate(self.modem, calling, len, self.listen_mode.current()) {
             return Err(self.refuse_broadcast(kind, g.message()));
@@ -1110,6 +1122,7 @@ impl App {
                 self.emit_all(events);
             }
             ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
+            ReportKind::Tune(result) => self.tune_report(result),
             ReportKind::Telemetry(msg) => {
                 self.rig_telemetry_msg(&msg);
                 let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
@@ -1279,6 +1292,7 @@ impl App {
             ui_language: self.ui_language(),
             notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
             rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),
+            tune: self.rig.tune.view(),
         })
     }
 }

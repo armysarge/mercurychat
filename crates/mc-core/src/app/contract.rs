@@ -8,7 +8,7 @@ use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
-use super::rig::{RigBanner, RigChange, RigView};
+use super::rig::{RigBanner, RigChange, RigView, TuneView};
 use super::rigconfig::{BandLevels, RigConfig};
 use super::telemetry::TelemetryView;
 use crate::macros::MacroDef;
@@ -61,9 +61,11 @@ pub struct AppSnapshot {
     pub notify_prefs: NotifyPrefs,
     /// The rig as MercuryChat reads it through rigctld (M3b).
     pub rig: Box<RigView>,
+    /// Mercury's tuning carrier (M3b).
+    pub tune: TuneView,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, TS)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export)]
 pub enum AppCommand {
@@ -218,7 +220,19 @@ pub enum AppCommand {
         band: String,
         levels: BandLevels,
     },
+    /// Mercury's tuning carrier on or off (RIG-05). On: at the band's tune
+    /// level, stopped by MercuryChat after 30 s. Off is always allowed.
+    Tune {
+        on: bool,
+    },
+    /// Change the tuning level while Tune is on; stored for the band.
+    SetTuneLevel {
+        dbfs: f32,
+    },
 }
+
+// Every float in a command is validated finite before use.
+impl Eq for AppCommand {}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase")]

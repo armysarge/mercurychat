@@ -622,6 +622,29 @@ impl RigPolicy {
 
 /// May `change` be made now? Checked by the actor at the moment it forwards
 /// the change, so a change and a call start cannot both win.
+/// Mercury's tuning carrier as the UI shows it (M3b, RIG-05).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct TuneView {
+    /// Does this Mercury have TUNE: `null` until it answers after attach.
+    pub supported: Option<bool>,
+    pub active: bool,
+    /// When MercuryChat stops it, while it is on.
+    pub ends_utc: Option<String>,
+    /// The level it runs at, dBFS at the sound card.
+    pub level_dbfs: f32,
+}
+
+// The level is validated finite before use, so equality is total.
+impl Eq for TuneView {}
+
+impl Default for TuneView {
+    fn default() -> Self {
+        TuneView { supported: None, active: false, ends_utc: None, level_dbfs: -20.0 }
+    }
+}
+
 pub fn rig_gate(activity: Activity, rig: &RigPolicy, change: &RigChange, attached: bool) -> Result<(), RigRefusal> {
     match activity {
         Activity::Idle => {}

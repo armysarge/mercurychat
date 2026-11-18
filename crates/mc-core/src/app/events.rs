@@ -8,7 +8,7 @@ use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
 use super::logbook::Qso;
-use super::rig::RigView;
+use super::rig::{RigView, TuneView};
 use super::telemetry::TelemetryView;
 use serde::Serialize;
 use std::collections::VecDeque;
@@ -125,6 +125,10 @@ pub enum AppEvent {
     /// most 2 a second; the snapshot always has the latest.
     Rig {
         rig: RigView,
+    },
+    /// Mercury's tuning carrier: whether it has TUNE, on or off, its level.
+    Tune {
+        tune: TuneView,
     },
 }
 

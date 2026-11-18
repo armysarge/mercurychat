@@ -74,6 +74,27 @@ pub enum Command {
     Mode(u8),
     BusyDetect(bool),
     Monitor(bool),
+    /// Mercury's tuning carrier (TNC.md "TUNE"): a 1 kHz tone at a level in
+    /// dBFS, its query, or off. Mercury stops it by itself after 60 s.
+    Tune(TuneArg),
+}
+
+/// The argument of `TUNE`.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum TuneArg {
+    /// Key and hold the tone at this level, dBFS at the sound card (-60 to 0).
+    Level(f32),
+    /// `TUNE ?`: Mercury answers `TUNE <level>`, or WRONG if it has no TUNE.
+    Query,
+    Off,
+}
+
+// Levels are built in range (finite), so equality is total.
+impl Eq for TuneArg {}
+
+impl TuneArg {
+    /// The tuning levels Mercury accepts, dBFS.
+    pub const RANGE: (f32, f32) = (-60.0, 0.0);
 }
 
 impl Command {
@@ -92,6 +113,9 @@ impl Command {
             Command::Mode(m) => format!("MODE {m}"),
             Command::BusyDetect(b) => format!("BUSYDETECT {}", on(*b)),
             Command::Monitor(b) => format!("MONITOR {}", on(*b)),
+            Command::Tune(TuneArg::Level(db)) => format!("TUNE {db}"),
+            Command::Tune(TuneArg::Query) => "TUNE ?".into(),
+            Command::Tune(TuneArg::Off) => "TUNE OFF".into(),
         };
         s + "\r"
     }

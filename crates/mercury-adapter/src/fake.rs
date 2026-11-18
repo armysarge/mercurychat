@@ -28,6 +28,12 @@ struct Station {
     listen_wrong: bool,
     /// Answer `LISTEN OFF` with WRONG (fault injection); the setting stays.
     listen_off_wrong: bool,
+    /// An older Mercury: no TUNE at all (every TUNE is WRONG).
+    no_tune: bool,
+    /// Answer every TUNE level with WRONG (fault injection).
+    tune_wrong: bool,
+    /// The tuning carrier's level while it is on.
+    tune: Option<String>,
 }
 
 impl Station {
@@ -186,6 +192,21 @@ impl FakeNet {
     }
 
     /// Make station `i` answer `MODE n` with WRONG (an unsupported mode).
+    /// Make station `i` an older Mercury without TUNE.
+    pub fn set_no_tune(&self, i: usize, on: bool) {
+        self.shared.lock().unwrap().st[i].no_tune = on;
+    }
+
+    /// Make station `i` answer every TUNE level with WRONG.
+    pub fn set_tune_wrong(&self, i: usize, on: bool) {
+        self.shared.lock().unwrap().st[i].tune_wrong = on;
+    }
+
+    /// Station `i`'s tuning carrier level while it is on.
+    pub fn tuning(&self, i: usize) -> Option<String> {
+        self.shared.lock().unwrap().st[i].tune.clone()
+    }
+
     pub fn set_mode_wrong(&self, i: usize, wrong: bool) {
         self.shared.lock().unwrap().st[i].mode_wrong = wrong;
     }
@@ -408,6 +429,31 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
                 send_line(&s, i, "PTT OFF");
             } else {
                 send_line(&s, i, "DISCONNECTED");
+            }
+        }
+        ["TUNE", _] if s.st[i].no_tune => send_line(&s, i, "WRONG"),
+        ["TUNE", "?"] => {
+            let level = s.st[i].tune.clone().unwrap_or_else(|| "-20".into());
+            send_line(&s, i, &format!("TUNE {level}"));
+        }
+        ["TUNE", "OFF"] => {
+            send_line(&s, i, "OK");
+            if s.st[i].tune.take().is_some() {
+                send_line(&s, i, "PTT OFF");
+            }
+        }
+        ["TUNE", level] => {
+            // Like Mercury: refused while a link is up or out of range.
+            let ok = s.session.is_none()
+                && !s.st[i].tune_wrong
+                && level.parse::<f32>().is_ok_and(|v| (-60.0..=0.0).contains(&v));
+            if !ok {
+                send_line(&s, i, "WRONG");
+            } else {
+                send_line(&s, i, "OK");
+                if s.st[i].tune.replace((*level).to_string()).is_none() {
+                    send_line(&s, i, "PTT ON");
+                }
             }
         }
         ["VERSION"] => send_line(&s, i, "VARA version 4.9.0 registered"),

@@ -17,5 +17,5 @@ pub mod rigctl;
 pub mod telemetry;
 
 pub use client::{Ack, AdapterEvent, AttachError, Attachment, CommandError, Endpoint, MercuryClient, Timeouts};
-pub use command::{Bandwidth, Callsign, Command};
+pub use command::{Bandwidth, Callsign, Command, TuneArg};
 pub use control::ControlEvent;

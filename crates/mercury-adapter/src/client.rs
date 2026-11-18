@@ -163,6 +163,8 @@ impl MercuryClient {
                         let ack = match ev {
                             ControlEvent::Ok => Some(Ack::Ok),
                             ControlEvent::Wrong => Some(Ack::Wrong),
+                            // `TUNE ?` is answered with its level, not OK.
+                            ControlEvent::Tune(_) => Some(Ack::Ok),
                             _ => None,
                         };
                         if let Some(a) = ack {

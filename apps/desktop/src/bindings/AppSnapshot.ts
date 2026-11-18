@@ -8,6 +8,7 @@ import type { RigView } from "./RigView";
 import type { SessionInfo } from "./SessionInfo";
 import type { StationProfile } from "./StationProfile";
 import type { TelemetryView } from "./TelemetryView";
+import type { TuneView } from "./TuneView";
 
 export type AppSnapshot = { seq: number, generation: number, modem: ModemState, 
 /**
@@ -69,4 +70,8 @@ notifyPrefs: NotifyPrefs,
 /**
  * The rig as MercuryChat reads it through rigctld (M3b).
  */
-rig: RigView, };
+rig: RigView, 
+/**
+ * Mercury's tuning carrier (M3b).
+ */
+tune: TuneView, };

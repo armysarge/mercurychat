@@ -19,7 +19,7 @@ use mch_protocol::ObjectId;
 use mercury_adapter::broadcast::{BroadcastAbort, BroadcastPort};
 use mercury_adapter::kiss::KissFrame;
 use mercury_adapter::telemetry::{Spectrum, TelemetryClient, TelemetryCmd, TelemetryLink, TelemetryMsg};
-use mercury_adapter::{Callsign, Command, Endpoint};
+use mercury_adapter::{Callsign, Command, Endpoint, TuneArg};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -82,7 +82,21 @@ pub enum ModemCmd {
     Broadcast(Vec<u8>),
     /// The operator re-armed beacons. Retry a closed broadcast connection.
     ReopenBroadcast,
+    /// Mercury's tuning carrier (M3b). Carried out while idle; `Off` also
+    /// during a link (harmless there, and never left unsent).
+    Tune(TuneArg),
     Shutdown,
+}
+
+/// What became of a TUNE command (M3b).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TuneResult {
+    /// The answer to the `TUNE ?` probe: false is an older Mercury.
+    Supported(bool),
+    Started,
+    Stopped,
+    /// Not carried out; the reason in plain words.
+    Refused(String),
 }
 
 /// What the modem tells the actor, for the generation it was started in.
@@ -131,6 +145,8 @@ pub enum ReportKind {
     },
     /// Mercury's telemetry WebSocket: its link, or a status.
     Telemetry(TelemetryMsg),
+    /// What became of a TUNE command, or the probe after attach.
+    Tune(TuneResult),
     /// Where to send commands for this modem's telemetry client (M3b: the
     /// per-band TX level). Sent once, when the client starts.
     TelemetryCmds(mpsc::Sender<TelemetryCmd>),
@@ -522,9 +538,10 @@ async fn run(
                 _ = stopped(&mut cmds, &r) => return,
             }
             let _telemetry = telemetry_url.map(|url| Telemetry::start(url, &opts.spectrum, &r));
+            let mut station = station;
+            probe_tune(&mut station, &r).await;
             r.send(ReportKind::ListenMode(station.listen_mode())).await;
             r.state(ModemState::Ready, None).await;
-            let mut station = station;
             serve(&mut station, cmds, &r, receive_only, &mut broadcast).await;
         }
         ModemTarget::Simulator => {
@@ -574,9 +591,10 @@ async fn simulator(
         _ = broadcast.open(false) => {}
         _ = stopped(&mut cmds, &r) => return,
     }
+    let mut sim = sim;
+    probe_tune(&mut sim.station, &r).await;
     r.send(ReportKind::ListenMode(sim.station.listen_mode())).await;
     r.state(ModemState::Ready, Some("simulator".into())).await;
-    let mut sim = sim;
     forwarders.observe(&mut sim.station, &r);
     if on_air {
         sim.start_peer_broadcasts();
@@ -600,6 +618,20 @@ async fn simulator(
 /// Turn listening on after attach or recovery (D18). One attempt, never
 /// retried: a refusal leaves the modem Ready with the reason shown, and the
 /// next successful recovery tries again.
+/// Does this Mercury have TUNE (M3b)? An older one answers WRONG. Asked
+/// while attaching, so the answer is in before Ready.
+async fn probe_tune(st: &mut Station, r: &Reporter) {
+    let supported = match st.tune(TuneArg::Query).await {
+        Ok(()) => true,
+        Err(StationError::Wrong(_)) => false,
+        Err(e) => {
+            tracing::warn!("TUNE probe: {e}");
+            false
+        }
+    };
+    r.send(ReportKind::Tune(TuneResult::Supported(supported))).await;
+}
+
 async fn arm(st: &mut Station, r: &Reporter, listening: &mut bool) {
     *listening = false;
     match st.set_listen(true).await {
@@ -805,6 +837,17 @@ async fn serve(
                     }
                 }
             },
+            Idle::Cmd(Some(ModemCmd::Tune(arg))) => {
+                let result = match (arg, st.tune(arg).await) {
+                    (TuneArg::Query, res) => TuneResult::Supported(res.is_ok()),
+                    (TuneArg::Level(_), Ok(())) => TuneResult::Started,
+                    (TuneArg::Off, Ok(())) => TuneResult::Stopped,
+                    (_, Err(StationError::Wrong(w))) => TuneResult::Refused(format!("Mercury answered WRONG to {w}")),
+                    (_, Err(e)) => TuneResult::Refused(e.to_string()),
+                };
+                r.send(ReportKind::Tune(result)).await;
+                continue;
+            }
             Idle::Cmd(Some(ModemCmd::ReopenBroadcast)) => {
                 if broadcast.port().is_none() {
                     broadcast.open(true).await;
@@ -1108,6 +1151,7 @@ async fn link(
                             *dirty = true;
                         }
                     }
+                    Some(ModemCmd::Tune(TuneArg::Off)) => send_wire(Command::Tune(TuneArg::Off)),
                     Some(ModemCmd::Submit { peer, id }) => {
                         if peer == link.info.peer && !ending && !aborted {
                             link.submit(r, id.0).await;

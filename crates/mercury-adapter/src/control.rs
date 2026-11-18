@@ -86,6 +86,8 @@ pub enum ControlEvent {
     Monitor(String),
     /// Response to VERSION; a fixed VARA string, not Mercury's identity.
     Version(String),
+    /// `TUNE <level>`: the answer to `TUNE ?` (M3b).
+    Tune(String),
     Unknown(String),
 }
 
@@ -95,6 +97,7 @@ pub fn parse_event(line: &str) -> ControlEvent {
     let rest: Vec<&str> = it.collect();
     match (head, rest.as_slice()) {
         ("OK", []) => ControlEvent::Ok,
+        ("TUNE", [level]) => ControlEvent::Tune((*level).to_string()),
         ("WRONG", []) => ControlEvent::Wrong,
         ("REGISTERED", [c]) => ControlEvent::Registered((*c).to_string()),
         ("CONNECTED", [s, d, bw]) => {

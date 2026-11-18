@@ -49,6 +49,9 @@ async fn simulator_profile_reaches_ready() {
     assert_eq!(a.event, AppEvent::ActiveProfileChanged { id: Some(id) });
     let b = next(&mut rx).await;
     assert_eq!(b.event, AppEvent::ModemState { state: ModemState::Attaching, detail: None });
+    // While attaching, the modem is asked whether it can tune (M3b).
+    let t = next(&mut rx).await;
+    assert!(matches!(&t.event, AppEvent::Tune { tune } if tune.supported == Some(true)), "{:?}", t.event);
     let c = next(&mut rx).await;
     assert_eq!(c.event, AppEvent::ModemState { state: ModemState::Ready, detail: Some("simulator".into()) });
     assert!(a.generation >= 1 && b.generation == a.generation && c.generation == a.generation);
