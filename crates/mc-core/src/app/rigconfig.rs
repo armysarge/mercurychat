@@ -75,6 +75,9 @@ pub struct BandLevels {
     pub tune_dbfs: f32,
 }
 
+// Validated finite before use (the actor rejects NaN), so equality is total.
+impl Eq for BandLevels {}
+
 impl Default for BandLevels {
     fn default() -> Self {
         BandLevels { tx_gain_db: 0.0, tune_dbfs: -20.0 }

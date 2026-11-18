@@ -9,7 +9,7 @@ use super::events::{ModemState, SessionInfo};
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
 use super::rig::{RigBanner, RigChange, RigView};
-use super::rigconfig::RigConfig;
+use super::rigconfig::{BandLevels, RigConfig};
 use super::telemetry::TelemetryView;
 use crate::macros::MacroDef;
 use crate::profile::{FieldError, StationProfile};
@@ -211,6 +211,12 @@ pub enum AppCommand {
     /// Take a rig banner down, once it may go.
     DismissRigBanner {
         banner: RigBanner,
+    },
+    /// Store a band's TX and Tune levels for the active profile (RIG-04);
+    /// applied at once if the rig is on that band and the station idle.
+    SetBandLevels {
+        band: String,
+        levels: BandLevels,
     },
 }
 

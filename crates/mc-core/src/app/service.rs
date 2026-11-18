@@ -676,6 +676,7 @@ impl App {
             AppCommand::SetRigConfig { config } => self.set_rig_config(config),
             AppCommand::RigSet { change } => self.rig_set(change),
             AppCommand::DismissRigBanner { banner } => self.dismiss_rig_banner(banner),
+            AppCommand::SetBandLevels { band, levels } => self.set_band_levels(band, levels),
         }
     }
 
@@ -1039,6 +1040,7 @@ impl App {
         self.discovery.modem_changed();
         // A new active profile (or none): its stored Receive only choice.
         self.sync_receive_only();
+        self.rig_modem_changed();
         self.start_rig(target.as_ref().map(|p| p.id.as_str()));
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
         self.open_chat(&p);
@@ -1107,7 +1109,9 @@ impl App {
                 let events = self.discovery.frame(self.chat.as_mut(), f, &tuning);
                 self.emit_all(events);
             }
+            ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
             ReportKind::Telemetry(msg) => {
+                self.rig_telemetry_msg(&msg);
                 let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
                 // Ruling P2: the gate prefers telemetry's live listen mode.
                 self.listen_mode.set_live(self.telemetry.live_listen_mode());

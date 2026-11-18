@@ -18,7 +18,7 @@ use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
 use mercury_adapter::broadcast::{BroadcastAbort, BroadcastPort};
 use mercury_adapter::kiss::KissFrame;
-use mercury_adapter::telemetry::{Spectrum, TelemetryClient, TelemetryLink, TelemetryMsg};
+use mercury_adapter::telemetry::{Spectrum, TelemetryClient, TelemetryCmd, TelemetryLink, TelemetryMsg};
 use mercury_adapter::{Callsign, Command, Endpoint};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -131,6 +131,9 @@ pub enum ReportKind {
     },
     /// Mercury's telemetry WebSocket: its link, or a status.
     Telemetry(TelemetryMsg),
+    /// Where to send commands for this modem's telemetry client (M3b: the
+    /// per-band TX level). Sent once, when the client starts.
+    TelemetryCmds(mpsc::Sender<TelemetryCmd>),
 }
 
 /// What a failed CQFRAME means, truthfully (03 section 6): a modem that never
@@ -383,7 +386,9 @@ struct Telemetry {
 impl Telemetry {
     fn start(url: String, spectrum: &SpectrumFeed, r: &Reporter) -> Telemetry {
         let (tx, mut rx) = mpsc::channel(64);
-        let client = TelemetryClient::spawn(url, tx, spectrum.0.clone());
+        let (cmd_tx, cmd_rx) = mpsc::channel(8);
+        let client = TelemetryClient::spawn_commanded(url, tx, spectrum.0.clone(), cmd_rx);
+        let _ = r.tx.try_send(ModemReport { generation: r.generation, kind: ReportKind::TelemetryCmds(cmd_tx) });
         let fwd = r.clone();
         let forward = tokio::spawn(async move {
             while let Some(m) = rx.recv().await {

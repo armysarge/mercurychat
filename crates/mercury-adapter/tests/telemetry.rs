@@ -194,7 +194,7 @@ async fn oversized_text_frame_is_refused() {
                 assert_eq!(st.snr, Some(3.5), "only the good status is taken: {st:?}");
                 break;
             }
-            TelemetryMsg::Link(_) => continue, // it may drop and reconnect
+            _ => continue, // it may drop and reconnect
         }
     }
     client.abort();

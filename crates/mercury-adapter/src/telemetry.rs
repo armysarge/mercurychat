@@ -1,14 +1,15 @@
 //! Mercury's telemetry WebSocket (WEBSOCKET_API.md; MercuryChat OBS-01,
-//! OBS-02): the `status` event, the binary spectrum frame, and a client that
-//! reconnects on its own. Telemetry is optional and read-only: the client
-//! never sends a command, and losing it never touches the TNC connection.
+//! OBS-02): the `status` and `radio_list` events, the binary spectrum frame,
+//! and a client that reconnects on its own. Telemetry is optional, and losing
+//! it never touches the TNC connection. The client sends one command only,
+//! when asked: `set_tx_gain`, the per-band TX level (M3b, RIG-04).
 //!
 //! Everything here comes from another process and is bounded: text frames
 //! over 64 KiB are refused, a status field that is absent, null or of the
 //! wrong type is `None` (never a default 0), and a spectrum frame must match
 //! 03 §4 exactly.
 
-use futures_util::{Stream, StreamExt};
+use futures_util::{Sink, SinkExt, Stream, StreamExt};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -105,6 +106,28 @@ fn token(v: &serde_json::Value, empty_ok: bool) -> Option<String> {
 fn text(v: &serde_json::Value) -> Option<String> {
     let s: String = v.as_str()?.chars().filter(|c| !c.is_control()).take(256).collect();
     (!s.is_empty()).then_some(s)
+}
+
+/// Read one text frame as any event MercuryChat uses; `Ok(None)` for others
+/// (and for a `radio_list` without a PTT method).
+pub fn parse_event(frame: &str) -> Result<Option<Event>, TelemetryError> {
+    if frame.len() > MAX_TEXT_FRAME {
+        return Err(TelemetryError::TooLarge(frame.len()));
+    }
+    let v: serde_json::Value = serde_json::from_str(frame).map_err(|e| TelemetryError::Json(e.to_string()))?;
+    let obj = v.as_object().ok_or(TelemetryError::NotAnEvent)?;
+    match obj.get("type").and_then(|t| t.as_str()).ok_or(TelemetryError::NotAnEvent)? {
+        "status" => Ok(parse_text(frame)?.map(Event::Status)),
+        "radio_list" => {
+            let Some(ptt_method) = obj.get("ptt_method").and_then(text) else { return Ok(None) };
+            Ok(Some(Event::RadioList(RadioList {
+                ptt_method,
+                selected_model: obj.get("selected").and_then(|v| v.as_str()).and_then(|s| s.trim().parse().ok()),
+                device_path: obj.get("device_path").and_then(text).unwrap_or_default(),
+            })))
+        }
+        _ => Ok(None),
+    }
 }
 
 /// Read one text frame. `Ok(None)` for any event other than `status`.
@@ -233,7 +256,50 @@ pub enum TelemetryLink {
 pub enum TelemetryMsg {
     Link(TelemetryLink),
     Status(Status),
+    /// Mercury's PTT and rig settings (WEBSOCKET_API.md §5.5).
+    RadioList(RadioList),
+    /// A command could not be sent.
+    CommandFailed {
+        reason: String,
+    },
 }
+
+/// What MercuryChat reads of `radio_list`: how Mercury keys the radio.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RadioList {
+    /// `none`, `hamlib`, `serial`, `cm108`, `hermes_shm`.
+    pub ptt_method: String,
+    /// The Hamlib model id (`selected`); `None` when empty or not a number.
+    pub selected_model: Option<i32>,
+    /// The serial device, or `host:port` for a network rig (model 2).
+    pub device_path: String,
+}
+
+/// A telemetry text event MercuryChat reads.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Event {
+    Status(Status),
+    RadioList(RadioList),
+}
+
+/// A command for Mercury's WebSocket.
+#[derive(Debug, Clone, PartialEq)]
+pub enum TelemetryCmd {
+    /// The modulator gain in dB, applied live (`set_tx_gain`).
+    SetTxGain(f32),
+}
+
+impl TelemetryCmd {
+    /// The command as sent (WEBSOCKET_API.md §6).
+    pub fn json(&self) -> String {
+        match self {
+            TelemetryCmd::SetTxGain(db) => format!(r#"{{"command":"set_tx_gain","value":"{db:.2}"}}"#),
+        }
+    }
+}
+
+/// The sending half of a telemetry connection.
+pub type Outbox = Pin<Box<dyn Sink<String, Error = String> + Send>>;
 
 /// One message read from a telemetry connection.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -259,7 +325,7 @@ pub fn jitter(step: Duration) -> Duration {
 }
 
 /// Open a plain `ws://` connection to Mercury, bounded in time and size.
-async fn dial_ws(url: String) -> Result<Conn, String> {
+async fn dial_ws(url: String) -> Result<(Conn, Option<Outbox>), String> {
     let cfg = WebSocketConfig::default().max_message_size(Some(MAX_WS_MESSAGE)).max_frame_size(Some(MAX_WS_MESSAGE));
     let connect = tokio_tungstenite::connect_async_with_config(url.as_str(), Some(cfg), false);
     let (ws, _) = match tokio::time::timeout(DIAL_TIMEOUT, connect).await {
@@ -267,8 +333,15 @@ async fn dial_ws(url: String) -> Result<Conn, String> {
         Ok(Err(e)) => return Err(e.to_string()),
         Ok(Ok(opened)) => opened,
     };
-    // Pings are answered by the reader itself; nothing is ever sent.
-    let frames = ws.filter_map(|m| async move {
+    // Pings are answered by the reader itself; the only command sent is the
+    // one the app asks for.
+    let (write, read) = ws.split();
+    let outbox: Outbox = Box::pin(
+        write
+            .with(|t: String| async move { Ok::<_, tokio_tungstenite::tungstenite::Error>(Message::text(t)) })
+            .sink_map_err(|e| e.to_string()),
+    );
+    let frames = read.filter_map(|m| async move {
         match m {
             Ok(Message::Text(t)) => Some(Ok(Frame::Text(t.as_str().to_string()))),
             Ok(Message::Binary(b)) => Some(Ok(Frame::Binary(b.to_vec()))),
@@ -277,11 +350,11 @@ async fn dial_ws(url: String) -> Result<Conn, String> {
             Err(e) => Some(Err(e.to_string())),
         }
     });
-    Ok(Box::pin(frames))
+    Ok((Box::pin(frames), Some(outbox)))
 }
 
 /// The telemetry client: one task, which connects, reads, and reconnects on
-/// [`BACKOFF`] until aborted. It never sends a command.
+/// [`BACKOFF`] until aborted. It sends a command only when one is asked of it.
 pub struct TelemetryClient;
 
 impl TelemetryClient {
@@ -293,13 +366,23 @@ impl TelemetryClient {
         out: mpsc::Sender<TelemetryMsg>,
         spectrum: watch::Sender<Option<Arc<Spectrum>>>,
     ) -> AbortHandle {
-        Self::spawn_with(move || dial_ws(url.clone()), out, spectrum, jitter)
+        tokio::spawn(run(move || dial_ws(url.clone()), None, out, spectrum, jitter)).abort_handle()
+    }
+
+    /// As [`TelemetryClient::spawn`], also sending the commands from `cmds`.
+    pub fn spawn_commanded(
+        url: String,
+        out: mpsc::Sender<TelemetryMsg>,
+        spectrum: watch::Sender<Option<Arc<Spectrum>>>,
+        cmds: mpsc::Receiver<TelemetryCmd>,
+    ) -> AbortHandle {
+        tokio::spawn(run(move || dial_ws(url.clone()), Some(cmds), out, spectrum, jitter)).abort_handle()
     }
 
     /// As [`TelemetryClient::spawn`], with the connection and the jitter
     /// supplied: tests use it to run the schedule on a paused clock.
     pub fn spawn_with<D, F>(
-        dial: D,
+        mut dial: D,
         out: mpsc::Sender<TelemetryMsg>,
         spectrum: watch::Sender<Option<Arc<Spectrum>>>,
         jitter: impl FnMut(Duration) -> Duration + Send + 'static,
@@ -308,7 +391,11 @@ impl TelemetryClient {
         D: FnMut() -> F + Send + 'static,
         F: Future<Output = Result<Conn, String>> + Send + 'static,
     {
-        tokio::spawn(run(dial, out, spectrum, jitter)).abort_handle()
+        let dial = move || {
+            let f = dial();
+            async move { f.await.map(|c| (c, None)) }
+        };
+        tokio::spawn(run(dial, None, out, spectrum, jitter)).abort_handle()
     }
 }
 
@@ -320,14 +407,26 @@ enum Said {
     Lost,
 }
 
+/// The next command, or never (no command channel, or it has closed).
+async fn next_cmd(cmds: &mut Option<mpsc::Receiver<TelemetryCmd>>) -> TelemetryCmd {
+    if let Some(rx) = cmds.as_mut() {
+        if let Some(c) = rx.recv().await {
+            return c;
+        }
+        *cmds = None;
+    }
+    std::future::pending().await
+}
+
 async fn run<D, F>(
     mut dial: D,
+    mut cmds: Option<mpsc::Receiver<TelemetryCmd>>,
     out: mpsc::Sender<TelemetryMsg>,
     spectrum: watch::Sender<Option<Arc<Spectrum>>>,
     mut jitter: impl FnMut(Duration) -> Duration,
 ) where
     D: FnMut() -> F,
-    F: Future<Output = Result<Conn, String>>,
+    F: Future<Output = Result<(Conn, Option<Outbox>), String>>,
 {
     let mut step = 0usize;
     let mut said = Said::Connecting;
@@ -337,7 +436,7 @@ async fn run<D, F>(
     loop {
         let reason = match dial().await {
             Err(e) => e,
-            Ok(mut conn) => {
+            Ok((mut conn, mut outbox)) => {
                 said = Said::Up;
                 if out.send(TelemetryMsg::Link(TelemetryLink::Up)).await.is_err() {
                     return;
@@ -345,20 +444,43 @@ async fn run<D, F>(
                 // Only a valid status moves this deadline on.
                 let mut status_due = tokio::time::Instant::now() + SILENCE;
                 let reason = loop {
-                    match tokio::time::timeout_at(status_due, conn.next()).await {
+                    let frame = tokio::select! {
+                        f = tokio::time::timeout_at(status_due, conn.next()) => f,
+                        cmd = next_cmd(&mut cmds) => {
+                            let sent = match outbox.as_mut() {
+                                Some(o) => o.send(cmd.json()).await,
+                                None => Err("this connection cannot send".to_string()),
+                            };
+                            if let Err(e) = sent {
+                                outbox = None;
+                                let reason = format!("telemetry command not sent: {e}");
+                                if out.send(TelemetryMsg::CommandFailed { reason }).await.is_err() {
+                                    return;
+                                }
+                            }
+                            continue;
+                        }
+                    };
+                    match frame {
                         Err(_) => break format!("no status from Mercury for {} s", SILENCE.as_secs()),
                         Ok(None) => break "closed by Mercury".to_string(),
                         Ok(Some(Err(e))) => break e,
                         // Garbage is dropped; only good telemetry counts.
-                        Ok(Some(Ok(Frame::Text(t)))) => {
-                            if let Ok(Some(st)) = parse_text(&t) {
+                        Ok(Some(Ok(Frame::Text(t)))) => match parse_event(&t) {
+                            Ok(Some(Event::Status(st))) => {
                                 step = 0;
                                 status_due = tokio::time::Instant::now() + SILENCE;
                                 if out.send(TelemetryMsg::Status(st)).await.is_err() {
                                     return;
                                 }
                             }
-                        }
+                            Ok(Some(Event::RadioList(rl))) => {
+                                if out.send(TelemetryMsg::RadioList(rl)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            _ => {}
+                        },
                         Ok(Some(Ok(Frame::Binary(b)))) => {
                             if let Ok(s) = Spectrum::decode(&b) {
                                 step = 0;
@@ -377,7 +499,19 @@ async fn run<D, F>(
                 return;
             }
         }
-        tokio::time::sleep(jitter(BACKOFF[step])).await;
+        // Wait out the backoff; a command meanwhile cannot be sent.
+        let until = tokio::time::Instant::now() + jitter(BACKOFF[step]);
         step = (step + 1).min(BACKOFF.len() - 1);
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep_until(until) => break,
+                _ = next_cmd(&mut cmds) => {
+                    let reason = "telemetry is not connected to Mercury".to_string();
+                    if out.send(TelemetryMsg::CommandFailed { reason }).await.is_err() {
+                        return;
+                    }
+                }
+            }
+        }
     }
 }

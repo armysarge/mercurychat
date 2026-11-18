@@ -8,11 +8,15 @@ use crate::app::contract::{AppError, CommandOk};
 use crate::app::discovery::Reading;
 use crate::app::events::{AppEvent, ModemState};
 use crate::app::modem::ModemCmd;
-use crate::app::rig::{rig_gate, Activity, RigAction, RigBanner, RigChange, RigPolicy, RIG_SOURCE};
-use crate::app::rigconfig::{rig_key, RigArrangement, RigConfig};
+use crate::app::rig::{
+    rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, TxLevelResult, RIG_SOURCE,
+};
+use crate::app::rigconfig::{rig_key, BandLevels, RigArrangement, RigConfig};
 use crate::app::telemetry::Tuning;
+use crate::band::{band_for, BANDS};
 use mc_storage::now_utc;
 use mercury_adapter::rigctl::{Level, PollRate, RigClient, RigClientCmd, RigLink, RigMsg, RigReply, RigRequest};
+use mercury_adapter::telemetry::{RadioList, TelemetryCmd, TelemetryMsg};
 use mercury_adapter::Callsign;
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -28,6 +32,10 @@ pub const CALL_HOLD: Duration = Duration::from_secs(1);
 pub const RIG_EVENT_GAP: Duration = Duration::from_millis(500);
 /// The last frequency is stored at most this often.
 pub const LAST_SAVE_GAP: Duration = Duration::from_secs(5);
+/// How long Mercury has to confirm a new TX level in its status (RIG-04).
+pub const TX_LEVEL_CONFIRM: Duration = Duration::from_secs(5);
+/// Two levels this close are the same.
+pub const TX_LEVEL_TOLERANCE: f32 = 0.01;
 /// Highest frequency a rig change may ask for (6 m tops out at 54 MHz).
 pub const MAX_FREQ_HZ: u64 = 60_000_000;
 
@@ -71,6 +79,17 @@ pub(super) struct RigSide {
     restore_pending: bool,
     last_saved: Option<LastTuning>,
     last_saved_at: Option<Instant>,
+    /// The rig settings the link runs on.
+    cfg: RigConfig,
+    /// Commands for the modem's telemetry client (set_tx_gain), if it has one.
+    tele_tx: Option<mpsc::Sender<TelemetryCmd>>,
+    /// Mercury's last `radio_list`, for the two-owner check.
+    radio_list: Option<RadioList>,
+    /// The band the rig was last on, and a TX level waiting to be applied.
+    band: Option<String>,
+    tx_pending: Option<(String, f32)>,
+    /// A TX level sent, awaiting Mercury's status: (band, dB, deadline).
+    tx_wait: Option<(String, f32, Instant)>,
 }
 
 impl Default for RigSide {
@@ -91,7 +110,39 @@ impl Default for RigSide {
             restore_pending: false,
             last_saved: None,
             last_saved_at: None,
+            cfg: RigConfig::default(),
+            tele_tx: None,
+            radio_list: None,
+            band: None,
+            tx_pending: None,
+            tx_wait: None,
         }
+    }
+}
+
+/// Does Mercury key through the rigctld MercuryChat reads (RIG-01; design §2.11)?
+fn owner_check(cfg: &RigConfig, rl: Option<&RadioList>) -> OwnerCheck {
+    let Some(rl) = rl else { return OwnerCheck::Unknown };
+    if cfg.arrangement != RigArrangement::Rigctld || rl.ptt_method != "hamlib" {
+        return OwnerCheck::Ok;
+    }
+    let ours = format!("{}:{}", cfg.host, cfg.port);
+    let norm = |a: &str| a.trim().replace("localhost", "127.0.0.1");
+    match rl.selected_model {
+        Some(2) if norm(&rl.device_path) == norm(&ours) => OwnerCheck::Ok,
+        Some(2) => OwnerCheck::Warn {
+            reason: format!(
+                "Mercury keys through the rigctld at {}, MercuryChat reads the one at {ours}: the PTT check only works if both reach the same rigctld",
+                rl.device_path
+            ),
+        },
+        Some(model) => OwnerCheck::Refused {
+            reason: format!(
+                "Mercury keys the radio through its own CAT connection (Hamlib model {model} on {}), so the CAT port would have two owners: set the PTT in Mercury to Hamlib model 2 (rigctld) at {ours}",
+                rl.device_path
+            ),
+        },
+        None => OwnerCheck::Warn { reason: "Mercury keys through Hamlib, but which rig it uses could not be read".into() },
     }
 }
 
@@ -177,11 +228,19 @@ impl App {
         let was_configured = r.policy.configured();
         r.policy = RigPolicy::new(configured);
         r.policy.set_activity(Activity::Idle);
+        let check = owner_check(&cfg, r.radio_list.as_ref());
+        let refused = matches!(check, OwnerCheck::Refused { .. });
+        r.policy.set_owner_check(check);
+        r.cfg = cfg.clone();
         r.restore_pending = configured && cfg.restore_on_startup;
         r.inbox_new = true;
         r.inbox = None;
         r.dirty = configured || was_configured;
-        if configured {
+        if configured && refused {
+            // Two owners of the CAT port: no rig link until Mercury is changed.
+            let reason = "not connected: Mercury owns the CAT port".to_string();
+            r.policy.on_msg(&RigMsg::Link(RigLink::Lost { reason }), Instant::now());
+        } else if configured {
             let (cmd_tx, cmd_rx) = mpsc::channel(32);
             let (out_tx, out_rx) = mpsc::channel(256);
             let task = RigClient::spawn(format!("{}:{}", cfg.host, cfg.port), cmd_rx, out_tx);
@@ -441,6 +500,7 @@ impl App {
             self.rig.in_flight = None;
             self.release_held_call(true);
         }
+        self.sync_tx_level(now);
         let activity = self.activity();
         self.rig.policy.set_activity(activity);
         let rate = self.rig.policy.poll_rate(activity);
@@ -459,13 +519,134 @@ impl App {
         }
     }
 
-    /// When the loop must next wake for the rig: a throttled event or a held call.
+    /// When the loop must next wake for the rig: a throttled event, a held
+    /// call or a TX level awaiting confirmation.
     pub(super) fn rig_wake(&self) -> Option<Instant> {
         let event = self.rig.dirty.then(|| self.rig.emitted_at.map(|t| t + RIG_EVENT_GAP)).flatten();
         let held = self.rig.held_call.as_ref().map(|h| h.until);
-        match (event, held) {
-            (Some(a), Some(b)) => Some(a.min(b)),
-            (a, b) => a.or(b),
+        let tx = self.rig.tx_wait.as_ref().map(|w| w.2);
+        [event, held, tx].into_iter().flatten().min()
+    }
+
+    /// A new modem (or none): its telemetry client, and what it said, are gone.
+    pub(super) fn rig_modem_changed(&mut self) {
+        self.rig.tele_tx = None;
+        self.rig.radio_list = None;
+        self.rig.tx_wait = None;
+        self.rig.tx_pending = None;
+        self.rig.band = None;
+        self.rig.policy.set_tx_level(None);
+    }
+
+    /// The modem's telemetry client takes commands here.
+    pub(super) fn rig_telemetry(&mut self, tx: mpsc::Sender<TelemetryCmd>) {
+        self.rig.tele_tx = Some(tx);
+    }
+
+    /// What the rig side reads from Mercury's telemetry.
+    pub(super) fn rig_telemetry_msg(&mut self, msg: &TelemetryMsg) {
+        match msg {
+            TelemetryMsg::RadioList(rl) => {
+                let before = self.rig.policy.owner_check().clone();
+                self.rig.radio_list = Some(rl.clone());
+                let after = owner_check(&self.rig.cfg, Some(rl));
+                if after != before {
+                    let was_refused = matches!(before, OwnerCheck::Refused { .. });
+                    let refused = matches!(after, OwnerCheck::Refused { .. });
+                    if let OwnerCheck::Refused { reason } | OwnerCheck::Warn { reason } = &after {
+                        let line = self.discovery.note("rig", reason.clone());
+                        self.emit(line);
+                    }
+                    if refused != was_refused {
+                        // Stop the link, or start it again now that Mercury has changed.
+                        let id = self.rig.profile_id.clone();
+                        self.start_rig(id.as_deref());
+                    } else {
+                        self.rig.policy.set_owner_check(after);
+                    }
+                    self.rig.dirty = true;
+                }
+            }
+            TelemetryMsg::Status(st) => {
+                if let (Some((band, db, _)), Some(now)) = (&self.rig.tx_wait, st.tx_gain_db) {
+                    if (now - db).abs() <= TX_LEVEL_TOLERANCE {
+                        let result = TxLevelResult::Applied { band: band.clone(), db: *db };
+                        self.rig.tx_wait = None;
+                        self.tx_level_done(result);
+                    }
+                }
+            }
+            TelemetryMsg::CommandFailed { reason } => {
+                if let Some((band, _, _)) = self.rig.tx_wait.take() {
+                    self.tx_level_done(TxLevelResult::NotApplied { band, reason: reason.clone() });
+                }
+            }
+            TelemetryMsg::Link(_) => {}
+        }
+    }
+
+    fn tx_level_done(&mut self, result: TxLevelResult) {
+        let text = match &result {
+            TxLevelResult::Applied { band, db } => format!("TX level for {band} applied: {db:+.1} dB"),
+            TxLevelResult::NotApplied { band, reason } => format!("TX level for {band} not applied: {reason}"),
+            TxLevelResult::Pending { .. } => return,
+        };
+        let line = self.discovery.note("rig", text);
+        self.emit(line);
+        self.rig.policy.set_tx_level(Some(result));
+        self.rig.dirty = true;
+    }
+
+    pub(super) fn set_band_levels(&mut self, band: String, levels: BandLevels) -> Result<CommandOk, AppError> {
+        let Some(id) = self.active_profile().map(|p| p.id) else {
+            return Err(conflict("no station is selected".into()));
+        };
+        if !BANDS.iter().any(|(_, _, b)| *b == band) {
+            return Err(invalid("band", "Choose an amateur band, e.g. 40m"));
+        }
+        levels.validate().map_err(|m| invalid("levels", &m))?;
+        BandLevels::save(&mut self.store, &id, &band, levels).map_err(|message| AppError::Storage { message })?;
+        if self.rig.band.as_deref() == Some(band.as_str()) {
+            self.rig.tx_pending = Some((band, levels.tx_gain_db));
+        }
+        Ok(CommandOk::Done)
+    }
+
+    /// Follow the band, and apply a stored TX level once the station is idle.
+    fn sync_tx_level(&mut self, now: Instant) {
+        if let Some((band, _, deadline)) = &self.rig.tx_wait {
+            if now >= *deadline {
+                let band = band.clone();
+                self.rig.tx_wait = None;
+                let reason = format!("Mercury did not confirm the new level within {} s", TX_LEVEL_CONFIRM.as_secs());
+                self.tx_level_done(TxLevelResult::NotApplied { band, reason });
+            }
+        }
+        let band = self.tuning(now).freq.and_then(|f| band_for(f.value)).map(String::from);
+        if band.is_some() && band != self.rig.band {
+            self.rig.band = band.clone();
+            let stored = match (self.rig.profile_id.as_deref(), band.as_deref()) {
+                (Some(id), Some(b)) => BandLevels::load_all(&self.store, id).get(b).copied(),
+                _ => None,
+            };
+            // A band without stored levels leaves Mercury's own level alone.
+            self.rig.tx_pending = stored.map(|l| (band.clone().unwrap_or_default(), l.tx_gain_db));
+        }
+        let Some((band, db)) = self.rig.tx_pending.clone() else { return };
+        if self.rig.tx_wait.is_some()
+            || rig_gate(self.activity(), &self.rig.policy, &RigChange::TxLevel, self.attached()).is_err()
+        {
+            return; // waits until the station is idle
+        }
+        self.rig.tx_pending = None;
+        let sent = self.rig.tele_tx.as_ref().is_some_and(|t| t.try_send(TelemetryCmd::SetTxGain(db)).is_ok());
+        if sent {
+            self.rig.tx_wait = Some((band.clone(), db, now + TX_LEVEL_CONFIRM));
+            self.rig.policy.set_tx_level(Some(TxLevelResult::Pending { band, db }));
+            self.rig.dirty = true;
+        } else {
+            let reason = "no telemetry connection to Mercury".to_string();
+            self.tx_level_done(TxLevelResult::NotApplied { band, reason });
         }
     }
 }

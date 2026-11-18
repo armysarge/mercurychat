@@ -79,6 +79,13 @@ async fn until_state(rx: &mut Receiver<EventEnvelope>, want: ModemState, secs: u
 
 /// An app on `profile` with rigctld at `rig`, its modem idle and the rig link up.
 async fn ready(root: &Path, profile: StationProfile, rig: RigConfig) -> (AppHandle, Receiver<EventEnvelope>) {
+    let (h, rx) = attached(root, profile, rig).await;
+    wait_for(&h, 5, "the rig link", |s| s.rig.link == RigLinkView::Up && s.rig.ptt != RigPttView::Unknown).await;
+    (h, rx)
+}
+
+/// As `ready`, without waiting for the rig link.
+async fn attached(root: &Path, profile: StationProfile, rig: RigConfig) -> (AppHandle, Receiver<EventEnvelope>) {
     let h = spawn_app(Store::open_in_memory().unwrap(), opts(root));
     let id = match h.call(AppCommand::SaveProfile { profile }).await.unwrap() {
         CommandOk::Profile(p) => p.id,
@@ -88,7 +95,6 @@ async fn ready(root: &Path, profile: StationProfile, rig: RigConfig) -> (AppHand
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
     until_state(&mut rx, ModemState::Listening, 15).await;
     assert_eq!(h.call(AppCommand::SetRigConfig { config: rig }).await.unwrap(), CommandOk::Done);
-    wait_for(&h, 5, "the rig link", |s| s.rig.link == RigLinkView::Up && s.rig.ptt != RigPttView::Unknown).await;
     (h, rx)
 }
 
@@ -284,4 +290,121 @@ async fn restore_on_startup_is_opt_in() {
     // With the opt-in, the last frequency comes back.
     h.call(AppCommand::SetRigConfig { config: RigConfig { restore_on_startup: true, ..rigctld(&rig) } }).await.unwrap();
     wait_for(&h, 5, "the restore", |_| rig.freq() == 10_145_000).await;
+}
+
+// ---- Task 6: per-band TX level and the two-owner check (telemetry WebSocket) ----
+
+use mc_core::app::{BandLevels, OwnerCheck, TxLevelResult};
+use mercury_adapter::fake_ws::FakeWs;
+
+const STATUS: &str = r#"{"type":"status","snr":5.0,"tx_gain_db":0.0,"audio_ok":true,"busy":""}"#;
+
+fn with_ws(net: &FakeNet, ws: &FakeWs) -> StationProfile {
+    let mut p = existing(net);
+    if let ModemTarget::Existing { telemetry_url, .. } = &mut p.modem {
+        *telemetry_url = Some(ws.url.clone());
+    }
+    p
+}
+
+fn radio_list(model: &str, device: &str, method: &str) -> String {
+    format!(
+        r#"{{"type":"radio_list","selected":"{model}","device_path":"{device}","ptt_method":"{method}","list":[]}}"#
+    )
+}
+
+async fn levels(h: &AppHandle, band: &str, tx_gain_db: f32) {
+    let levels = BandLevels { tx_gain_db, tune_dbfs: -20.0 };
+    assert_eq!(h.call(AppCommand::SetBandLevels { band: band.into(), levels }).await.unwrap(), CommandOk::Done);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn band_change_applies_and_confirms_tx_level() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    ws.set_status(Some(STATUS));
+    let rig = FakeRigctld::start().await; // starts on 20 m
+    let (h, _rx) = ready(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+    levels(&h, "40m", -3.5).await;
+    set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap();
+    wait_for(&h, 8, "the TX level confirmed", |s| {
+        matches!(&s.rig.tx_level_applied, Some(TxLevelResult::Applied { band, db }) if band == "40m" && *db == -3.5)
+    })
+    .await;
+    assert!(ws.received().iter().any(|t| t.contains(r#""set_tx_gain","value":"-3.50""#)), "{:?}", ws.received());
+    // A band without stored levels leaves Mercury's own level alone.
+    let sent = ws.received().len();
+    set(&h, RigChange::Frequency { hz: 14_105_000 }).await.unwrap();
+    wait_for(&h, 3, "20 m", |s| s.rig.frequency.as_ref().is_some_and(|f| f.value == 14_105_000)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert_eq!(ws.received().len(), sent, "nothing stored for 20 m: nothing sent");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unconfirmed_tx_level_reports_not_applied() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    ws.set_status(Some(STATUS));
+    ws.set_answer_commands(false);
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+    levels(&h, "40m", -3.5).await;
+    set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap();
+    wait_for(
+        &h,
+        10,
+        "not applied",
+        |s| matches!(&s.rig.tx_level_applied, Some(TxLevelResult::NotApplied { band, .. }) if band == "40m"),
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn serial_cat_in_mercury_refuses_rig_control() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    ws.set_status(Some(STATUS));
+    ws.set_radio_list(Some(&radio_list("1035", "/dev/ttyUSB0", "hamlib")));
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = attached(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+    let s = wait_for(&h, 5, "the refusal", |s| matches!(s.rig.owner_check, OwnerCheck::Refused { .. })).await;
+    let OwnerCheck::Refused { reason } = s.rig.owner_check else { unreachable!() };
+    assert!(reason.contains("1035") && reason.contains("rigctld"), "{reason}");
+    wait_for(&h, 3, "the link down", |s| s.rig.link != RigLinkView::Up).await;
+    assert!(!rig.log().iter().any(|l| l.starts_with("+F")));
+    let err = set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap_err();
+    assert!(matches!(err, AppError::Refused { reason: "rig.refused.linkDown", .. }), "{err:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn different_rigctld_address_only_warns() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    ws.set_status(Some(STATUS));
+    ws.set_radio_list(Some(&radio_list("2", "127.0.0.1:4999", "hamlib")));
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+    wait_for(&h, 5, "the warning", |s| matches!(s.rig.owner_check, OwnerCheck::Warn { .. })).await;
+    set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap();
+    wait_for(&h, 3, "the set", |_| rig.freq() == 7_105_000).await;
+    // Mercury pointed at our rigctld: fine.
+    let ok = radio_list("2", &format!("127.0.0.1:{}", rig.addr.port()), "hamlib");
+    ws.send_text(ok);
+    wait_for(&h, 5, "ok", |s| s.rig.owner_check == OwnerCheck::Ok).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_radio_list_is_unknown() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = FakeWs::start().await;
+    ws.set_status(Some(STATUS));
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert_eq!(snapshot(&h).await.rig.owner_check, OwnerCheck::Unknown);
 }
