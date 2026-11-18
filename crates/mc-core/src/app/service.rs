@@ -217,7 +217,15 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     let Some(req) = req else { break };
                     match req {
                         Request::Command(cmd, reply) => {
-                            let _ = reply.send(app.handle(*cmd));
+                            // The link test waits on the network: it answers from its own task.
+                            let cmd = match *cmd {
+                                AppCommand::TestRig { config } => {
+                                    app.test_rig(config, reply);
+                                    continue;
+                                }
+                                other => other,
+                            };
+                            let _ = reply.send(app.handle(cmd));
                             // A modem change is answered at once, then started.
                             if let Some(target) = app.pending.take() {
                                 app.switch_modem(target);
@@ -702,6 +710,9 @@ impl App {
             AppCommand::Tune { on } => self.tune(on),
             AppCommand::SetTuneLevel { dbfs } => self.set_tune_level(dbfs),
             AppCommand::BandLevels => self.band_levels(),
+            AppCommand::RigSettings => self.rig_settings(),
+            // Answered from the loop (see `test_rig`), never here.
+            AppCommand::TestRig { .. } => Err(AppError::Internal { message: "the rig test runs on its own".into() }),
             AppCommand::Frequencies => self.frequencies(),
             AppCommand::SaveFrequency { entry } => self.save_frequency(entry),
             AppCommand::DeleteFrequency { id } => self.delete_frequency(&id),

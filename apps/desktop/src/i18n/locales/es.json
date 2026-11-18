@@ -225,7 +225,16 @@
     "cancel": "Cancelar",
     "stopUsing": "Dejar de usar",
     "use": "Usar",
-    "addStation": "Añadir una estación"
+    "addStation": "Añadir una estación",
+    "tabs": {
+      "aria": "Secciones de ajustes",
+      "station": "Estación",
+      "profiles": "Perfiles",
+      "rig": "Equipo",
+      "notifications": "Notificaciones",
+      "appearance": "Apariencia",
+      "about": "Acerca de"
+    }
   },
   "appearance": {
     "title": "Apariencia",
@@ -706,5 +715,86 @@
     "txApplied": "Nivel de TX para {band} aplicado: {db} dB",
     "txPending": "Nivel de TX para {band}: esperando a Mercury",
     "txNotApplied": "Nivel de TX para {band} no aplicado: {reason}"
+  },
+  "rigSettings": {
+    "title": "Equipo",
+    "noStation": "Elija una estación para configurar su equipo.",
+    "arrangement": "Cómo lee MercuryChat el equipo",
+    "arrangementOpt": {
+      "none": "Ninguno",
+      "rigctld": "rigctld, compartido con Mercury",
+      "mercury": "Solo Mercury (frecuencia, solo lectura)"
+    },
+    "hint": "Con rigctld, MercuryChat y Mercury comparten un rigctld que usted ejecuta: Mercury activa el PTT a través de él (Hamlib modelo 2) y MercuryChat comprueba que el equipo lo sigue.",
+    "host": "Host",
+    "port": "Puerto",
+    "restore": "Volver a la última frecuencia cuando se conecte el equipo",
+    "save": "Guardar",
+    "saved": "Guardado",
+    "test": "Probar",
+    "testing": "Probando…",
+    "testHint": "La prueba abre su propia conexión y solo lee del equipo.",
+    "region": "Región IARU (para las frecuencias sugeridas)",
+    "regionOpt": "Región {n}",
+    "step": {
+      "connect": "Conexión",
+      "caps": "Capacidades",
+      "frequency": "Frecuencia",
+      "mode": "Modo",
+      "ptt": "Lectura de PTT",
+      "owner": "PTT de Mercury"
+    }
+  },
+  "freqList": {
+    "title": "Lista de frecuencias",
+    "hint": "Compartida por todas las estaciones. Las entradas sugeridas son un punto de partida tomado de los planes de banda de la IARU, no frecuencias de llamada oficiales.",
+    "name": "Nombre",
+    "freq": "Frecuencia",
+    "mode": "Modo",
+    "band": "Banda",
+    "purpose": "Uso",
+    "notes": "Notas",
+    "actions": "Acciones",
+    "suggested": "sugerida",
+    "outOfBand": "Fuera de banda",
+    "purposeOpt": {
+      "beacon": "Baliza",
+      "cq": "CQ",
+      "chat": "Chat"
+    },
+    "add": "Añadir",
+    "update": "Guardar cambios",
+    "edit": "Editar",
+    "delete": "Eliminar",
+    "up": "Subir",
+    "down": "Bajar",
+    "cancel": "Cancelar",
+    "restore": "Restaurar sugeridas",
+    "restored": "Entradas sugeridas añadidas: {n}",
+    "freqInvalid": "Escriba una frecuencia como 7.105",
+    "mhz": "{mhz} MHz",
+    "empty": "La lista está vacía."
+  },
+  "bandLevels": {
+    "title": "Niveles de TX y de sintonía por banda",
+    "hint": "Se aplican cuando el equipo pasa a la banda y la estación está libre. El nivel de sintonía es en la tarjeta de sonido (dBFS) y no usa el nivel de TX.",
+    "band": "Banda",
+    "tx": "Nivel de TX (dB)",
+    "tune": "Nivel de sintonía (dBFS)",
+    "txAria": "Nivel de TX para {band}",
+    "tuneAria": "Nivel de sintonía para {band}",
+    "saved": "Guardado para {band}"
+  },
+  "schedule": {
+    "title": "Programa de QSY",
+    "hint": "Las horas son UTC. El equipo solo cambia cuando toca un cambio y la estación está libre; un cambio que no puede hacerse antes del siguiente se omite.",
+    "enabled": "Seguir el programa",
+    "time": "Inicio (UTC)",
+    "entry": "Entrada",
+    "add": "Añadir un cambio",
+    "remove": "Quitar",
+    "save": "Guardar programa",
+    "saved": "Programa guardado",
+    "needEntries": "Añada primero entradas a la lista de frecuencias."
   }
 }

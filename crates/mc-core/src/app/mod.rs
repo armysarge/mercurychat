@@ -35,8 +35,8 @@ pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
 pub use notify::{NotifyPrefs, NOTIFY_SETTING};
 pub use rig::{
     rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigCapsView, RigChange, RigLinkView, RigMeters, RigPolicy,
-    RigPttView, RigRefusal, RigView, TuneView, TxLevelResult, AGREE_TO_CLEAR, PTT_CHECK_OFF_AFTER, PTT_WINDOW,
-    RIG_SOURCE,
+    RigPttView, RigRefusal, RigTestStep, RigView, TuneView, TxLevelResult, AGREE_TO_CLEAR, PTT_CHECK_OFF_AFTER,
+    PTT_WINDOW, RIG_SOURCE,
 };
 pub use rigconfig::{BandLevels, RigArrangement, RigConfig, TUNE_RANGE, TX_GAIN_RANGE};
 pub use schedule::{Schedule, ScheduleNext, ScheduleSlot, MAX_SLOTS};

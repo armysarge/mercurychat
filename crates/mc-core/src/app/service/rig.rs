@@ -9,14 +9,14 @@ use crate::app::discovery::Reading;
 use crate::app::events::{AppEvent, ModemState};
 use crate::app::modem::{ModemCmd, TuneResult};
 use crate::app::rig::{
-    rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, RigRefusal, TuneView, TxLevelResult,
-    RIG_SOURCE,
+    rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, RigRefusal, RigTestStep, TuneView,
+    TxLevelResult, RIG_SOURCE,
 };
 use crate::app::rigconfig::{rig_key, BandLevels, RigArrangement, RigConfig, TUNE_RANGE};
 use crate::app::telemetry::Tuning;
 use crate::band::{band_for, BANDS};
 use mc_storage::now_utc;
-use mercury_adapter::rigctl::{Level, PollRate, RigClient, RigClientCmd, RigLink, RigMsg, RigReply, RigRequest};
+use mercury_adapter::rigctl::{probe, Level, PollRate, RigClient, RigClientCmd, RigLink, RigMsg, RigReply, RigRequest};
 use mercury_adapter::telemetry::{RadioList, TelemetryCmd, TelemetryMsg};
 use mercury_adapter::{Callsign, TuneArg};
 use serde::{Deserialize, Serialize};
@@ -37,6 +37,9 @@ pub const LAST_SAVE_GAP: Duration = Duration::from_secs(5);
 pub const TX_LEVEL_CONFIRM: Duration = Duration::from_secs(5);
 /// Two levels this close are the same.
 pub const TX_LEVEL_TOLERANCE: f32 = 0.01;
+/// How long each step of the Settings link test may take.
+pub const RIG_TEST_TIMEOUT: Duration = Duration::from_secs(3);
+
 /// MercuryChat stops Tune after this (RIG-05); Mercury's own stop is 60 s.
 pub const TUNE_LIMIT: Duration = Duration::from_secs(30);
 
@@ -304,6 +307,40 @@ impl App {
             r.tx = Some(cmd_tx);
             r.inbox = Some(out_rx);
         }
+    }
+
+    /// The Settings link test: a separate connection that only reads, run in
+    /// its own task so the actor never waits on the network; plus whether
+    /// Mercury keys through the same rigctld (from its last radio_list).
+    pub(super) fn test_rig(&mut self, config: RigConfig, reply: super::Reply<CommandOk>) {
+        let host = config.host.trim().to_string();
+        if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) || config.port == 0 {
+            let _ = reply.send(Err(invalid("host", "Enter the rigctld host and port, e.g. 127.0.0.1 and 4532")));
+            return;
+        }
+        let cfg = RigConfig { arrangement: RigArrangement::Rigctld, host, ..config };
+        let owner = match owner_check(&cfg, self.rig.radio_list.as_ref()) {
+            OwnerCheck::Ok => {
+                RigTestStep { name: "owner".into(), ok: Some(true), detail: "Mercury keys through this rigctld".into() }
+            }
+            OwnerCheck::Warn { reason } => RigTestStep { name: "owner".into(), ok: None, detail: reason },
+            OwnerCheck::Refused { reason } => RigTestStep { name: "owner".into(), ok: Some(false), detail: reason },
+            OwnerCheck::Unknown => RigTestStep {
+                name: "owner".into(),
+                ok: None,
+                detail: "Mercury's PTT settings are not known: it has no telemetry connection".into(),
+            },
+        };
+        let addr = format!("{}:{}", cfg.host, cfg.port);
+        tokio::spawn(async move {
+            let mut steps: Vec<RigTestStep> = probe(&addr, RIG_TEST_TIMEOUT)
+                .await
+                .into_iter()
+                .map(|s| RigTestStep { name: s.name.into(), ok: s.ok, detail: s.detail })
+                .collect();
+            steps.push(owner);
+            let _ = reply.send(Ok(CommandOk::RigTest { steps }));
+        });
     }
 
     pub(super) fn set_rig_config(&mut self, config: RigConfig) -> Result<CommandOk, AppError> {
@@ -601,6 +638,12 @@ impl App {
         let tx = self.rig.tx_wait.as_ref().map(|w| w.2);
         let tune = self.rig.tune.until.as_ref().filter(|_| !self.rig.tune.off_sent).map(|u| u.0);
         [event, held, tx, tune, self.freq.wake()].into_iter().flatten().min()
+    }
+
+    /// The settings the rig link runs on, when they are not the stored ones
+    /// (the simulator's own rig).
+    pub(super) fn rig_config_override(&self) -> Option<RigConfig> {
+        self.rig.sim.map(|_| self.rig.cfg.clone())
     }
 
     /// The simulator's rig is up: link to it, with Mercury keying through it

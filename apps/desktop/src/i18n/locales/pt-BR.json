@@ -225,7 +225,16 @@
     "cancel": "Cancelar",
     "stopUsing": "Parar de usar",
     "use": "Usar",
-    "addStation": "Adicionar uma estação"
+    "addStation": "Adicionar uma estação",
+    "tabs": {
+      "aria": "Seções das configurações",
+      "station": "Estação",
+      "profiles": "Perfis",
+      "rig": "Rádio",
+      "notifications": "Notificações",
+      "appearance": "Aparência",
+      "about": "Sobre"
+    }
   },
   "appearance": {
     "title": "Aparência",
@@ -706,5 +715,86 @@
     "txApplied": "Nível de TX para {band} aplicado: {db} dB",
     "txPending": "Nível de TX para {band}: aguardando o Mercury",
     "txNotApplied": "Nível de TX para {band} não aplicado: {reason}"
+  },
+  "rigSettings": {
+    "title": "Rádio",
+    "noStation": "Escolha uma estação para configurar o rádio.",
+    "arrangement": "Como o MercuryChat lê o rádio",
+    "arrangementOpt": {
+      "none": "Nenhum",
+      "rigctld": "rigctld, compartilhado com o Mercury",
+      "mercury": "Só o Mercury (frequência, somente leitura)"
+    },
+    "hint": "Com o rigctld, o MercuryChat e o Mercury compartilham um rigctld que você executa: o Mercury aciona o PTT por ele (Hamlib modelo 2) e o MercuryChat verifica se o rádio acompanha.",
+    "host": "Host",
+    "port": "Porta",
+    "restore": "Voltar à última frequência quando o link com o rádio subir",
+    "save": "Salvar",
+    "saved": "Salvo",
+    "test": "Testar",
+    "testing": "Testando…",
+    "testHint": "O teste abre a própria conexão e apenas lê do rádio.",
+    "region": "Região IARU (para frequências sugeridas)",
+    "regionOpt": "Região {n}",
+    "step": {
+      "connect": "Conexão",
+      "caps": "Recursos",
+      "frequency": "Frequência",
+      "mode": "Modo",
+      "ptt": "Leitura do PTT",
+      "owner": "PTT do Mercury"
+    }
+  },
+  "freqList": {
+    "title": "Lista de frequências",
+    "hint": "Compartilhada por todas as estações. As entradas sugeridas são um ponto de partida baseado nos planos de banda da IARU, não frequências de chamada oficiais.",
+    "name": "Nome",
+    "freq": "Frequência",
+    "mode": "Modo",
+    "band": "Banda",
+    "purpose": "Uso",
+    "notes": "Notas",
+    "actions": "Ações",
+    "suggested": "sugerida",
+    "outOfBand": "Fora da banda",
+    "purposeOpt": {
+      "beacon": "Baliza",
+      "cq": "CQ",
+      "chat": "Chat"
+    },
+    "add": "Adicionar",
+    "update": "Salvar alterações",
+    "edit": "Editar",
+    "delete": "Excluir",
+    "up": "Mover para cima",
+    "down": "Mover para baixo",
+    "cancel": "Cancelar",
+    "restore": "Restaurar sugeridas",
+    "restored": "Entradas sugeridas adicionadas: {n}",
+    "freqInvalid": "Digite uma frequência como 7.105",
+    "mhz": "{mhz} MHz",
+    "empty": "A lista está vazia."
+  },
+  "bandLevels": {
+    "title": "Níveis de TX e de sintonia por banda",
+    "hint": "Aplicados quando o rádio muda para a banda e a estação está ociosa. O nível de sintonia é na placa de som (dBFS) e ignora o nível de TX.",
+    "band": "Banda",
+    "tx": "Nível de TX (dB)",
+    "tune": "Nível de sintonia (dBFS)",
+    "txAria": "Nível de TX para {band}",
+    "tuneAria": "Nível de sintonia para {band}",
+    "saved": "Salvo para {band}"
+  },
+  "schedule": {
+    "title": "Agenda de QSY",
+    "hint": "Os horários são UTC. O rádio só muda quando há uma mudança prevista e a estação está ociosa; uma mudança que não puder acontecer antes da próxima é pulada.",
+    "enabled": "Seguir a agenda",
+    "time": "Início (UTC)",
+    "entry": "Entrada",
+    "add": "Adicionar uma mudança",
+    "remove": "Remover",
+    "save": "Salvar agenda",
+    "saved": "Agenda salva",
+    "needEntries": "Adicione primeiro entradas à lista de frequências."
   }
 }

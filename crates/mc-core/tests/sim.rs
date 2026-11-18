@@ -273,3 +273,14 @@ async fn sim_cq_keys_and_the_cross_check_agrees() {
     assert_eq!(s.rig.fault, None);
     assert!(s.rig.banners.is_empty(), "{:?}", s.rig.banners);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sim_rig_settings_show_the_sim_rig_and_test_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let h = sim_with_rig(dir.path()).await;
+    let CommandOk::RigSettings { config, .. } = h.call(AppCommand::RigSettings).await.unwrap() else { panic!() };
+    assert_eq!(config.arrangement, mc_core::app::RigArrangement::Rigctld);
+    let CommandOk::RigTest { steps } = h.call(AppCommand::TestRig { config }).await.unwrap() else { panic!() };
+    assert_eq!(steps.len(), 6);
+    assert!(steps.iter().all(|s| s.ok == Some(true)), "{steps:?}");
+}

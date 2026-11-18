@@ -9,7 +9,7 @@ use super::events::{ModemState, SessionInfo};
 use super::frequencies::FrequencyEntry;
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
-use super::rig::{RigBanner, RigChange, RigView, TuneView};
+use super::rig::{RigBanner, RigChange, RigTestStep, RigView, TuneView};
 use super::rigconfig::{BandLevels, RigConfig};
 use super::schedule::{Schedule, ScheduleNext};
 use super::telemetry::TelemetryView;
@@ -235,6 +235,13 @@ pub enum AppCommand {
     },
     /// The active profile's stored TX and Tune levels, by band.
     BandLevels,
+    /// The active profile's rig settings, region and schedule (Settings: Rig).
+    RigSettings,
+    /// Try these rig settings on a separate, short-lived connection that only
+    /// reads; the running link is not touched.
+    TestRig {
+        config: RigConfig,
+    },
     /// The frequency list (shared by every profile), by sort then frequency.
     Frequencies,
     /// Add (empty id) or change an entry; answered with the whole list.
@@ -277,6 +284,8 @@ pub enum CommandOk {
     Activity { entries: Vec<ActivityEntry> },
     Frequencies { entries: Vec<FrequencyEntry> },
     Restored { added: u32 },
+    RigTest { steps: Vec<RigTestStep> },
+    RigSettings { config: RigConfig, region: u8, schedule: Schedule },
     BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },
     Qsos { qsos: Vec<Qso> },
     Qso(Qso),

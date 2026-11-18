@@ -224,7 +224,16 @@
     "cancel": "Cancel",
     "stopUsing": "Stop using",
     "use": "Use",
-    "addStation": "Add a station"
+    "addStation": "Add a station",
+    "tabs": {
+      "aria": "Settings sections",
+      "station": "Station",
+      "profiles": "Profiles",
+      "rig": "Rig",
+      "notifications": "Notifications",
+      "appearance": "Appearance",
+      "about": "About"
+    }
   },
   "appearance": {
     "title": "Appearance",
@@ -705,5 +714,86 @@
     "txApplied": "TX level for {band} applied: {db} dB",
     "txPending": "TX level for {band}: waiting for Mercury",
     "txNotApplied": "TX level for {band} not applied: {reason}"
+  },
+  "rigSettings": {
+    "title": "Rig",
+    "noStation": "Choose a station to set up its rig.",
+    "arrangement": "How MercuryChat reads the rig",
+    "arrangementOpt": {
+      "none": "None",
+      "rigctld": "rigctld, shared with Mercury",
+      "mercury": "Mercury only (frequency, read-only)"
+    },
+    "hint": "With rigctld, MercuryChat and Mercury share one rigctld you run: Mercury keys PTT through it (Hamlib model 2) and MercuryChat checks that the rig follows.",
+    "host": "Host",
+    "port": "Port",
+    "restore": "Retune to the last frequency when the rig link comes up",
+    "save": "Save",
+    "saved": "Saved",
+    "test": "Test",
+    "testing": "Testing…",
+    "testHint": "The test opens its own connection and only reads from the rig.",
+    "region": "IARU region (for suggested frequencies)",
+    "regionOpt": "Region {n}",
+    "step": {
+      "connect": "Connect",
+      "caps": "Capabilities",
+      "frequency": "Frequency",
+      "mode": "Mode",
+      "ptt": "PTT read-back",
+      "owner": "Mercury's PTT"
+    }
+  },
+  "freqList": {
+    "title": "Frequency list",
+    "hint": "Shared by every station. Suggested entries are a starting point drafted from the IARU band plans, not official calling frequencies.",
+    "name": "Name",
+    "freq": "Frequency",
+    "mode": "Mode",
+    "band": "Band",
+    "purpose": "Use",
+    "notes": "Notes",
+    "actions": "Actions",
+    "suggested": "suggested",
+    "outOfBand": "Out of band",
+    "purposeOpt": {
+      "beacon": "Beacon",
+      "cq": "CQ",
+      "chat": "Chat"
+    },
+    "add": "Add",
+    "update": "Save changes",
+    "edit": "Edit",
+    "delete": "Delete",
+    "up": "Move up",
+    "down": "Move down",
+    "cancel": "Cancel",
+    "restore": "Restore suggested",
+    "restored": "Suggested entries added: {n}",
+    "freqInvalid": "Enter a frequency such as 7.105",
+    "mhz": "{mhz} MHz",
+    "empty": "The list is empty."
+  },
+  "bandLevels": {
+    "title": "TX and Tune levels per band",
+    "hint": "Applied when the rig moves to the band and the station is idle. The Tune level is at the sound card (dBFS) and bypasses the TX level.",
+    "band": "Band",
+    "tx": "TX level (dB)",
+    "tune": "Tune level (dBFS)",
+    "txAria": "TX level for {band}",
+    "tuneAria": "Tune level for {band}",
+    "saved": "Saved for {band}"
+  },
+  "schedule": {
+    "title": "QSY schedule",
+    "hint": "Times are UTC. The rig moves only when a change is due and the station is idle; a change that cannot happen before the next one is skipped.",
+    "enabled": "Follow the schedule",
+    "time": "Start (UTC)",
+    "entry": "Entry",
+    "add": "Add a change",
+    "remove": "Remove",
+    "save": "Save schedule",
+    "saved": "Schedule saved",
+    "needEntries": "Add frequency-list entries first."
   }
 }

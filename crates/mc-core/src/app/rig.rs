@@ -623,6 +623,17 @@ impl RigPolicy {
 
 /// May `change` be made now? Checked by the actor at the moment it forwards
 /// the change, so a change and a call start cannot both win.
+/// One step of the Settings link test: `connect`, `caps`, `frequency`,
+/// `mode`, `ptt` or `owner`; `ok` is `null` when skipped or not known.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct RigTestStep {
+    pub name: String,
+    pub ok: Option<bool>,
+    pub detail: String,
+}
+
 /// Mercury's tuning carrier as the UI shows it (M3b, RIG-05).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]

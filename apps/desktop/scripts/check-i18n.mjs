@@ -255,6 +255,10 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     // M3b: the rig's banners (from the contract) and the gate's reasons (rig.ts mirrors the core's).
     "banner.rig.": () => unionOf("RigBanner.ts"),
     "rig.refused.": () => constOf("rig.ts", "REFUSALS"),
+    "settings.tabs.": () => constOf("views/Settings.vue", "TABS"),
+    "rigSettings.arrangementOpt.": () => constOf("components/RigSettings.vue", "ARRANGEMENTS"),
+    "rigSettings.step.": () => constOf("components/RigSettings.vue", "STEPS"),
+    "freqList.purposeOpt.": () => constOf("components/FrequencyListEditor.vue", "PURPOSES"),
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
       const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";

@@ -6,7 +6,7 @@ use chrono::NaiveTime;
 use mc_core::app::{
     spawn_app, ActivityEntry, AppCommand, AppError, AppEvent, AppHandle, AppOptions, AppSnapshot, CommandOk,
     EventEnvelope, FrequencyEntry, ModemState, RigArrangement, RigBanner, RigChange, RigConfig, RigLinkView,
-    RigPttView, Schedule, ScheduleSlot, RIG_SOURCE,
+    RigPttView, RigTestStep, Schedule, ScheduleSlot, RIG_SOURCE,
 };
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_storage::Store;
@@ -749,4 +749,103 @@ async fn band_levels_read_back_what_was_stored() {
     let CommandOk::BandLevels { levels: all } = h.call(AppCommand::BandLevels).await.unwrap() else { panic!() };
     assert_eq!(all.get("40m"), Some(&levels));
     assert_eq!(all.len(), 1);
+}
+
+// ---- Task 11: the link test in Settings → Rig
+
+async fn rig_test(h: &AppHandle, rig: RigConfig) -> Vec<RigTestStep> {
+    match h.call(AppCommand::TestRig { config: rig }).await.unwrap() {
+        CommandOk::RigTest { steps } => steps,
+        other => panic!("{other:?}"),
+    }
+}
+
+/// An app whose own rig link is off, so only the test talks to the fake.
+async fn no_rig_app(dir: &Path, net: &FakeNet) -> AppHandle {
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir));
+    let id = match h.call(AppCommand::SaveProfile { profile: existing(net) }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    let mut rx = h.subscribe();
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    until_state(&mut rx, ModemState::Listening, 15).await;
+    h
+}
+
+fn names(steps: &[RigTestStep]) -> Vec<&str> {
+    steps.iter().map(|s| s.name.as_str()).collect()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rig_test_reports_each_step() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let h = no_rig_app(dir.path(), &net).await;
+    let steps = rig_test(&h, rigctld(&rig)).await;
+    assert_eq!(names(&steps), ["connect", "caps", "frequency", "mode", "ptt", "owner"]);
+    for s in &steps[..5] {
+        assert_eq!(s.ok, Some(true), "{s:?}");
+    }
+    assert!(steps[2].detail.contains("14.074"), "{:?}", steps[2]);
+    assert!(steps[3].detail.contains("PKTUSB"), "{:?}", steps[3]);
+    assert_eq!(steps[5].ok, None, "no telemetry: Mercury's PTT settings are unknown");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rig_test_explains_rprt_11() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    rig.ptt_error(Some(-11));
+    let h = no_rig_app(dir.path(), &net).await;
+    let steps = rig_test(&h, rigctld(&rig)).await;
+    let ptt = steps.iter().find(|s| s.name == "ptt").unwrap();
+    assert_eq!(ptt.ok, Some(false));
+    assert!(ptt.detail.contains("-P RIG"), "{ptt:?}");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rig_test_with_nothing_listening_fails_at_connect_and_skips_the_rest() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let cfg = rigctld(&rig);
+    drop(rig);
+    let h = no_rig_app(dir.path(), &net).await;
+    let steps = rig_test(&h, cfg).await;
+    assert_eq!(steps[0].ok, Some(false), "{:?}", steps[0]);
+    for s in &steps[1..5] {
+        assert_eq!(s.ok, None, "{s:?}");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rig_test_never_writes() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let h = no_rig_app(dir.path(), &net).await;
+    rig_test(&h, rigctld(&rig)).await;
+    assert_eq!(rig.log(), [r"+\dump_caps", "+f", "+m", "+t"]);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rig_settings_read_back_config_region_and_schedule() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rig = FakeRigctld::start().await;
+    let (h, _rx) = ready(dir.path(), existing(&net), rigctld(&rig)).await;
+    h.call(AppCommand::SetRegion { region: 3 }).await.unwrap();
+    let e = save_entry(&h, entry("Net", 7_110_000)).await;
+    let schedule = Schedule { enabled: true, slots: vec![ScheduleSlot { start_utc: "06:00".into(), entry_id: e.id }] };
+    h.call(AppCommand::SetSchedule { schedule: schedule.clone() }).await.unwrap();
+    let CommandOk::RigSettings { config, region, schedule: got } = h.call(AppCommand::RigSettings).await.unwrap()
+    else {
+        panic!()
+    };
+    assert_eq!(config, rigctld(&rig));
+    assert_eq!(region, 3);
+    assert_eq!(got, schedule);
 }

@@ -225,7 +225,16 @@
     "cancel": "Annuler",
     "stopUsing": "Ne plus utiliser",
     "use": "Utiliser",
-    "addStation": "Ajouter une station"
+    "addStation": "Ajouter une station",
+    "tabs": {
+      "aria": "Sections des réglages",
+      "station": "Station",
+      "profiles": "Profils",
+      "rig": "Poste",
+      "notifications": "Notifications",
+      "appearance": "Apparence",
+      "about": "À propos"
+    }
   },
   "appearance": {
     "title": "Apparence",
@@ -706,5 +715,86 @@
     "txApplied": "Niveau TX pour {band} appliqué : {db} dB",
     "txPending": "Niveau TX pour {band} : en attente de Mercury",
     "txNotApplied": "Niveau TX pour {band} non appliqué : {reason}"
+  },
+  "rigSettings": {
+    "title": "Poste",
+    "noStation": "Choisissez une station pour régler son poste.",
+    "arrangement": "Comment MercuryChat lit le poste",
+    "arrangementOpt": {
+      "none": "Aucun",
+      "rigctld": "rigctld, partagé avec Mercury",
+      "mercury": "Mercury seul (fréquence, lecture seule)"
+    },
+    "hint": "Avec rigctld, MercuryChat et Mercury partagent un rigctld que vous lancez : Mercury passe en émission par lui (Hamlib modèle 2) et MercuryChat vérifie que le poste suit.",
+    "host": "Hôte",
+    "port": "Port",
+    "restore": "Revenir à la dernière fréquence quand la liaison avec le poste s'établit",
+    "save": "Enregistrer",
+    "saved": "Enregistré",
+    "test": "Tester",
+    "testing": "Test en cours…",
+    "testHint": "Le test ouvre sa propre connexion et ne fait que lire le poste.",
+    "region": "Région IARU (pour les fréquences suggérées)",
+    "regionOpt": "Région {n}",
+    "step": {
+      "connect": "Connexion",
+      "caps": "Capacités",
+      "frequency": "Fréquence",
+      "mode": "Mode",
+      "ptt": "Lecture du PTT",
+      "owner": "PTT de Mercury"
+    }
+  },
+  "freqList": {
+    "title": "Liste de fréquences",
+    "hint": "Partagée par toutes les stations. Les entrées suggérées sont un point de départ tiré des plans de bande de l'IARU, pas des fréquences d'appel officielles.",
+    "name": "Nom",
+    "freq": "Fréquence",
+    "mode": "Mode",
+    "band": "Bande",
+    "purpose": "Usage",
+    "notes": "Notes",
+    "actions": "Actions",
+    "suggested": "suggérée",
+    "outOfBand": "Hors bande",
+    "purposeOpt": {
+      "beacon": "Balise",
+      "cq": "CQ",
+      "chat": "Discussion"
+    },
+    "add": "Ajouter",
+    "update": "Enregistrer les modifications",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "up": "Monter",
+    "down": "Descendre",
+    "cancel": "Annuler",
+    "restore": "Restaurer les suggestions",
+    "restored": "Entrées suggérées ajoutées : {n}",
+    "freqInvalid": "Saisissez une fréquence comme 7.105",
+    "mhz": "{mhz} MHz",
+    "empty": "La liste est vide."
+  },
+  "bandLevels": {
+    "title": "Niveaux TX et d'accord par bande",
+    "hint": "Appliqués quand le poste passe sur la bande et que la station est libre. Le niveau d'accord est à la carte son (dBFS) et ignore le niveau TX.",
+    "band": "Bande",
+    "tx": "Niveau TX (dB)",
+    "tune": "Niveau d'accord (dBFS)",
+    "txAria": "Niveau TX pour {band}",
+    "tuneAria": "Niveau d'accord pour {band}",
+    "saved": "Enregistré pour {band}"
+  },
+  "schedule": {
+    "title": "Programme de QSY",
+    "hint": "Les heures sont en UTC. Le poste ne change que lorsqu'un changement est dû et que la station est libre ; un changement impossible avant le suivant est sauté.",
+    "enabled": "Suivre le programme",
+    "time": "Début (UTC)",
+    "entry": "Entrée",
+    "add": "Ajouter un changement",
+    "remove": "Retirer",
+    "save": "Enregistrer le programme",
+    "saved": "Programme enregistré",
+    "needEntries": "Ajoutez d'abord des entrées à la liste de fréquences."
   }
 }

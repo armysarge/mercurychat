@@ -89,6 +89,24 @@ impl App {
         Ok(self.store.frequencies().map_err(storage)?.into_iter().map(FrequencyEntry::from).collect())
     }
 
+    pub(super) fn rig_settings(&self) -> Result<CommandOk, AppError> {
+        let id = self.freq_profile()?;
+        let schedule = self
+            .store
+            .setting(&schedule_key(&id))
+            .ok()
+            .flatten()
+            .and_then(|j| serde_json::from_str(&j).ok())
+            .unwrap_or_default();
+        Ok(CommandOk::RigSettings {
+            config: self
+                .rig_config_override()
+                .unwrap_or_else(|| crate::app::rigconfig::RigConfig::load(&self.store, &id)),
+            region: self.region(&id),
+            schedule,
+        })
+    }
+
     pub(super) fn frequencies(&self) -> Result<CommandOk, AppError> {
         Ok(CommandOk::Frequencies { entries: self.entries()? })
     }
