@@ -22,6 +22,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 3, sql: MIGRATION_3 },
     Migration { to: 4, sql: MIGRATION_4 },
     Migration { to: 5, sql: MIGRATION_5 },
+    Migration { to: 6, sql: MIGRATION_6 },
 ];
 
 const MIGRATION_1: &str = r#"
@@ -216,4 +217,26 @@ fn backup_before(conn: &Connection, db_path: &Path, from: i64) -> Result<PathBuf
 /// existing profile starts as "answering calls".
 const MIGRATION_5: &str = r#"
 ALTER TABLE station_profiles ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// The frequency list (M3b, D15): the operator's named entries and the
+/// suggested presets (`preset_key` set), shared by every station profile.
+/// Created in station databases too, where it stays empty.
+const MIGRATION_6: &str = r#"
+CREATE TABLE frequency_list (
+  id          TEXT PRIMARY KEY,
+  name        TEXT NOT NULL,
+  freq_hz     INTEGER NOT NULL CHECK (freq_hz > 0),
+  mode        TEXT NOT NULL,
+  passband_hz INTEGER,
+  purpose     TEXT NOT NULL DEFAULT '',
+  notes       TEXT NOT NULL DEFAULT '',
+  suggested   INTEGER NOT NULL DEFAULT 0,
+  preset_key  TEXT,
+  region      INTEGER,
+  sort        INTEGER NOT NULL DEFAULT 0,
+  created_utc TEXT NOT NULL,
+  updated_utc TEXT NOT NULL
+);
+CREATE UNIQUE INDEX frequency_list_preset ON frequency_list(preset_key) WHERE preset_key IS NOT NULL;
 "#;

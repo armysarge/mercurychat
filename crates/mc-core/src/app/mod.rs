@@ -10,6 +10,7 @@ mod events;
 mod logbook;
 mod modem;
 mod notify;
+mod rigconfig;
 mod service;
 mod telemetry;
 
@@ -28,6 +29,7 @@ pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, Sess
 pub use logbook::{Qso, QsoEdit, FINALISE_SETTING, OPERATOR_SOURCE};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
 pub use notify::{NotifyPrefs, NOTIFY_SETTING};
+pub use rigconfig::{BandLevels, RigArrangement, RigConfig, TUNE_RANGE, TX_GAIN_RANGE};
 pub use service::{spawn_app, AppHandle, AppOptions};
 pub use telemetry::{
     AudioView, TelemetryLinkView, TelemetryView, Tuning, CONTROL_SOURCE, EVENT_GAP, FREQ_FRESH_MS, OFFSET_FRESH_MS,
@@ -55,5 +57,7 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     QsoEdit::export_all(&cfg)?;
     MacroDef::export_all(&cfg)?;
     NotifyPrefs::export_all(&cfg)?;
+    RigConfig::export_all(&cfg)?;
+    BandLevels::export_all(&cfg)?;
     Since::export_all(&cfg)
 }

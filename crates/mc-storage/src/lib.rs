@@ -30,6 +30,7 @@ pub enum StorageError {
     QsoNotFound(String),
 }
 
+mod freqlist;
 mod heard;
 mod logbook;
 mod macros;
@@ -191,6 +192,24 @@ pub struct QsoEdit {
     pub qth: Option<String>,
     pub my_power: Option<String>,
     pub notes: Option<String>,
+}
+
+/// One entry of the frequency list (M3b, D15). `preset_key` marks a shipped
+/// suggestion; once stored, the operator may edit or delete it like any other.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrequencyRow {
+    pub id: String,
+    pub name: String,
+    pub freq_hz: u64,
+    pub mode: String,
+    pub passband_hz: Option<i32>,
+    /// `beacon`, `cq`, `chat`.
+    pub purpose: Vec<String>,
+    pub notes: String,
+    pub suggested: bool,
+    pub preset_key: Option<String>,
+    pub region: Option<u8>,
+    pub sort: i64,
 }
 
 /// One text macro of a station profile.
