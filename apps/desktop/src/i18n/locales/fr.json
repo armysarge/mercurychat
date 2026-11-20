@@ -207,6 +207,9 @@
     "host": "Hôte",
     "controlPort": "Port de contrôle",
     "dataPort": "Port de données",
+    "broadcastPort": "Port de diffusion",
+    "telemetryUrl": "Spectre (lien UI de Mercury)",
+    "optionalHint": "Le port de diffusion transporte CQ, balises et stations entendues (Mercury -b, 8100 par défaut). Le spectre vient du lien UI de Mercury, désactivé sauf si Mercury tourne avec -G (ou ui_enabled = true dans mercury.ini). Laissez un champ vide pour vous en passer.",
     "useExisting": "Utiliser ce Mercury",
     "unexpectedReply": "Réponse inattendue : {type}"
   },
@@ -374,11 +377,11 @@
     "label": "Modifier"
   },
   "sidebar": {
-    "label": "Discussions et stations entendues",
-    "chats": "Discussions",
+    "label": "Contacts et stations entendues",
+    "chats": "Contacts",
     "heard": "Entendues",
     "heardEmpty": "Aucune station entendue pour l'instant. Les stations entendues sur l'air apparaîtront ici.",
-    "toggle": "Discussions",
+    "toggle": "Contacts",
     "close": "Fermer",
     "heardNew": "{n} station entendue depuis la dernière fois | {n} stations entendues depuis la dernière fois"
   },
@@ -615,6 +618,8 @@
     "openFailed": "Le navigateur n'a pas pu être ouvert : {reason}"
   },
   "waterfall": {
+    "howUnconfigured": "Aucune adresse de spectre pour cette station : ajoutez-en une dans Réglages → Profils (par exemple ws://127.0.0.1:10000/websocket).",
+    "howLost": "Mercury ne répond pas sur son lien UI : lancez Mercury avec -G (ou ui_enabled = true dans mercury.ini) et vérifiez l'adresse dans Réglages → Profils.",
     "show": "Afficher",
     "hide": "Masquer",
     "closed": "Le spectre et la cascade sont masqués.",

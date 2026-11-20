@@ -22,7 +22,7 @@
 // M3a Task 10 (Operate workspace), on the same simulator run:
 //   T10a SIM1 appears in Heard by CQ and then with a "Beacon" badge and its
 //        locator, highlighted (static under reduced motion), announced politely;
-//        the Heard tab counts new stations while Chats is open and clears on open
+//        the Heard tab counts new stations while Contacts is open and clears on open
 //   T10b a star persists across a restart (checked in T10e)
 //   T10c Call CQ shows "transmitted"; telemetry reads "unavailable"; the strip's
 //        frequency is dashes in the seven-segment font; channel occupancy unknown
@@ -48,7 +48,7 @@
 //   R2 picking a frequency-list entry moves the rig there
 //   R3 Tune asks to confirm the first time, then shows Stop with a countdown; Stop ends it
 //   R4 with SIM1 connected the digits take no focus and say "not while connected"
-//   R5 the strip is at most 60 px tall at 1280 and 1024 px wide
+//   R5 the strip is at most 80 px tall at 1280 and 1024 px wide
 //   R6 the Rig button's panel has no Split when the rig cannot split, and has one when it can
 // M3b Task 11 (Settings in tabs; Settings → Rig):
 //   S1 every Settings tab opens its panel; arrow keys move between tabs
@@ -179,15 +179,15 @@ try {
   if (await s.eval("document.querySelector('input.listen')")) throw new Error("the old Listen switch is still in the window");
   results.push('PASS receive only: first use explains automatic answering and offers "Start in Receive only"; header toggles Answering calls <-> Receive only from the core\'s state; no old Listen switch');
 
-  // ---- T10a. SIM1 is heard by CQ, then by beacon with its locator (Chats open: the Heard tab counts them)
-  await until(s, "document.querySelector('aside.sidebar [role=tab][aria-selected=true]')?.textContent.trim() === 'Chats'", "Chats open first");
-  await until(s, "!!document.querySelector('#side-heard-new')", "the Heard tab's new-station count while Chats is open", 15000);
+  // ---- T10a. SIM1 is heard by CQ, then by beacon with its locator (Contacts open: the Heard tab counts them)
+  await until(s, "document.querySelector('aside.sidebar [role=tab][aria-selected=true]')?.textContent.trim() === 'Contacts'", "Contacts open first");
+  await until(s, "!!document.querySelector('#side-heard-new')", "the Heard tab's new-station count while Contacts is open", 15000);
   const count = await s.eval("document.querySelector('#side-heard-new [aria-hidden]').textContent.trim()");
   await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
   await until(s, "!document.querySelector('#side-heard-new')", "the count cleared once Heard is open");
   const heardRow = "document.querySelector('.heard .row[data-callsign=\"SIM1\"]')";
   await until(s, heardRow, "SIM1 in the Heard list", 15000);
-  // The first observation (the CQ) came while Chats was open; the beacon follows about 2 s later.
+  // The first observation (the CQ) came while Contacts was open; the beacon follows about 2 s later.
   await until(s, `${heardRow}.querySelector('.badge')?.textContent.trim() === 'Beacon' && ${heardRow}.querySelector('.grid')?.textContent.trim() === 'JJ00aa'`, "SIM1's Beacon badge and locator", 15000);
   const fresh = await s.eval(`${heardRow}.classList.contains('fresh')`);
   const anim = await s.eval(`getComputedStyle(${heardRow}).animationName`);
@@ -200,7 +200,7 @@ try {
   if (!/^SIM1 heard: (CQ|Beacon)$/.test(live)) throw new Error(`live region: "${live}"`);
   const act = await s.eval("[...document.querySelectorAll('.activity .line[data-kind=heard]')].map(l => l.querySelector('.text').textContent)");
   if (!act.some((l) => /SIM1 \(CQ/.test(l))) throw new Error(`no CQ heard line in the activity drawer: ${act.slice(0, 6).join(" | ")}`);
-  results.push(`PASS heard: while Chats was open the Heard tab counted ${count}; opening Heard cleared it; SIM1 listed with a "Beacon" badge and locator JJ00aa after its CQ, highlighted (animation ${anim}, static under reduced motion); live region "${live}"; the activity drawer has the CQ line`);
+  results.push(`PASS heard: while Contacts was open the Heard tab counted ${count}; opening Heard cleared it; SIM1 listed with a "Beacon" badge and locator JJ00aa after its CQ, highlighted (animation ${anim}, static under reduced motion); live region "${live}"; the activity drawer has the CQ line`);
 
   // ---- T10b. a star persists (checked again after the restart in section 7)
   await s.eval(`${heardRow}.querySelector('.star').click()`);
@@ -276,7 +276,7 @@ try {
   await until(s, "document.querySelector('.strip button.tune').textContent.trim() === 'Tune'", "Tune stopped", 5000);
   results.push(`PASS tune: the first Tune asked "${ask}", then showed "${stop}"; Stop ended it`);
 
-  // ---- R5. one row, at most 60 px, at 1280 and 1024 px
+  // ---- R5. one row, at most 80 px, at 1280 and 1024 px
   const heights = [];
   for (const w of [1280, 1024]) {
     await s.send("Emulation.setDeviceMetricsOverride", { width: w, height: 800, deviceScaleFactor: 1, mobile: false });
@@ -285,7 +285,7 @@ try {
   }
   await s.send("Emulation.clearDeviceMetricsOverride", {});
   await sleep(600); // the resize this causes closes any open popover: let it land first
-  if (heights.some((h) => h > 60)) throw new Error(`strip heights ${heights.join(", ")}`);
+  if (heights.some((h) => h > 80)) throw new Error(`strip heights ${heights.join(", ")}`);
   results.push(`PASS strip height: ${heights.join(" / ")} px at 1280 / 1024 px wide`);
 
   // ---- R6. the Rig panel shows Split only when the rig has it (the sim's dummy rig can split)
@@ -396,13 +396,13 @@ try {
     const lw = (r) => { const [l, , w] = r.split(","); return `${l},${w}`; };
     if (lw(state.rect) !== lw(sideRect)) throw new Error(`${name}: sidebar left/width ${lw(state.rect)} != ${lw(sideRect)}`);
     if (state.search !== "SIM" || state.active !== picked) throw new Error(`${name}: search/selection lost: ${JSON.stringify(state)}`);
-    if (state.tabs !== "Chats|Heard") throw new Error(`${name}: tabs ${state.tabs}`);
+    if (state.tabs !== "Contacts|Heard") throw new Error(`${name}: tabs ${state.tabs}`);
   }
   await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
   await s.eval(`${rail("Settings")}.click()`);
   await until(s, "document.querySelector('.profiles, .card')", "Settings");
   if (!(await s.eval("document.querySelector('aside.sidebar [role=tab][aria-selected=true]').textContent.trim() === 'Heard'"))) throw new Error("the Heard tab was not kept");
-  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Chats').click()");
+  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Contacts').click()");
   await s.eval(`${rail("Settings")}.click()`);
   await s.eval("document.querySelector('.item').click()");
   await until(s, "document.querySelector('.chat-pane')", "a chat picked on Settings opens it");

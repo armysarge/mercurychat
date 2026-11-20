@@ -15,7 +15,21 @@ const emit = defineEmits<{ done: [] }>();
 const props = defineProps<{ receiveOnly?: boolean }>();
 
 const simCall = ref("");
-const ex = ref({ callsign: "", host: "127.0.0.1", controlPort: 8300, dataPort: 8301 });
+const ex = ref({
+  callsign: "", host: "127.0.0.1", controlPort: 8300, dataPort: 8301,
+  // Optional, prefilled with Mercury's defaults (-b 8100, -U 10000).
+  broadcastPort: 8100 as number | "", telemetryUrl: "ws://127.0.0.1:10000/websocket",
+});
+// The spectrum address follows the host until the operator edits it.
+let telemetryEdited = false;
+const markTelemetryEdited = () => { telemetryEdited = true; };
+const defaultTelemetry = (host: string) => {
+  const h = host.trim() || "127.0.0.1";
+  return `ws://${h.includes(":") && !h.startsWith("[") ? `[${h}]` : h}:10000/websocket`;
+};
+function hostChanged() {
+  if (!telemetryEdited) ex.value.telemetryUrl = defaultTelemetry(ex.value.host);
+}
 const errors = ref<Record<string, string>>({});
 const formError = ref("");
 const busy = ref(false);
@@ -62,7 +76,12 @@ function useExisting() {
       p.modem.controlPort === Number(v.controlPort) &&
       p.modem.dataPort === Number(v.dataPort),
   );
-  const draft: StationProfile = existing ?? {
+  const broadcastPort = v.broadcastPort === "" ? null : Number(v.broadcastPort);
+  const telemetryUrl = v.telemetryUrl.trim() || null;
+  // A station already saved keeps its history; its optional ports follow the form.
+  const draft: StationProfile = existing
+    ? { ...existing, modem: { ...existing.modem, broadcastPort, telemetryUrl } as StationProfile["modem"] }
+    : {
     id: "",
     callsign: v.callsign,
     name: null,
@@ -72,8 +91,8 @@ function useExisting() {
       host: v.host,
       controlPort: Number(v.controlPort),
       dataPort: Number(v.dataPort),
-      broadcastPort: null,
-      telemetryUrl: null,
+      broadcastPort,
+      telemetryUrl,
     },
     lab: false,
     receiveOnly: props.receiveOnly ?? false,
@@ -98,13 +117,18 @@ function useExisting() {
       <label>{{ t("profile.callsign") }} <input v-model="ex.callsign" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
       <span v-if="errors['ex.callsign']" class="field-error">{{ errors["ex.callsign"] }}</span>
       <div class="row">
-        <label>{{ t("profile.host") }} <input v-model="ex.host" name="host" class="mono" size="16" autocomplete="off" spellcheck="false" /></label>
+        <label>{{ t("profile.host") }} <input v-model="ex.host" name="host" class="mono" size="16" autocomplete="off" spellcheck="false" @input="hostChanged" /></label>
         <label>{{ t("profile.controlPort") }} <input v-model.number="ex.controlPort" name="controlPort" class="mono" type="number" min="1" max="65534" /></label>
         <label>{{ t("profile.dataPort") }} <input v-model.number="ex.dataPort" name="dataPort" class="mono" type="number" min="1" max="65535" /></label>
       </div>
-      <span v-for="f in ['host', 'controlPort', 'dataPort', 'modemKind']" :key="f">
+      <div class="row">
+        <label class="bport">{{ t("profile.broadcastPort") }} <input v-model.number="ex.broadcastPort" name="broadcastPort" class="mono" type="number" min="1" max="65535" /></label>
+        <label class="turl">{{ t("profile.telemetryUrl") }} <input v-model="ex.telemetryUrl" name="telemetryUrl" class="mono" autocomplete="off" spellcheck="false" @input="markTelemetryEdited" /></label>
+      </div>
+      <p class="muted small">{{ t("profile.optionalHint") }}</p>
+      <template v-for="f in ['host', 'controlPort', 'dataPort', 'broadcastPort', 'telemetryUrl', 'modemKind']" :key="f">
         <span v-if="errors['ex.' + f]" class="field-error">{{ errors["ex." + f] }}</span>
-      </span>
+      </template>
       <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useExisting") }}</button></div>
     </form>
     <p v-if="formError" class="err" role="alert">{{ formError }}</p>
@@ -115,4 +139,5 @@ function useExisting() {
 .forms { display: grid; gap: calc(var(--space) * 2); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
 input { width: 100%; }
 .row label { flex: 1; min-width: 7em; }
+.row label.turl { flex: 3; min-width: 16em; }
 </style>

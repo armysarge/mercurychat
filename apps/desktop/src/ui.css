@@ -13,7 +13,7 @@ h2 { font-size: calc(15px * var(--font-scale)); }
 }
 .card {
   background: var(--surface); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: calc(var(--space) * 2);
+  border-radius: var(--radius); padding: calc(var(--space) * 1.5) calc(var(--space) * 2);
 }
 .stack { display: grid; gap: var(--space); }
 .row { display: flex; flex-wrap: wrap; gap: var(--space); align-items: center; }
@@ -21,7 +21,7 @@ h2 { font-size: calc(15px * var(--font-scale)); }
 label { display: flex; flex-direction: column; gap: 2px; color: var(--text-2); font-size: calc(12px * var(--font-scale)); }
 input, textarea, select {
   background: var(--raised); color: var(--text); border: 1px solid var(--border-strong);
-  border-radius: 8px; padding: 6px 8px; font: inherit;
+  border-radius: 8px; padding: 4px 8px; font: inherit;
 }
 input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 /* Every button has one shape: 32 px tall, 9 px radius, the same weight and

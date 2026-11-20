@@ -201,6 +201,7 @@ const AXIS_DB = [-20, -70, -120];
     </div>
     <div v-if="open" id="wf-body" class="body">
       <p v-if="!up" class="muted small wf-status" role="status">{{ t("waterfall.unavailable", { link: t(`telemetry.link.${link}`) }) }}</p>
+      <p v-if="!up" class="muted small wf-how">{{ t(link === "unconfigured" ? "waterfall.howUnconfigured" : "waterfall.howLost") }}</p>
       <div v-else class="panels" :data-drawing="String(drawing)">
         <figure class="panel" :title="t('waterfall.spectrumAxis')">
           <canvas ref="spectrumCanvas" class="spectrum-canvas" role="img" :aria-label="t('waterfall.spectrumAria')"></canvas>
@@ -214,7 +215,7 @@ const AXIS_DB = [-20, -70, -120];
       </div>
       <p v-if="error" class="err small" role="alert">{{ error }}</p>
     </div>
-    <p v-else class="muted small closed-note">{{ up ? t("waterfall.closed") : t("strip.telemetryUnavailable") }}</p>
+    <p v-else class="muted small closed-note" :title="up ? undefined : t(link === 'unconfigured' ? 'waterfall.howUnconfigured' : 'waterfall.howLost')">{{ up ? t("waterfall.closed") : t("strip.telemetryUnavailable") }}</p>
   </div>
 </template>
 

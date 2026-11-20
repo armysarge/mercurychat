@@ -12,7 +12,7 @@
 //  3. Spectrum and waterfall (Waterfall.vue, Task 12): collapsed by default;
 //     "telemetry unavailable" whenever its telemetry is not Up.
 // Collapsible as one unit; the choice is remembered. Shown on every page, as
-// one row no taller than 60 px (owner, 17 Nov); at 1100 px or less only the
+// one row no taller than 80 px (owner, 20 Nov); at 1100 px or less only the
 // station and the actions show.
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -218,27 +218,27 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
 </template>
 
 <style scoped>
-/* One row, never taller than 60 px (owner, 17 Nov): station, actions, then
+/* One row, never taller than 80 px (owner, 20 Nov; was 60 px): station, actions, then
    the spectrum at the right edge. Long status text is cut with an ellipsis
    and shown in full on hover. */
 .strip {
   display: flex; align-items: center; gap: var(--space); flex: none;
-  box-sizing: border-box; height: 60px; max-height: 60px; overflow: hidden;
-  padding: 4px var(--space) 4px calc(var(--space) * 2);
+  box-sizing: border-box; height: 80px; max-height: 80px; overflow: hidden;
+  padding: 6px var(--space) 6px calc(var(--space) * 2);
   background: var(--surface); border-bottom: 1px solid var(--border);
 }
 .strip.closed { height: 32px; }
 .groups { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: calc(var(--space) * 2); }
-.group { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; height: 100%; }
+.group { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; height: 100%; }
 .group + .group { border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
 .station { flex: none; }
 .actions { flex: 1 1 auto; }
 .spectrum { flex: none; margin-left: auto; }
 .freq { display: flex; align-items: baseline; gap: var(--space); line-height: 1; }
-.big { font-size: calc(22px * var(--font-scale)); line-height: 1; }
+.big { font-size: calc(30px * var(--font-scale)); line-height: 1; }
 .tags { display: flex; gap: 4px; align-items: center; flex-wrap: nowrap; }
-.tag { padding: 0 6px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-2); line-height: 1.4; white-space: nowrap; }
-.profile-switch { max-width: 140px; padding: 0 4px; height: 20px; }
+.tag { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-2); line-height: 1.5; white-space: nowrap; }
+.profile-switch { max-width: 140px; padding: 0 4px; height: 24px; }
 .buttons { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .next-beacon { margin-left: 6px; white-space: nowrap; }
 .status { display: flex; gap: 12px; min-width: 0; height: 1.3em; }
@@ -246,7 +246,7 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
 .collapse { flex: none; border-color: transparent; padding: 0 8px; }
 button.tag { background: transparent; font: inherit; height: auto; cursor: pointer; }
 button.tag:disabled { cursor: not-allowed; }
-.freq-list { max-width: 150px; padding: 0 4px; height: 20px; }
+.freq-list { max-width: 170px; padding: 0 4px; height: 24px; }
 .chip { flex: none; padding: 0 6px; border-radius: 999px; border: 1px solid; white-space: nowrap; font-weight: 600; }
 .ptt-fault { color: var(--danger); border-color: var(--danger); }
 .ptt-check-off { color: var(--warning); border-color: var(--warning); }

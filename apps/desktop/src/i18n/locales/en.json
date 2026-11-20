@@ -206,6 +206,9 @@
     "host": "Host",
     "controlPort": "Control port",
     "dataPort": "Data port",
+    "broadcastPort": "Broadcast port",
+    "telemetryUrl": "Spectrum (Mercury UI link)",
+    "optionalHint": "The broadcast port carries CQ, beacons and heard stations (Mercury -b, default 8100). The spectrum comes from Mercury's UI link, which is off unless Mercury runs with -G (or ui_enabled = true in mercury.ini). Leave a field empty to go without it.",
     "useExisting": "Use this Mercury",
     "unexpectedReply": "Unexpected reply: {type}"
   },
@@ -373,11 +376,11 @@
     "label": "Edit"
   },
   "sidebar": {
-    "label": "Chats and heard stations",
-    "chats": "Chats",
+    "label": "Contacts and heard stations",
+    "chats": "Contacts",
     "heard": "Heard",
     "heardEmpty": "No stations heard yet. Stations you hear on the air will appear here.",
-    "toggle": "Chats",
+    "toggle": "Contacts",
     "close": "Close",
     "heardNew": "{n} station heard since you last looked | {n} stations heard since you last looked"
   },
@@ -614,6 +617,8 @@
     "openFailed": "The browser could not be opened: {reason}"
   },
   "waterfall": {
+    "howUnconfigured": "No spectrum address for this station: add one under Settings → Profiles (for example ws://127.0.0.1:10000/websocket).",
+    "howLost": "Mercury is not answering on its UI link: start Mercury with -G (or set ui_enabled = true in mercury.ini) and check the address under Settings → Profiles.",
     "show": "Show",
     "hide": "Hide",
     "closed": "Spectrum and waterfall are hidden.",

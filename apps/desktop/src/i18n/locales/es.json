@@ -207,6 +207,9 @@
     "host": "Host",
     "controlPort": "Puerto de control",
     "dataPort": "Puerto de datos",
+    "broadcastPort": "Puerto de difusión",
+    "telemetryUrl": "Espectro (enlace UI de Mercury)",
+    "optionalHint": "El puerto de difusión lleva CQ, balizas y estaciones escuchadas (Mercury -b, por defecto 8100). El espectro llega por el enlace UI de Mercury, apagado salvo que Mercury se ejecute con -G (o ui_enabled = true en mercury.ini). Deja un campo vacío para prescindir de él.",
     "useExisting": "Usar este Mercury",
     "unexpectedReply": "Respuesta inesperada: {type}"
   },
@@ -374,11 +377,11 @@
     "label": "Editar"
   },
   "sidebar": {
-    "label": "Chats y estaciones escuchadas",
-    "chats": "Chats",
+    "label": "Contactos y estaciones escuchadas",
+    "chats": "Contactos",
     "heard": "Escuchadas",
     "heardEmpty": "Aún no se ha escuchado ninguna estación. Las que escuches en el aire aparecerán aquí.",
-    "toggle": "Chats",
+    "toggle": "Contactos",
     "close": "Cerrar",
     "heardNew": "{n} estación oída desde la última vez | {n} estaciones oídas desde la última vez"
   },
@@ -615,6 +618,8 @@
     "openFailed": "No se pudo abrir el navegador: {reason}"
   },
   "waterfall": {
+    "howUnconfigured": "Esta estación no tiene dirección de espectro: añádela en Ajustes → Perfiles (por ejemplo ws://127.0.0.1:10000/websocket).",
+    "howLost": "Mercury no responde en su enlace UI: inicia Mercury con -G (o pon ui_enabled = true en mercury.ini) y revisa la dirección en Ajustes → Perfiles.",
     "show": "Mostrar",
     "hide": "Ocultar",
     "closed": "El espectro y la cascada están ocultos.",

@@ -154,7 +154,7 @@ try {
     }
     if (shot.theme) await setTheme(s, shot.theme);
     await s.eval(`${rail(VIEW_LABEL[shot.view] ?? "Operate")}.click()`);
-    if (shot.side) await s.eval(sideTab(shot.side === "heard" ? "Heard" : "Chats"));
+    if (shot.side) await s.eval(sideTab(shot.side === "heard" ? "Heard" : "Contacts"));
     await sleep(600);
     if (shot.scroll) await s.eval(`document.querySelector(${JSON.stringify(shot.scroll)})?.scrollIntoView({ block: 'start' })`);
     await sleep(300);

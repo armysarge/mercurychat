@@ -141,7 +141,6 @@ async function chooseFinalise(on: boolean) {
     </div>
     <div v-show="tab === 'station'" id="panel-station" class="panel" role="tabpanel" aria-labelledby="tab-station">
     <StationInfo />
-    <MacroEditor />
     <section v-if="activeProfile" class="card stack" aria-labelledby="h-logbook">
       <h2 id="h-logbook">{{ t("logbook.title") }}</h2>
       <label class="switch-row">
@@ -151,9 +150,10 @@ async function chooseFinalise(on: boolean) {
       <p class="muted small">{{ t("logbook.finaliseNote") }}</p>
       <p v-if="finaliseError" class="err" role="alert">{{ finaliseError }}</p>
     </section>
+    <MacroEditor class="span-all" />
     </div>
     <div v-show="tab === 'profiles'" id="panel-profiles" class="panel" role="tabpanel" aria-labelledby="tab-profiles">
-    <section class="card stack" aria-labelledby="h-profiles">
+    <section class="card stack span-all" aria-labelledby="h-profiles">
       <h2 id="h-profiles">{{ t("settings.stationProfiles") }}</h2>
       <ul v-if="snapshot?.profiles.length" class="profiles">
         <li v-for="p in snapshot.profiles" :key="p.id" :class="{ active: p.id === snapshot.activeProfileId }">
@@ -180,8 +180,8 @@ async function chooseFinalise(on: boolean) {
       <p v-else class="muted">{{ t("settings.noProfile") }}</p>
       <p v-if="error" class="err" role="alert">{{ error }}</p>
     </section>
-    <h2>{{ t("settings.addStation") }}</h2>
-    <ProfileForms />
+    <h2 class="span-all">{{ t("settings.addStation") }}</h2>
+    <ProfileForms class="span-all" />
     </div>
     <div v-show="tab === 'rig'" id="panel-rig" class="panel" role="tabpanel" aria-labelledby="tab-rig">
       <RigSettings />
@@ -200,7 +200,13 @@ async function chooseFinalise(on: boolean) {
 .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); }
 .tab { border: 1px solid transparent; border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; background: transparent; padding: 4px 12px; color: var(--text-2); }
 .tab[aria-selected="true"] { border-color: var(--border); background: var(--surface); color: var(--text); font-weight: 600; margin-bottom: -1px; }
-.panel { display: grid; gap: calc(var(--space) * 2); align-content: start; min-width: 0; }
+/* Sections sit side by side where they fit (owner, 20 Nov); lists and
+   multi-part forms take the whole width. */
+.panel {
+  display: grid; gap: calc(var(--space) * 1.5); align-content: start; align-items: start; min-width: 0;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 440px), 1fr));
+}
+.panel > .span-all, .panel :deep(.span-all) { grid-column: 1 / -1; }
 h1 { font-size: calc(20px * var(--font-scale)); }
 .profiles { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .profiles li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); padding: 6px 8px; border-radius: 8px; background: var(--raised); }

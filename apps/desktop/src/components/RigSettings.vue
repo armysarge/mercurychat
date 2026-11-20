@@ -124,14 +124,14 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
       <p v-if="error" class="err" role="alert">{{ error }}</p>
     </template>
   </section>
-  <FrequencyListEditor v-if="activeProfile" />
   <BandLevelsEditor v-if="activeProfile" />
+  <FrequencyListEditor v-if="activeProfile" class="span-all" />
   <ScheduleEditor v-if="activeProfile" :initial="schedule" />
 </template>
 
 <style scoped>
 .arrangement { border: 0; padding: 0; margin: 0; display: grid; gap: 4px; }
-.radio { display: flex; gap: 8px; align-items: center; }
+.radio { display: flex; flex-direction: row; gap: 8px; align-items: center; color: var(--text); }
 .address { display: flex; gap: calc(var(--space) * 2); flex-wrap: wrap; }
 .rig-port { width: 7em; }
 .buttons { display: flex; gap: var(--space); align-items: center; }
