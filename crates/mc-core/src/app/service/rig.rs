@@ -147,7 +147,7 @@ pub(super) struct RigSide {
     /// The rig settings the link runs on.
     cfg: RigConfig,
     /// Commands for the modem's telemetry client (set_tx_gain), if it has one.
-    tele_tx: Option<mpsc::Sender<TelemetryCmd>>,
+    pub(super) tele_tx: Option<mpsc::Sender<TelemetryCmd>>,
     /// Mercury's last `radio_list`, for the two-owner check.
     radio_list: Option<RadioList>,
     /// The band the rig was last on, and a TX level waiting to be applied.
@@ -859,7 +859,7 @@ impl App {
         let held = self.rig.held_call.as_ref().map(|h| h.until);
         let tx = self.rig.tx_wait.as_ref().map(|w| w.2);
         let tune = self.rig.tune.until.as_ref().filter(|_| !self.rig.tune.off_sent).map(|u| u.0);
-        [event, held, tx, tune, self.freq.wake()].into_iter().flatten().min()
+        [event, held, tx, tune, self.freq.wake(), self.audio.wake()].into_iter().flatten().min()
     }
 
     /// The settings the rig link runs on, when they are not the stored ones
@@ -880,6 +880,7 @@ impl App {
 
     /// A new modem (or none): its telemetry client, and what it said, are gone.
     pub(super) fn rig_modem_changed(&mut self) {
+        self.audio.reset();
         self.rig.sim = None;
         self.rig.tele_tx = None;
         self.rig.radio_list = None;
@@ -1066,7 +1067,7 @@ impl App {
                     self.tx_level_done(TxLevelResult::NotApplied { band, reason: reason.clone() });
                 }
             }
-            TelemetryMsg::Link(_) => {}
+            TelemetryMsg::Link(_) | TelemetryMsg::Audio(_) => {}
         }
     }
 

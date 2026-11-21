@@ -2,6 +2,7 @@
 //! and gets `CommandOk` or `AppError`; it never touches sockets, files or the
 //! database directly (docs/02 §2, §7).
 
+use super::audio::AudioSettingsView;
 use super::beacon::BeaconStatus;
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
@@ -250,6 +251,16 @@ pub enum AppCommand {
     /// The CAT log: MercuryChat's rigctld's stderr, then MercuryChat's own rig
     /// link errors, each the last 200 lines.
     CatLog,
+    /// Mercury's sound devices, from its UI link (M3b.1 §6).
+    AudioSettings,
+    /// Apply sound devices in Mercury (`set_audio_config`); refused while the
+    /// station is busy. Mercury's verdict arrives as an activity note.
+    SetAudio {
+        system: String,
+        input: String,
+        output: String,
+        channel: String,
+    },
     /// The frequency list (shared by every profile), by sort then frequency.
     Frequencies,
     /// Add (empty id) or change an entry; answered with the whole list.
@@ -296,6 +307,7 @@ pub enum CommandOk {
     RigSettings { config: RigConfig, region: u8, schedule: Schedule },
     HamlibModels { models: Vec<HamlibModelView>, found: bool },
     CatLog { lines: Vec<String> },
+    Audio(AudioSettingsView),
     BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },
     Qsos { qsos: Vec<Qso> },
     Qso(Qso),

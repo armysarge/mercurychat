@@ -190,7 +190,7 @@ impl Telemetry {
                 Some(line)
             }
             // The actor reads these itself (M3b): nothing for the view.
-            TelemetryMsg::RadioList(_) | TelemetryMsg::CommandFailed { .. } => None,
+            TelemetryMsg::RadioList(_) | TelemetryMsg::Audio(_) | TelemetryMsg::CommandFailed { .. } => None,
             TelemetryMsg::Status(status) => {
                 // A status only counts on a link that is up.
                 if self.link != TelemetryLinkView::Up {

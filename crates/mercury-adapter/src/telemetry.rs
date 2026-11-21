@@ -108,6 +108,15 @@ fn text(v: &serde_json::Value) -> Option<String> {
     (!s.is_empty()).then_some(s)
 }
 
+/// At most this many sound devices (or sound systems) are kept from a list.
+pub const MAX_DEVICES: usize = 64;
+
+/// A device id or name from Mercury: no control characters, at most 512
+/// characters (Mercury's own limit is 512 bytes); empty is allowed.
+fn device_text(v: &serde_json::Value) -> Option<String> {
+    Some(v.as_str()?.chars().filter(|c| !c.is_control()).take(512).collect())
+}
+
 /// Read one text frame as any event MercuryChat uses; `Ok(None)` for others
 /// (and for a `radio_list` without a PTT method).
 pub fn parse_event(frame: &str) -> Result<Option<Event>, TelemetryError> {
@@ -118,6 +127,41 @@ pub fn parse_event(frame: &str) -> Result<Option<Event>, TelemetryError> {
     let obj = v.as_object().ok_or(TelemetryError::NotAnEvent)?;
     match obj.get("type").and_then(|t| t.as_str()).ok_or(TelemetryError::NotAnEvent)? {
         "status" => Ok(parse_text(frame)?.map(Event::Status)),
+        kind @ ("capture_dev_list" | "playback_dev_list") => {
+            let selected = obj.get("selected").and_then(device_text).unwrap_or_default();
+            let list = obj
+                .get("list")
+                .and_then(|l| l.as_array())
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|d| {
+                            let id = d.get("id").and_then(device_text)?;
+                            let name = d.get("name").and_then(device_text).unwrap_or_else(|| id.clone());
+                            Some(AudioDevice { id, name })
+                        })
+                        .take(MAX_DEVICES)
+                        .collect()
+                })
+                .unwrap_or_default();
+            Ok(Some(Event::Audio(if kind == "capture_dev_list" {
+                AudioEvent::Capture { selected, list }
+            } else {
+                AudioEvent::Playback { selected, list }
+            })))
+        }
+        "audio_system" => {
+            let selected = obj.get("selected").and_then(device_text).unwrap_or_default();
+            let list = obj
+                .get("list")
+                .and_then(|l| l.as_array())
+                .map(|a| a.iter().filter_map(device_text).take(MAX_DEVICES).collect())
+                .unwrap_or_default();
+            Ok(Some(Event::Audio(AudioEvent::System { selected, list })))
+        }
+        "input_channel" => {
+            let selected = obj.get("selected").and_then(device_text).unwrap_or_default();
+            Ok(Some(Event::Audio(AudioEvent::Channel { selected })))
+        }
         "radio_list" => {
             let Some(ptt_method) = obj.get("ptt_method").and_then(text) else { return Ok(None) };
             Ok(Some(Event::RadioList(RadioList {
@@ -258,6 +302,8 @@ pub enum TelemetryMsg {
     Status(Status),
     /// Mercury's PTT and rig settings (WEBSOCKET_API.md §5.5).
     RadioList(RadioList),
+    /// Mercury's sound devices (M3b.1 §6).
+    Audio(AudioEvent),
     /// A command could not be sent.
     CommandFailed {
         reason: String,
@@ -275,11 +321,32 @@ pub struct RadioList {
     pub device_path: String,
 }
 
+/// One sound device as Mercury lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AudioDevice {
+    pub id: String,
+    pub name: String,
+}
+
+/// Mercury's sound devices, sent on connect and after `set_audio_config`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AudioEvent {
+    /// `capture_dev_list`: inputs, and the one in use.
+    Capture { selected: String, list: Vec<AudioDevice> },
+    /// `playback_dev_list`: outputs, and the one in use.
+    Playback { selected: String, list: Vec<AudioDevice> },
+    /// `audio_system`: the sound systems this Mercury build has.
+    System { selected: String, list: Vec<String> },
+    /// `input_channel`: `left`, `right` or `stereo`.
+    Channel { selected: String },
+}
+
 /// A telemetry text event MercuryChat reads.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Event {
     Status(Status),
     RadioList(RadioList),
+    Audio(AudioEvent),
 }
 
 /// A command for Mercury's WebSocket.
@@ -287,13 +354,25 @@ pub enum Event {
 pub enum TelemetryCmd {
     /// The modulator gain in dB, applied live (`set_tx_gain`).
     SetTxGain(f32),
+    /// Mercury's sound devices (`set_audio_config`): it restarts its audio
+    /// and saves the choice only if the restart is healthy.
+    SetAudioConfig { capture: String, playback: String, channel: String, system: String },
 }
 
 impl TelemetryCmd {
-    /// The command as sent (WEBSOCKET_API.md §6).
+    /// The command as sent (WEBSOCKET_API.md §6). Values from Mercury and the
+    /// OS are JSON-escaped (built with serde_json).
     pub fn json(&self) -> String {
         match self {
             TelemetryCmd::SetTxGain(db) => format!(r#"{{"command":"set_tx_gain","value":"{db:.2}"}}"#),
+            TelemetryCmd::SetAudioConfig { capture, playback, channel, system } => serde_json::json!({
+                "command": "set_audio_config",
+                "value": capture,
+                "value2": playback,
+                "value3": channel,
+                "value4": system,
+            })
+            .to_string(),
         }
     }
 }
@@ -476,6 +555,11 @@ async fn run<D, F>(
                             }
                             Ok(Some(Event::RadioList(rl))) => {
                                 if out.send(TelemetryMsg::RadioList(rl)).await.is_err() {
+                                    return;
+                                }
+                            }
+                            Ok(Some(Event::Audio(a))) => {
+                                if out.send(TelemetryMsg::Audio(a)).await.is_err() {
                                     return;
                                 }
                             }

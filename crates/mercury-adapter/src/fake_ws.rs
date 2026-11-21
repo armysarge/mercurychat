@@ -32,6 +32,12 @@ struct Shared {
     received: Vec<String>,
     tx_gain_db: Option<f64>,
     answer_commands: bool,
+    /// Frames sent to each client after the radio_list (device lists).
+    hello: Vec<String>,
+    /// What `set_audio_config` brings: audio_ok and audio_error in the status.
+    audio_result: (bool, String),
+    /// Set once a `set_audio_config` has been carried out.
+    audio_now: Option<(bool, String)>,
 }
 
 impl Default for Shared {
@@ -44,6 +50,9 @@ impl Default for Shared {
             received: vec![],
             tx_gain_db: None,
             answer_commands: true,
+            hello: vec![],
+            audio_result: (true, String::new()),
+            audio_now: None,
         }
     }
 }
@@ -51,14 +60,66 @@ impl Default for Shared {
 /// The status as sent: the set one, with `tx_gain_db` as last commanded.
 fn status_now(s: &Shared) -> Option<String> {
     let status = s.status.clone()?;
-    let Some(g) = s.tx_gain_db else { return Some(status) };
+    if s.tx_gain_db.is_none() && s.audio_now.is_none() {
+        return Some(status);
+    }
     match serde_json::from_str::<serde_json::Value>(&status) {
         Ok(serde_json::Value::Object(mut o)) => {
-            o.insert("tx_gain_db".into(), serde_json::json!(g));
+            if let Some(g) = s.tx_gain_db {
+                o.insert("tx_gain_db".into(), serde_json::json!(g));
+            }
+            if let Some((ok, err)) = &s.audio_now {
+                o.insert("audio_ok".into(), serde_json::json!(ok));
+                o.insert("audio_error".into(), serde_json::json!(err));
+            }
             Some(serde_json::Value::Object(o).to_string())
         }
         _ => Some(status),
     }
+}
+
+/// A client's command, recorded and carried out as Mercury would; the frames
+/// to send back.
+fn answer_command(s: &mut Shared, text: &str) -> Vec<String> {
+    s.received.push(text.to_string());
+    let Some(cmd) = serde_json::from_str::<serde_json::Value>(text).ok() else { return vec![] };
+    if !s.answer_commands {
+        return vec![];
+    }
+    match cmd["command"].as_str() {
+        Some("set_tx_gain") => match cmd["value"].as_str().and_then(|v| v.parse::<f64>().ok()) {
+            Some(g) => {
+                s.tx_gain_db = Some(g);
+                vec![r#"{"status":"ok"}"#.to_string()]
+            }
+            None => vec![],
+        },
+        Some("set_audio_config") => {
+            s.audio_now = Some(s.audio_result.clone());
+            audio_lists_after(s, &cmd)
+        }
+        _ => vec![],
+    }
+}
+
+/// The hello frames after a `set_audio_config`: Mercury republishes its
+/// device lists with the new selection (only when the restart was healthy).
+fn audio_lists_after(s: &Shared, cmd: &serde_json::Value) -> Vec<String> {
+    s.hello
+        .iter()
+        .filter_map(|h| {
+            let mut v: serde_json::Value = serde_json::from_str(h).ok()?;
+            let key = match v["type"].as_str()? {
+                "capture_dev_list" => "value",
+                "playback_dev_list" => "value2",
+                _ => return Some(h.clone()),
+            };
+            if s.audio_result.0 {
+                v["selected"] = cmd[key].clone();
+            }
+            Some(v.to_string())
+        })
+        .collect()
 }
 
 pub struct FakeWs {
@@ -117,6 +178,17 @@ impl FakeWs {
         self.shared.lock().unwrap().radio_list = json.map(String::from);
     }
 
+    /// Frames sent to each new client after the radio_list: Mercury's
+    /// device lists, audio system and input channel.
+    pub fn set_hello(&self, frames: Vec<String>) {
+        self.shared.lock().unwrap().hello = frames;
+    }
+
+    /// What a `set_audio_config` brings (default: healthy).
+    pub fn set_audio_result(&self, ok: bool, error: &str) {
+        self.shared.lock().unwrap().audio_result = (ok, error.to_string());
+    }
+
     /// Whether `set_tx_gain` is carried out and answered (default yes).
     pub fn set_answer_commands(&self, on: bool) {
         self.shared.lock().unwrap().answer_commands = on;
@@ -148,9 +220,12 @@ async fn serve(tcp: tokio::net::TcpStream, mut rx: broadcast::Receiver<Out>, sha
     let Ok(ws) = tokio_tungstenite::accept_async(tcp).await else { return };
     shared.lock().unwrap().accepted += 1;
     let (mut tx, mut incoming) = ws.split();
-    let hello = shared.lock().unwrap().radio_list.clone();
-    if let Some(rl) = hello {
-        if tx.send(Message::text(rl)).await.is_err() {
+    let hello = {
+        let s = shared.lock().unwrap();
+        s.radio_list.iter().chain(s.hello.iter()).cloned().collect::<Vec<_>>()
+    };
+    for frame in hello {
+        if tx.send(Message::text(frame)).await.is_err() {
             return;
         }
     }
@@ -170,20 +245,14 @@ async fn serve(tcp: tokio::net::TcpStream, mut rx: broadcast::Receiver<Out>, sha
             m = incoming.next() => match m {
                 Some(Ok(Message::Text(t))) => {
                     let t = t.as_str().to_string();
-                    let mut s = shared.lock().unwrap();
-                    s.received.push(t.clone());
-                    let cmd: Option<serde_json::Value> = serde_json::from_str(&t).ok();
-                    let gain = cmd
-                        .as_ref()
-                        .filter(|c| c["command"] == "set_tx_gain")
-                        .and_then(|c| c["value"].as_str()?.parse::<f64>().ok());
-                    match gain {
-                        Some(g) if s.answer_commands => {
-                            s.tx_gain_db = Some(g);
-                            Message::text(r#"{"status":"ok"}"#)
+                    // The lock is released before anything is sent.
+                    let frames = answer_command(&mut shared.lock().unwrap(), &t);
+                    for f in frames {
+                        if tx.send(Message::text(f)).await.is_err() {
+                            return;
                         }
-                        _ => continue,
                     }
+                    continue;
                 }
                 Some(Ok(_)) => continue,
                 _ => return,

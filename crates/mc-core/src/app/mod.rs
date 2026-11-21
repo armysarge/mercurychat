@@ -1,6 +1,7 @@
 //! The application layer the UI talks to: typed commands in, one event stream
 //! out (docs/02 §2–§3).
 
+mod audio;
 mod beacon;
 mod broadcast;
 mod chat;
@@ -18,6 +19,7 @@ mod service;
 mod telemetry;
 
 pub use crate::macros::{expand, Expanded, MacroContext, MacroDef};
+pub use audio::{AudioDeviceView, AudioSettingsView};
 pub use beacon::{
     BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus, ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN,
     MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD,

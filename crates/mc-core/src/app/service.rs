@@ -28,6 +28,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
+mod audio;
 mod freq;
 mod rig;
 use freq::FreqSide;
@@ -199,6 +200,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         mercury_listening: false,
         receive_only_shown: (false, false),
         rig: RigSide::with_options(opts.tune_limit, opts.rigctld_program, opts.managed_listen),
+        audio: crate::app::audio::AudioSide::default(),
         freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
@@ -277,6 +279,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             app.sync_beacon();
             app.sync_telemetry();
             app.sync_rig();
+            app.sync_audio();
         }
     });
     AppHandle { tx, events, spectrum }
@@ -324,6 +327,7 @@ struct App {
     receive_only_shown: (bool, bool),
     /// Rig control (M3b): the rigctld client, the policy and the held call.
     rig: RigSide,
+    audio: crate::app::audio::AudioSide,
     freq: FreqSide,
 }
 
@@ -728,6 +732,8 @@ impl App {
                 Err(AppError::Internal { message: "the model list runs on its own".into() })
             }
             AppCommand::CatLog => self.cat_log(),
+            AppCommand::AudioSettings => self.audio_settings(),
+            AppCommand::SetAudio { system, input, output, channel } => self.set_audio(system, input, output, channel),
             AppCommand::Frequencies => self.frequencies(),
             AppCommand::SaveFrequency { entry } => self.save_frequency(entry),
             AppCommand::DeleteFrequency { id } => self.delete_frequency(&id),
@@ -1176,6 +1182,7 @@ impl App {
             ReportKind::SimRig(addr) => self.rig_sim(addr),
             ReportKind::Telemetry(msg) => {
                 self.rig_telemetry_msg(&msg);
+                self.audio_telemetry_msg(&msg);
                 let line = self.telemetry.on_msg(msg, tokio::time::Instant::now());
                 // Ruling P2: the gate prefers telemetry's live listen mode.
                 self.listen_mode.set_live(self.telemetry.live_listen_mode());
