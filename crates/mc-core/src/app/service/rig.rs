@@ -12,7 +12,7 @@ use crate::app::rig::{
     rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, RigRefusal, RigTestStep, TuneView,
     TxLevelResult, RIG_SOURCE,
 };
-use crate::app::rigconfig::{rig_key, BandLevels, RigArrangement, RigConfig, TUNE_RANGE};
+use crate::app::rigconfig::{rig_key, BandLevels, FreqControl, RigConfig, TUNE_RANGE};
 use crate::app::telemetry::Tuning;
 use crate::band::{band_for, BANDS};
 use mc_storage::now_utc;
@@ -173,10 +173,10 @@ impl Default for RigSide {
 /// Does Mercury key through the rigctld MercuryChat reads (RIG-01; design §2.11)?
 fn owner_check(cfg: &RigConfig, rl: Option<&RadioList>) -> OwnerCheck {
     let Some(rl) = rl else { return OwnerCheck::Unknown };
-    if cfg.arrangement != RigArrangement::Rigctld || rl.ptt_method != "hamlib" {
+    if cfg.freq_control != FreqControl::ExternalRigctld || rl.ptt_method != "hamlib" {
         return OwnerCheck::Ok;
     }
-    let ours = format!("{}:{}", cfg.host, cfg.port);
+    let ours = format!("{}:{}", cfg.external.host, cfg.external.port);
     let norm = |a: &str| a.trim().replace("localhost", "127.0.0.1");
     match rl.selected_model {
         Some(2) if norm(&rl.device_path) == norm(&ours) => OwnerCheck::Ok,
@@ -269,12 +269,7 @@ impl App {
     pub(super) fn start_rig(&mut self, profile_id: Option<&str>) {
         let cfg = match (self.rig.sim, profile_id) {
             // The simulator's own rig, whatever the profile stores.
-            (Some(addr), Some(_)) => RigConfig {
-                arrangement: RigArrangement::Rigctld,
-                host: addr.ip().to_string(),
-                port: addr.port(),
-                restore_on_startup: false,
-            },
+            (Some(addr), Some(_)) => RigConfig::external(&addr.ip().to_string(), addr.port()),
             _ => profile_id.map(|id| RigConfig::load(&self.store, id)).unwrap_or_default(),
         };
         let r = &mut self.rig;
@@ -284,7 +279,7 @@ impl App {
         r.in_flight.clear();
         let same_station = profile_id.is_some() && r.profile_id.as_deref() == profile_id;
         r.profile_id = profile_id.map(String::from);
-        let configured = profile_id.is_some() && cfg.arrangement == RigArrangement::Rigctld;
+        let configured = profile_id.is_some() && cfg.freq_control == FreqControl::ExternalRigctld;
         // No rig before and none now: nothing to tell the UI.
         let was_configured = r.policy.configured();
         let old = std::mem::replace(&mut r.policy, RigPolicy::new(configured));
@@ -307,7 +302,7 @@ impl App {
         } else if configured {
             let (cmd_tx, cmd_rx) = mpsc::channel(32);
             let (out_tx, out_rx) = mpsc::channel(256);
-            let task = RigClient::spawn(format!("{}:{}", cfg.host, cfg.port), cmd_rx, out_tx);
+            let task = RigClient::spawn(format!("{}:{}", cfg.external.host, cfg.external.port), cmd_rx, out_tx);
             r.task = Some(AbortOnDrop(task));
             r.tx = Some(cmd_tx);
             r.inbox = Some(out_rx);
@@ -318,12 +313,12 @@ impl App {
     /// its own task so the actor never waits on the network; plus whether
     /// Mercury keys through the same rigctld (from its last radio_list).
     pub(super) fn test_rig(&mut self, config: RigConfig, reply: super::Reply<CommandOk>) {
-        let host = config.host.trim().to_string();
-        if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) || config.port == 0 {
+        let host = config.external.host.trim().to_string();
+        if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) || config.external.port == 0 {
             let _ = reply.send(Err(invalid("host", "Enter the rigctld host and port, e.g. 127.0.0.1 and 4532")));
             return;
         }
-        let cfg = RigConfig { arrangement: RigArrangement::Rigctld, host, ..config };
+        let cfg = RigConfig::external(&host, config.external.port);
         let owner = match owner_check(&cfg, self.rig.radio_list.as_ref()) {
             OwnerCheck::Ok => {
                 RigTestStep { name: "owner".into(), ok: Some(true), detail: "Mercury keys through this rigctld".into() }
@@ -336,7 +331,7 @@ impl App {
                 detail: "Mercury's PTT settings are not known: it has no telemetry connection".into(),
             },
         };
-        let addr = format!("{}:{}", cfg.host, cfg.port);
+        let addr = format!("{}:{}", cfg.external.host, cfg.external.port);
         tokio::spawn(async move {
             let mut steps: Vec<RigTestStep> = probe(&addr, RIG_TEST_TIMEOUT)
                 .await
@@ -352,16 +347,20 @@ impl App {
         let Some(id) = self.active_profile().map(|p| p.id) else {
             return Err(conflict("no station is selected".into()));
         };
-        if config.arrangement == RigArrangement::Rigctld {
-            let host = config.host.trim();
+        if let Some(e) = config.validate().into_iter().next() {
+            return Err(invalid(&e.field, &e.message));
+        }
+        if config.freq_control == FreqControl::ExternalRigctld {
+            let host = config.external.host.trim();
             if host.is_empty() || host.len() > 253 || host.chars().any(|c| c.is_whitespace() || c.is_control()) {
                 return Err(invalid("host", "Enter the rigctld host, e.g. 127.0.0.1"));
             }
-            if config.port == 0 {
+            if config.external.port == 0 {
                 return Err(invalid("port", "Enter the rigctld port, e.g. 4532"));
             }
         }
-        let config = RigConfig { host: config.host.trim().to_string(), ..config };
+        let mut config = config;
+        config.external.host = config.external.host.trim().to_string();
         config.save(&mut self.store, &id).map_err(|message| AppError::Storage { message })?;
         self.start_rig(Some(&id));
         Ok(CommandOk::Done)

@@ -1,6 +1,8 @@
 //! Rig settings, per-band levels and presets (M3b Task 3).
 
-use mc_core::app::{BandLevels, RigArrangement, RigConfig};
+use mc_core::app::{
+    BandLevels, CatLink, Endpoint, FreqControl, LineState, Parity, PttLine, PttMethod, PttSettings, RigConfig,
+};
 use mc_core::band::band_for;
 use mc_core::presets::presets;
 use mc_storage::Store;
@@ -31,21 +33,108 @@ fn every_preset_is_inside_its_band() {
 #[test]
 fn rig_config_defaults_and_round_trips() {
     let dir = tempfile::tempdir().unwrap();
-    let mut store = Store::open(&dir.path().join("a.db")).unwrap();
+    let store = Store::open(&dir.path().join("a.db")).unwrap();
     let d = RigConfig::default();
-    assert_eq!(d.arrangement, RigArrangement::Mercury, "the M3a behaviour: Mercury's read-only frequency");
-    assert_eq!((d.host.as_str(), d.port), ("127.0.0.1", 4532));
+    assert_eq!(d.freq_control, FreqControl::None, "the M3a behaviour: Mercury's read-only frequency");
+    assert_eq!(d.ptt.method, PttMethod::LeaveMercury);
+    assert_eq!((d.external.host.as_str(), d.external.port), ("127.0.0.1", 4532));
+    assert_eq!((d.flrig.host.as_str(), d.flrig.port), ("127.0.0.1", 12345));
+    assert_eq!((d.cat.baud, d.cat.data_bits, d.cat.stop_bits, d.cat.wait_ms), (9600, 8, 1, 0));
+    assert_eq!((d.read_every_s, d.offset_hz, d.ptt.cm108_gpio), (2, 0, 3));
+    assert_eq!(d.data_mode, "PKTUSB");
     assert!(!d.restore_on_startup, "restore is opt-in (RIG-03)");
+    assert!(d.validate().is_empty(), "{:?}", d.validate());
     assert_eq!(RigConfig::load(&store, "p1"), d);
-    let c = RigConfig {
-        arrangement: RigArrangement::Rigctld,
-        host: "10.0.0.2".into(),
-        port: 4632,
-        restore_on_startup: true,
+    assert_eq!(RigConfig::load(&store, "p2"), d, "per profile");
+}
+
+#[test]
+fn v2_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("a.db")).unwrap();
+    let mut c = RigConfig { freq_control: FreqControl::ManagedRigctld, ..RigConfig::default() };
+    c.cat.model = Some(3073);
+    c.cat.serial_port = "COM10".into();
+    c.cat.parity = Parity::Even;
+    c.cat.dtr = LineState::On;
+    c.ptt = PttSettings {
+        method: PttMethod::SerialLine,
+        line: PttLine::Dtr,
+        invert: true,
+        ptt_port: "COM11".into(),
+        cm108_gpio: 2,
     };
+    c.offset_hz = -1500;
+    c.read_every_s = 5;
+    c.hamlib_dir = r"C:\Hamlib\bin".into();
     c.save(&mut store, "p1").unwrap();
     assert_eq!(RigConfig::load(&store, "p1"), c);
-    assert_eq!(RigConfig::load(&store, "p2"), d, "per profile");
+}
+
+fn legacy(store: &mut Store, json: &str) -> RigConfig {
+    store.set_setting("profile.p1.rig.config", json).unwrap();
+    RigConfig::load(store, "p1")
+}
+
+#[test]
+fn legacy_rigctld_becomes_external() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("a.db")).unwrap();
+    let c = legacy(&mut store, r#"{"arrangement":"rigctld","host":"10.0.0.5","port":4600,"restoreOnStartup":true}"#);
+    assert_eq!(c.freq_control, FreqControl::ExternalRigctld);
+    assert_eq!(c.external, Endpoint { host: "10.0.0.5".into(), port: 4600 });
+    assert_eq!(c.ptt.method, PttMethod::Cat);
+    assert!(c.restore_on_startup);
+}
+
+#[test]
+fn legacy_mercury_and_none_become_none_leave_mercury() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("a.db")).unwrap();
+    for a in ["mercury", "none"] {
+        let c = legacy(
+            &mut store,
+            &format!(r#"{{"arrangement":"{a}","host":"127.0.0.1","port":4532,"restoreOnStartup":false}}"#),
+        );
+        assert_eq!(c.freq_control, FreqControl::None, "{a}");
+        assert_eq!(c.ptt.method, PttMethod::LeaveMercury, "{a}");
+    }
+}
+
+#[test]
+fn validate_rejects() {
+    type Bend = fn(&mut RigConfig);
+    let cases: [(Bend, &str); 8] = [
+        (|c| c.read_every_s = 3, "readEverySeconds"),
+        (|c| c.offset_hz = 10_000_001, "offsetHz"),
+        (|c| c.cat.data_bits = 6, "dataBits"),
+        (|c| c.cat.stop_bits = 3, "stopBits"),
+        (|c| c.cat.wait_ms = 1001, "waitMs"),
+        (|c| c.ptt.cm108_gpio = 5, "cm108Gpio"),
+        (
+            |c| {
+                c.freq_control = FreqControl::ManagedRigctld;
+                c.cat.serial_port = "COM3".into();
+            },
+            "model",
+        ),
+        (
+            |c| {
+                c.freq_control = FreqControl::ManagedRigctld;
+                c.cat.model = Some(1);
+                c.cat.link = CatLink::Serial;
+                c.cat.serial_port = String::new();
+            },
+            "serialPort",
+        ),
+    ];
+    for (bend, field) in cases {
+        let mut c = RigConfig::default();
+        bend(&mut c);
+        let errs = c.validate();
+        assert_eq!(errs.len(), 1, "{field}: {errs:?}");
+        assert_eq!(errs[0].field, field);
+    }
 }
 
 #[test]

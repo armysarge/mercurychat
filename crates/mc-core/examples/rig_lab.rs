@@ -15,7 +15,7 @@
 
 use mc_core::app::{
     spawn_app, ActivityEntry, AppCommand, AppHandle, AppOptions, AppSnapshot, BandLevels, CommandOk, ModemState,
-    OwnerCheck, RigArrangement, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView, TxLevelResult,
+    OwnerCheck, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView, TxLevelResult,
 };
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_core::station::{Station, StationConfig};
@@ -43,7 +43,7 @@ fn shell(cmd: &str) {
 }
 
 fn rig(port: u16) -> RigConfig {
-    RigConfig { arrangement: RigArrangement::Rigctld, host: "127.0.0.1".into(), port, restore_on_startup: false }
+    RigConfig::external("127.0.0.1", port)
 }
 
 fn profile(call: &str, tnc: u16, ws: u16) -> StationProfile {

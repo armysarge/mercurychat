@@ -5,8 +5,8 @@
 use chrono::NaiveTime;
 use mc_core::app::{
     spawn_app, ActivityEntry, AppCommand, AppError, AppEvent, AppHandle, AppOptions, AppSnapshot, CommandOk,
-    EventEnvelope, FrequencyEntry, ModemState, RigArrangement, RigBanner, RigChange, RigConfig, RigLinkView,
-    RigPttView, RigTestStep, Schedule, ScheduleSlot, RIG_SOURCE,
+    EventEnvelope, FrequencyEntry, ModemState, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView, RigTestStep,
+    Schedule, ScheduleSlot, RIG_SOURCE,
 };
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_storage::Store;
@@ -39,12 +39,7 @@ fn existing(net: &FakeNet) -> StationProfile {
 }
 
 fn rigctld(fake: &FakeRigctld) -> RigConfig {
-    RigConfig {
-        arrangement: RigArrangement::Rigctld,
-        host: "127.0.0.1".into(),
-        port: fake.addr.port(),
-        restore_on_startup: false,
-    }
+    RigConfig::external("127.0.0.1", fake.addr.port())
 }
 
 async fn snapshot(h: &AppHandle) -> AppSnapshot {

@@ -1,44 +1,204 @@
-//! Rig settings per station profile (M3b design §7.4): the arrangement, the
-//! rigctld address and restore-on-startup, and the per-band TX and tune
+//! Rig settings per station profile (M3b design §7.4, M3b.1 design §5): how
+//! MercuryChat reads the rig (Frequency control), how Mercury keys it (PTT),
+//! the CAT link for MercuryChat's own rigctld, and the per-band TX and tune
 //! levels. Kept as JSON in the app's settings, under the profile's keys.
+//! M3b's `arrangement` form is read and converted (M3b.1 design §8).
 
+use crate::profile::FieldError;
 use mc_storage::Store;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use ts_rs::TS;
 
-/// Who MercuryChat reads the rig through (RIG-01).
+/// Who MercuryChat reads and sets the rig through (M3b.1 §5.1).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
-pub enum RigArrangement {
-    /// No rig information at all.
-    None,
-    /// A rigctld the operator runs, shared with Mercury (connect-only).
-    Rigctld,
-    /// Mercury's own read-only frequency, from its telemetry (M3a).
+pub enum FreqControl {
+    /// No rig link: the frequency comes from Mercury's telemetry.
     #[default]
-    Mercury,
+    None,
+    /// A rigctld MercuryChat starts (or reuses, if one answers) on 127.0.0.1:4532.
+    ManagedRigctld,
+    /// A rigctld someone else runs: connect only.
+    ExternalRigctld,
+    /// FLRig, over XML-RPC: frequency and mode only.
+    Flrig,
+}
+
+/// How Mercury keys the radio, as MercuryChat sets it (M3b.1 §5.2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum PttMethod {
+    /// CAT through the rigctld.
+    Cat,
+    /// The DTR or RTS line of a serial port.
+    SerialLine,
+    Cm108,
+    /// No PTT: the radio's VOX.
+    NoPtt,
+    /// MercuryChat leaves Mercury's PTT setting as it is.
+    #[default]
+    LeaveMercury,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum CatLink {
+    #[default]
+    Serial,
+    /// A network radio: rigctld's `-r host:port`.
+    Tcp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum Parity {
+    #[default]
+    None,
+    Even,
+    Odd,
+}
+
+/// A serial control line's state while the port is open (Hamlib `dtr_state`, `rts_state`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum LineState {
+    #[default]
+    Unset,
+    On,
+    Off,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub enum PttLine {
+    #[default]
+    Rts,
+    Dtr,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
 #[serde(rename_all = "camelCase", default)]
 #[ts(export)]
-pub struct RigConfig {
-    pub arrangement: RigArrangement,
+pub struct Endpoint {
     pub host: String,
     pub port: u16,
+}
+
+impl Default for Endpoint {
+    fn default() -> Self {
+        Endpoint { host: "127.0.0.1".into(), port: 4532 }
+    }
+}
+
+/// The CAT link of MercuryChat's own rigctld (M3b.1 §5.3).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct CatSettings {
+    /// Hamlib rig model number.
+    pub model: Option<u32>,
+    pub link: CatLink,
+    pub serial_port: String,
+    /// `host:port` of a network radio.
+    pub tcp_addr: String,
+    pub baud: u32,
+    pub parity: Parity,
+    pub data_bits: u8,
+    pub stop_bits: u8,
+    /// Wait after each write (Hamlib `post_write_delay`), ms.
+    pub wait_ms: u32,
+    pub dtr: LineState,
+    pub rts: LineState,
+}
+
+impl Default for CatSettings {
+    fn default() -> Self {
+        CatSettings {
+            model: None,
+            link: CatLink::Serial,
+            serial_port: String::new(),
+            tcp_addr: String::new(),
+            baud: 9600,
+            parity: Parity::None,
+            data_bits: 8,
+            stop_bits: 1,
+            wait_ms: 0,
+            dtr: LineState::Unset,
+            rts: LineState::Unset,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct PttSettings {
+    pub method: PttMethod,
+    pub line: PttLine,
+    /// Line inverted (only when Mercury drives the port itself).
+    pub invert: bool,
+    /// A separate PTT port; empty: the CAT port.
+    pub ptt_port: String,
+    /// CM108 GPIO pin, 1 to 4.
+    pub cm108_gpio: u8,
+}
+
+impl Default for PttSettings {
+    fn default() -> Self {
+        PttSettings {
+            method: PttMethod::LeaveMercury,
+            line: PttLine::Rts,
+            invert: false,
+            ptt_port: String::new(),
+            cm108_gpio: 3,
+        }
+    }
+}
+
+pub const READ_EVERY_CHOICES: [u8; 4] = [1, 2, 5, 10];
+pub const OFFSET_LIMIT_HZ: u32 = 10_000_000;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase", default)]
+#[ts(export)]
+pub struct RigConfig {
+    pub freq_control: FreqControl,
+    pub external: Endpoint,
+    pub flrig: Endpoint,
+    pub cat: CatSettings,
+    pub ptt: PttSettings,
     /// Retune to the last frequency when the rig link first comes up (RIG-03: opt-in).
     pub restore_on_startup: bool,
+    /// Added to the dial frequency the rig reports; taken off when setting it.
+    pub offset_hz: i32,
+    /// How often the frequency and mode are read, seconds: 1, 2, 5 or 10.
+    pub read_every_s: u8,
+    /// The rig mode for data (QSY and the frequency test).
+    pub data_mode: String,
+    /// A folder to look in for rigctld when it is not on the PATH.
+    pub hamlib_dir: String,
 }
 
 impl Default for RigConfig {
     fn default() -> Self {
         RigConfig {
-            arrangement: RigArrangement::Mercury,
-            host: "127.0.0.1".into(),
-            port: 4532,
+            freq_control: FreqControl::None,
+            external: Endpoint::default(),
+            flrig: Endpoint { host: "127.0.0.1".into(), port: 12345 },
+            cat: CatSettings::default(),
+            ptt: PttSettings::default(),
             restore_on_startup: false,
+            offset_hz: 0,
+            read_every_s: 2,
+            data_mode: "PKTUSB".into(),
+            hamlib_dir: String::new(),
         }
     }
 }
@@ -47,20 +207,94 @@ pub(crate) fn rig_key(profile_id: &str, name: &str) -> String {
     format!("profile.{profile_id}.rig.{name}")
 }
 
+fn field(field: &str, message: &str) -> FieldError {
+    FieldError { field: field.into(), message: message.into() }
+}
+
+/// M3b's stored form (`arrangement`, `host`, `port`), converted (M3b.1 §8).
+fn from_legacy(v: &serde_json::Value) -> Option<RigConfig> {
+    let arrangement = v.get("arrangement")?.as_str()?;
+    let mut c = RigConfig {
+        restore_on_startup: v.get("restoreOnStartup").and_then(|b| b.as_bool()).unwrap_or(false),
+        ..RigConfig::default()
+    };
+    if arrangement == "rigctld" {
+        c.freq_control = FreqControl::ExternalRigctld;
+        if let Some(h) = v.get("host").and_then(|h| h.as_str()) {
+            c.external.host = h.to_string();
+        }
+        if let Some(p) = v.get("port").and_then(|p| p.as_u64()).and_then(|p| u16::try_from(p).ok()) {
+            c.external.port = p;
+        }
+        c.ptt.method = PttMethod::Cat;
+    }
+    Some(c)
+}
+
 impl RigConfig {
-    /// The profile's stored settings, or the defaults.
+    /// The profile's stored settings (M3b's form converted), or the defaults.
     pub fn load(store: &Store, profile_id: &str) -> RigConfig {
-        store
+        let Some(v) = store
             .setting(&rig_key(profile_id, "config"))
             .ok()
             .flatten()
-            .and_then(|j| serde_json::from_str(&j).ok())
-            .unwrap_or_default()
+            .and_then(|j| serde_json::from_str::<serde_json::Value>(&j).ok())
+        else {
+            return RigConfig::default();
+        };
+        from_legacy(&v).or_else(|| serde_json::from_value(v).ok()).unwrap_or_default()
     }
 
     pub fn save(&self, store: &mut Store, profile_id: &str) -> Result<(), String> {
         let json = serde_json::to_string(self).map_err(|e| e.to_string())?;
         store.set_setting(&rig_key(profile_id, "config"), &json).map_err(|e| e.to_string())
+    }
+
+    /// A connect-only rigctld at `host:port`; Mercury's PTT left as it is.
+    pub fn external(host: &str, port: u16) -> RigConfig {
+        RigConfig {
+            freq_control: FreqControl::ExternalRigctld,
+            external: Endpoint { host: host.into(), port },
+            ..RigConfig::default()
+        }
+    }
+
+    /// Every field that is out of range, by the UI's field name.
+    pub fn validate(&self) -> Vec<FieldError> {
+        let mut errs = Vec::new();
+        if !READ_EVERY_CHOICES.contains(&self.read_every_s) {
+            errs.push(field("readEverySeconds", "Read the frequency every 1, 2, 5 or 10 seconds"));
+        }
+        if self.offset_hz.unsigned_abs() > OFFSET_LIMIT_HZ {
+            errs.push(field("offsetHz", "The offset must be within ±10 000 000 Hz"));
+        }
+        if !(7..=8).contains(&self.cat.data_bits) {
+            errs.push(field("dataBits", "Data bits must be 7 or 8"));
+        }
+        if !(1..=2).contains(&self.cat.stop_bits) {
+            errs.push(field("stopBits", "Stop bits must be 1 or 2"));
+        }
+        if self.cat.wait_ms > 1000 {
+            errs.push(field("waitMs", "The wait time must be 0 to 1000 ms"));
+        }
+        if !(1..=4).contains(&self.ptt.cm108_gpio) {
+            errs.push(field("cm108Gpio", "The CM108 GPIO pin must be 1 to 4"));
+        }
+        if self.freq_control == FreqControl::ManagedRigctld {
+            if self.cat.model.is_none() {
+                errs.push(field("model", "Choose your radio's model"));
+            }
+            match self.cat.link {
+                CatLink::Serial if self.cat.serial_port.trim().is_empty() => {
+                    errs.push(field("serialPort", "Enter the radio's COM port, e.g. COM3"))
+                }
+                CatLink::Tcp if self.cat.tcp_addr.trim().is_empty() => {
+                    errs.push(field("tcpAddr", "Enter the radio's address, e.g. 192.168.1.20:50001"))
+                }
+                _ => {}
+            }
+        }
+        errs
     }
 }
 

@@ -279,7 +279,7 @@ async fn sim_rig_settings_show_the_sim_rig_and_test_it() {
     let dir = tempfile::tempdir().unwrap();
     let h = sim_with_rig(dir.path()).await;
     let CommandOk::RigSettings { config, .. } = h.call(AppCommand::RigSettings).await.unwrap() else { panic!() };
-    assert_eq!(config.arrangement, mc_core::app::RigArrangement::Rigctld);
+    assert_eq!(config.freq_control, mc_core::app::FreqControl::ExternalRigctld);
     let CommandOk::RigTest { steps } = h.call(AppCommand::TestRig { config }).await.unwrap() else { panic!() };
     assert_eq!(steps.len(), 6);
     assert!(steps.iter().all(|s| s.ok == Some(true)), "{steps:?}");

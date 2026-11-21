@@ -38,7 +38,10 @@ pub use rig::{
     RigPttView, RigRefusal, RigTestStep, RigView, TuneView, TxLevelResult, AGREE_TO_CLEAR, PTT_CHECK_OFF_AFTER,
     PTT_WINDOW, RIG_SOURCE,
 };
-pub use rigconfig::{BandLevels, RigArrangement, RigConfig, TUNE_RANGE, TX_GAIN_RANGE};
+pub use rigconfig::{
+    BandLevels, CatLink, CatSettings, Endpoint, FreqControl, LineState, Parity, PttLine, PttMethod, PttSettings,
+    RigConfig, READ_EVERY_CHOICES, TUNE_RANGE, TX_GAIN_RANGE,
+};
 pub use schedule::{Schedule, ScheduleNext, ScheduleSlot, MAX_SLOTS};
 pub use service::{spawn_app, AppHandle, AppOptions};
 pub use telemetry::{

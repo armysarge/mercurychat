@@ -16,11 +16,24 @@ import ScheduleEditor from "./ScheduleEditor.vue";
 import Switch from "./Switch.vue";
 
 const { t } = useI18n();
-const ARRANGEMENTS = ["none", "rigctld", "mercury"] as const;
+// Interim (M3b.1 Task 1): the M3b labels on the new Frequency control; Task 8 replaces this form.
+const ARRANGEMENTS = ["rigctld", "mercury"] as const;
+const FREQ_CONTROL = { rigctld: "externalRigctld", mercury: "none" } as const;
 const STEPS = ["connect", "caps", "frequency", "mode", "ptt", "owner"] as const;
 const REGIONS = [1, 2, 3];
 
-const config = ref<RigConfig>({ arrangement: "mercury", host: "127.0.0.1", port: 4532, restoreOnStartup: false });
+const config = ref<RigConfig>({
+  freqControl: "none",
+  external: { host: "127.0.0.1", port: 4532 },
+  flrig: { host: "127.0.0.1", port: 12345 },
+  cat: { model: null, link: "serial", serialPort: "", tcpAddr: "", baud: 9600, parity: "none", dataBits: 8, stopBits: 1, waitMs: 0, dtr: "unset", rts: "unset" },
+  ptt: { method: "leaveMercury", line: "rts", invert: false, pttPort: "", cm108Gpio: 3 },
+  restoreOnStartup: false,
+  offsetHz: 0,
+  readEveryS: 2,
+  dataMode: "PKTUSB",
+  hamlibDir: "",
+});
 const region = ref(1);
 const schedule = ref<Schedule>({ enabled: false, slots: [] });
 const error = ref("");
@@ -44,7 +57,7 @@ async function load() {
 }
 watch(() => activeProfile.value?.id, load, { immediate: true });
 
-const current = () => ({ ...config.value, port: Number(config.value.port) });
+const current = (): RigConfig => ({ ...config.value, external: { ...config.value.external, port: Number(config.value.external.port) } });
 async function save() {
   error.value = "";
   saved.value = false;
@@ -90,14 +103,14 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
       <fieldset class="arrangement">
         <legend>{{ t("rigSettings.arrangement") }}</legend>
         <label v-for="a in ARRANGEMENTS" :key="a" class="radio">
-          <input v-model="config.arrangement" type="radio" name="rig-arrangement" :value="a" />
+          <input v-model="config.freqControl" type="radio" name="rig-arrangement" :value="FREQ_CONTROL[a]" />
           <span>{{ t(`rigSettings.arrangementOpt.${a}`) }}</span>
         </label>
         <p class="muted small">{{ t("rigSettings.hint") }}</p>
       </fieldset>
-      <div v-if="config.arrangement === 'rigctld'" class="address">
-        <label>{{ t("rigSettings.host") }} <input v-model="config.host" class="rig-host" spellcheck="false" /></label>
-        <label>{{ t("rigSettings.port") }} <input v-model.number="config.port" class="rig-port" type="number" min="1" max="65535" /></label>
+      <div v-if="config.freqControl === 'externalRigctld'" class="address">
+        <label>{{ t("rigSettings.host") }} <input v-model="config.external.host" class="rig-host" spellcheck="false" /></label>
+        <label>{{ t("rigSettings.port") }} <input v-model.number="config.external.port" class="rig-port" type="number" min="1" max="65535" /></label>
       </div>
       <label class="switch-row">
         <span>{{ t("rigSettings.restore") }}</span>
@@ -105,7 +118,7 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
       </label>
       <div class="buttons">
         <button class="rig-save" @click="save">{{ t("rigSettings.save") }}</button>
-        <button v-if="config.arrangement === 'rigctld'" class="rig-test" :disabled="testing" :title="t('rigSettings.testHint')" @click="test">{{ testing ? t("rigSettings.testing") : t("rigSettings.test") }}</button>
+        <button v-if="config.freqControl === 'externalRigctld'" class="rig-test" :disabled="testing" :title="t('rigSettings.testHint')" @click="test">{{ testing ? t("rigSettings.testing") : t("rigSettings.test") }}</button>
         <span v-if="saved" class="ok small" role="status">{{ t("rigSettings.saved") }}</span>
       </div>
       <ol v-if="steps" class="rig-test-steps small">
