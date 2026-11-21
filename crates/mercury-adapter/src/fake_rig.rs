@@ -51,6 +51,11 @@ pub struct FakeRigctld {
 
 impl FakeRigctld {
     pub async fn start() -> FakeRigctld {
+        Self::start_at("127.0.0.1:0".parse().unwrap()).await
+    }
+
+    /// As [`FakeRigctld::start`], listening at `addr` (the fake-rigctld program).
+    pub async fn start_at(addr: SocketAddr) -> FakeRigctld {
         let state = Arc::new(Mutex::new(State {
             freq: 14_074_000,
             mode: "PKTUSB".into(),
@@ -66,7 +71,7 @@ impl FakeRigctld {
             log: vec![],
             tasks: vec![],
         }));
-        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind fake rigctld");
+        let listener = TcpListener::bind(addr).await.expect("bind fake rigctld");
         let addr = listener.local_addr().unwrap();
         let fake = FakeRigctld { addr, state };
         fake.serve(listener);

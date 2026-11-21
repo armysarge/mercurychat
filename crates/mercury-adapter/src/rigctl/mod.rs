@@ -11,6 +11,9 @@ pub use client::{
     METER_EVERY, READ_EVERY, REQUEST_TIMEOUT,
 };
 
-pub use daemon::{parse_model_list, rigctld_args, HamlibModel, RigctldSpec};
+pub use daemon::{
+    answers_as_rigctld, find_rigctld, find_rigctld_in, parse_model_list, rigctld_args, DaemonState, HamlibModel,
+    RigctldDaemon, RigctldSpec, LOG_LINES, READY_WITHIN, RESTART_AFTER,
+};
 pub use probe::{probe, ProbeStep, RPRT_PTT_UNREADABLE};
 pub use proto::{block_complete, parse_reply, Level, RigCaps, RigProtoError, RigReply, RigRequest};

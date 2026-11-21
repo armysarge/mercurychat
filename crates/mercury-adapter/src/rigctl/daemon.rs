@@ -1,7 +1,16 @@
 //! MercuryChat's own rigctld (M3b.1 design §5.3): its command line, Hamlib's
 //! list of rig models, and (Task 3) the process that runs it.
 
+use std::collections::VecDeque;
+use std::ffi::OsStr;
 use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::{Arc, Mutex};
+use std::time::Duration;
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+use tokio::sync::mpsc;
+use tokio::task::AbortHandle;
 
 /// What MercuryChat starts rigctld with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -85,4 +94,199 @@ pub fn parse_model_list(stdout: &str) -> Vec<HamlibModel> {
             })
         })
         .collect()
+}
+
+// ---- The process (Task 3) ---------------------------------------------------
+
+/// How long rigctld has to answer after it starts.
+pub const READY_WITHIN: Duration = Duration::from_secs(5);
+/// The wait before the one restart.
+pub const RESTART_AFTER: Duration = Duration::from_secs(2);
+/// Lines of rigctld's stderr kept for the CAT log.
+pub const LOG_LINES: usize = 200;
+const PROBE_TIMEOUT: Duration = Duration::from_secs(1);
+
+const EXE: &str = if cfg!(windows) { "rigctld.exe" } else { "rigctld" };
+
+/// rigctld on the PATH, else in `dir`.
+pub fn find_rigctld(dir: Option<&Path>) -> Option<PathBuf> {
+    find_rigctld_in(&std::env::var_os("PATH").unwrap_or_default(), dir)
+}
+
+/// As [`find_rigctld`], with the PATH given.
+pub fn find_rigctld_in(path_var: &OsStr, dir: Option<&Path>) -> Option<PathBuf> {
+    std::env::split_paths(path_var).chain(dir.map(Path::to_path_buf)).map(|d| d.join(EXE)).find(|p| p.is_file())
+}
+
+/// What MercuryChat's rigctld is doing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DaemonState {
+    /// A rigctld was already answering at the address: used, never stopped.
+    Reused,
+    Starting,
+    Running,
+    /// It exited or did not answer; one more start follows.
+    Restarting,
+    Failed {
+        reason: String,
+    },
+}
+
+/// Does something answer at `addr` as rigctld does: a frequency for `+f`
+/// (extended form: `get_freq:`, `Frequency: N`, `RPRT 0`)?
+pub async fn answers_as_rigctld(addr: SocketAddr) -> bool {
+    let attempt = async {
+        let mut s = tokio::net::TcpStream::connect(addr).await.ok()?;
+        s.write_all(b"+f\n").await.ok()?;
+        let mut text = String::new();
+        let mut buf = [0u8; 256];
+        while !text.contains("RPRT") && text.len() < 1024 {
+            let n = s.read(&mut buf).await.ok()?;
+            if n == 0 {
+                return None;
+            }
+            text.push_str(&String::from_utf8_lossy(&buf[..n]));
+        }
+        let freq = text.lines().find_map(|l| l.trim().strip_prefix("Frequency:"))?;
+        freq.trim().parse::<u64>().ok().filter(|_| text.contains("RPRT 0"))
+    };
+    matches!(tokio::time::timeout(PROBE_TIMEOUT, attempt).await, Ok(Some(_)))
+}
+
+/// MercuryChat's own rigctld. Dropping the handle stops it, if this handle
+/// started it; a reused rigctld is never touched.
+pub struct RigctldDaemon {
+    log: Arc<Mutex<VecDeque<String>>>,
+    task: AbortHandle,
+}
+
+impl Drop for RigctldDaemon {
+    fn drop(&mut self) {
+        // The task owns the child, spawned with kill_on_drop: aborting it stops rigctld.
+        self.task.abort();
+    }
+}
+
+impl RigctldDaemon {
+    pub fn start(exe: PathBuf, spec: RigctldSpec, events: mpsc::Sender<DaemonState>) -> RigctldDaemon {
+        Self::start_with_env(exe, spec, events, Vec::new())
+    }
+
+    /// As [`RigctldDaemon::start`], with extra environment for the program (tests).
+    pub fn start_with_env(
+        exe: PathBuf,
+        spec: RigctldSpec,
+        events: mpsc::Sender<DaemonState>,
+        env: Vec<(String, String)>,
+    ) -> RigctldDaemon {
+        let log = Arc::new(Mutex::new(VecDeque::with_capacity(LOG_LINES)));
+        let task = tokio::spawn(supervise(exe, spec, events, env, log.clone())).abort_handle();
+        RigctldDaemon { log, task }
+    }
+
+    /// The last [`LOG_LINES`] lines rigctld wrote to stderr, oldest first.
+    pub fn log(&self) -> Vec<String> {
+        self.log.lock().unwrap().iter().cloned().collect()
+    }
+}
+
+fn push_line(log: &Mutex<VecDeque<String>>, line: String) {
+    let mut l = log.lock().unwrap();
+    if l.len() == LOG_LINES {
+        l.pop_front();
+    }
+    l.push_back(line);
+}
+
+async fn supervise(
+    exe: PathBuf,
+    spec: RigctldSpec,
+    events: mpsc::Sender<DaemonState>,
+    env: Vec<(String, String)>,
+    log: Arc<Mutex<VecDeque<String>>>,
+) {
+    if answers_as_rigctld(spec.listen).await {
+        let _ = events.send(DaemonState::Reused).await;
+        return;
+    }
+    let args = rigctld_args(&spec);
+    let _ = events.send(DaemonState::Starting).await;
+    for attempt in 0..2 {
+        if attempt == 1 {
+            let _ = events.send(DaemonState::Restarting).await;
+            tokio::time::sleep(RESTART_AFTER).await;
+        }
+        let why = run_once(&exe, &args, &env, spec.listen, &events, &log).await;
+        if attempt == 1 {
+            let _ = events.send(DaemonState::Failed { reason: why }).await;
+        }
+    }
+}
+
+/// Start rigctld once and wait for it to stop; why it stopped.
+async fn run_once(
+    exe: &Path,
+    args: &[String],
+    env: &[(String, String)],
+    listen: SocketAddr,
+    events: &mpsc::Sender<DaemonState>,
+    log: &Arc<Mutex<VecDeque<String>>>,
+) -> String {
+    let mut cmd = tokio::process::Command::new(exe);
+    cmd.args(args)
+        .envs(env.iter().map(|(k, v)| (k, v)))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    #[cfg(windows)]
+    {
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = match cmd.spawn() {
+        Ok(c) => c,
+        Err(e) => return format!("{}: {e}", exe.display()),
+    };
+    let last = Arc::new(Mutex::new(None::<String>));
+    let reader = child.stderr.take().map(|err| {
+        let (log, last) = (log.clone(), last.clone());
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(err).lines();
+            while let Ok(Some(l)) = lines.next_line().await {
+                *last.lock().unwrap() = Some(l.clone());
+                push_line(&log, l);
+            }
+        })
+    });
+    let reason = |code: Option<i32>, last: &Mutex<Option<String>>| {
+        last.lock().unwrap().clone().unwrap_or_else(|| match code {
+            Some(c) => format!("rigctld exited (code {c})"),
+            None => "rigctld exited".to_string(),
+        })
+    };
+    // Ready: answering within READY_WITHIN, unless it exits first.
+    let deadline = tokio::time::Instant::now() + READY_WITHIN;
+    loop {
+        if let Ok(Some(status)) = child.try_wait() {
+            if let Some(r) = reader {
+                let _ = r.await; // the whole of stderr, for the reason
+            }
+            return reason(status.code(), &last);
+        }
+        if answers_as_rigctld(listen).await {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            let _ = child.kill().await;
+            return format!("rigctld did not answer on {listen} within {} s", READY_WITHIN.as_secs());
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    let _ = events.send(DaemonState::Running).await;
+    let status = child.wait().await;
+    if let Some(r) = reader {
+        let _ = r.await;
+    }
+    reason(status.ok().and_then(|s| s.code()), &last)
 }

@@ -11,7 +11,7 @@ default = ["fake"]
 fake = ["dep:rand"]
 
 [dependencies]
-tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros", "process"] }
 thiserror = "2"
 rand = { version = "0.9", optional = true }
 serde_json = "1"
@@ -20,5 +20,13 @@ serde_json = "1"
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }
 futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
 
+# A stand-in for Hamlib's rigctld (FakeRigctld behind rigctld's flags), for the
+# supervisor's tests (M3b.1 Task 3).
+[[bin]]
+name = "fake-rigctld"
+path = "src/bin/fake_rigctld.rs"
+required-features = ["fake"]
+
 [dev-dependencies]
+tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
