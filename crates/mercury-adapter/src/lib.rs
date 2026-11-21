@@ -8,9 +8,12 @@ pub mod control;
 #[cfg(feature = "fake")]
 pub mod fake;
 #[cfg(feature = "fake")]
+pub mod fake_flrig;
+#[cfg(feature = "fake")]
 pub mod fake_rig;
 #[cfg(feature = "fake")]
 pub mod fake_ws;
+pub mod flrig;
 pub mod kiss;
 pub mod monitor;
 pub mod rigctl;

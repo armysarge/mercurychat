@@ -24,7 +24,7 @@ pub enum PollRate {
 }
 
 impl PollRate {
-    fn ptt_every(self) -> Duration {
+    pub(crate) fn ptt_every(self) -> Duration {
         match self {
             PollRate::Active => Duration::from_millis(250),
             PollRate::Idle => Duration::from_secs(1),
