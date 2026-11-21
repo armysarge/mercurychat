@@ -13,7 +13,8 @@ use crate::app::rig::{
     TxLevelResult, RIG_SOURCE,
 };
 use crate::app::rigconfig::{
-    rig_key, rigctld_spec_for, BandLevels, FreqControl, HamlibModelView, RigConfig, TUNE_RANGE,
+    mercury_ptt_for, ptt_echo_matches, rig_key, rigctld_spec_for, BandLevels, FreqControl, HamlibModelView, RigConfig,
+    TUNE_RANGE,
 };
 use crate::app::telemetry::Tuning;
 use crate::band::{band_for, BANDS};
@@ -54,6 +55,10 @@ pub const TUNE_LIMIT: Duration = Duration::from_secs(30);
 
 /// Highest frequency a rig change may ask for (6 m tops out at 54 MHz).
 pub const MAX_FREQ_HZ: u64 = 60_000_000;
+
+/// Mercury's PTT setting is not sent again sooner than this (its
+/// radio_list answers a successful change; a failed one is not answered).
+pub const PTT_RESEND_GAP: Duration = Duration::from_secs(10);
 
 /// Where MercuryChat's own rigctld listens (M3b.1 §5.3).
 pub const MANAGED_LISTEN: &str = "127.0.0.1:4532";
@@ -167,6 +172,11 @@ pub(super) struct RigSide {
     managed_listen: SocketAddr,
     /// MercuryChat's own rig link errors, for the CAT log.
     cat_log: VecDeque<String>,
+    /// Mercury's PTT setting, last sent (and when): not sent again until
+    /// Mercury's radio_list has had time to answer it.
+    ptt_sent: Option<(TelemetryCmd, Instant)>,
+    /// Mercury's PTT should change, but the station was busy.
+    ptt_deferred: bool,
 }
 
 impl RigSide {
@@ -234,6 +244,8 @@ impl Default for RigSide {
             rigctld_program: None,
             managed_listen: MANAGED_LISTEN.parse().unwrap(),
             cat_log: VecDeque::new(),
+            ptt_sent: None,
+            ptt_deferred: false,
         }
     }
 }
@@ -546,6 +558,8 @@ impl App {
         config.external.host = config.external.host.trim().to_string();
         config.save(&mut self.store, &id).map_err(|message| AppError::Storage { message })?;
         self.start_rig(Some(&id));
+        self.rig.ptt_sent = None;
+        self.push_mercury_ptt();
         Ok(CommandOk::Done)
     }
 
@@ -832,6 +846,9 @@ impl App {
         }
         self.sync_tx_level(now);
         self.sync_tune(now);
+        if self.rig.ptt_deferred && self.activity() == Activity::Idle && !self.rig.tune.active {
+            self.push_mercury_ptt();
+        }
         self.emit_tune();
         self.sync_schedule(now);
         let activity = self.activity();
@@ -872,8 +889,12 @@ impl App {
     /// as the simulator's PTT does (Hamlib model 2 at its address).
     pub(super) fn rig_sim(&mut self, addr: std::net::SocketAddr) {
         self.rig.sim = Some(addr);
-        self.rig.radio_list =
-            Some(RadioList { ptt_method: "hamlib".into(), selected_model: Some(2), device_path: addr.to_string() });
+        self.rig.radio_list = Some(RadioList {
+            ptt_method: "hamlib".into(),
+            selected_model: Some(2),
+            device_path: addr.to_string(),
+            ..RadioList::default()
+        });
         let id = self.rig.profile_id.clone();
         self.start_rig(id.as_deref());
     }
@@ -1024,6 +1045,40 @@ impl App {
         }
     }
 
+    /// Set Mercury's PTT to match the rig settings (M3b.1 §5.2), once its
+    /// radio_list is known and differs; while the station is busy, later.
+    pub(super) fn push_mercury_ptt(&mut self) {
+        let Some(want) = mercury_ptt_for(&self.rig.cfg, self.rig.managed_listen) else {
+            self.rig.ptt_deferred = false;
+            return;
+        };
+        let Some(rl) = &self.rig.radio_list else { return };
+        if ptt_echo_matches(rl, &want) {
+            self.rig.ptt_deferred = false;
+            return;
+        }
+        let now = Instant::now();
+        if self
+            .rig
+            .ptt_sent
+            .as_ref()
+            .is_some_and(|(c, at)| *c == want && now.saturating_duration_since(*at) < PTT_RESEND_GAP)
+        {
+            return;
+        }
+        if self.activity() != Activity::Idle || self.rig.tune.active {
+            self.rig.ptt_deferred = true;
+            return;
+        }
+        let Some(tx) = &self.rig.tele_tx else { return };
+        if tx.try_send(want.clone()).is_ok() {
+            self.rig.ptt_deferred = false;
+            self.rig.ptt_sent = Some((want, now));
+            let line = self.discovery.note("rig", "set Mercury's PTT to match the rig settings");
+            self.emit(line);
+        }
+    }
+
     /// The modem's telemetry client takes commands here.
     pub(super) fn rig_telemetry(&mut self, tx: mpsc::Sender<TelemetryCmd>) {
         self.rig.tele_tx = Some(tx);
@@ -1035,6 +1090,7 @@ impl App {
             TelemetryMsg::RadioList(rl) => {
                 let before = self.rig.policy.owner_check().clone();
                 self.rig.radio_list = Some(rl.clone());
+                self.push_mercury_ptt();
                 let after = owner_check(&self.rig.cfg, Some(rl), self.rig.managed_listen);
                 if after != before {
                     let was_refused = matches!(before, OwnerCheck::Refused { .. });

@@ -136,6 +136,7 @@ async fn audio_refused_while_busy() {
     let ws = fake_mercury_ws().await;
     let (h, _rx) = start(dir.path(), existing(&net, Some(ws.url.clone()))).await;
     audio_until(&h, "the link", |v| v.available).await;
+    net.set_unanswered_calls(true); // the call stays pending, as Mercury retries
     h.call(AppCommand::Call { peer: "ZS1XYZ".into() }).await.unwrap();
     match h.call(set_audio("in2", "out2")).await {
         Err(AppError::Refused { reason, .. }) => assert_eq!(reason, "rig.refused.calling"),

@@ -200,3 +200,63 @@ fn rigctld_spec_maps_settings() {
     c.cat.model = None;
     assert!(rigctld_spec_for(&c, listen).is_none(), "no model: nothing to start");
 }
+
+#[test]
+fn mercury_ptt_mapping_table() {
+    use mc_core::app::mercury_ptt_for;
+    use mercury_adapter::telemetry::TelemetryCmd;
+    let managed: std::net::SocketAddr = "127.0.0.1:4532".parse().unwrap();
+    let cmd = |m: &str, d: &str, model: i32, line: &str, invert: &str, gpio: u8| TelemetryCmd::SetPttConfig {
+        method: m.into(),
+        device: d.into(),
+        model,
+        speed: 0,
+        line: line.into(),
+        invert: invert.into(),
+        gpio,
+    };
+    let with = |fc: FreqControl, m: PttMethod| {
+        let mut c = RigConfig { freq_control: fc, ..RigConfig::default() };
+        c.ptt.method = m;
+        c.cat.serial_port = "COM10".into();
+        c.external = Endpoint { host: "10.0.0.5".into(), port: 4600 };
+        c
+    };
+    for fc in [FreqControl::None, FreqControl::ManagedRigctld, FreqControl::ExternalRigctld, FreqControl::Flrig] {
+        assert_eq!(mercury_ptt_for(&with(fc, PttMethod::LeaveMercury), managed), None, "{fc:?}");
+        assert_eq!(mercury_ptt_for(&with(fc, PttMethod::NoPtt), managed), Some(cmd("none", "", 0, "rts", "none", 3)));
+    }
+    for m in [PttMethod::Cat, PttMethod::SerialLine, PttMethod::Cm108] {
+        assert_eq!(
+            mercury_ptt_for(&with(FreqControl::ManagedRigctld, m), managed),
+            Some(cmd("hamlib", "127.0.0.1:4532", 2, "rts", "none", 3)),
+            "{m:?}"
+        );
+        assert_eq!(
+            mercury_ptt_for(&with(FreqControl::ExternalRigctld, m), managed),
+            Some(cmd("hamlib", "10.0.0.5:4600", 2, "rts", "none", 3)),
+            "{m:?}"
+        );
+    }
+    let mut serial = with(FreqControl::None, PttMethod::SerialLine);
+    serial.ptt.line = PttLine::Dtr;
+    serial.ptt.invert = true;
+    assert_eq!(mercury_ptt_for(&serial, managed), Some(cmd("serial", "COM10", 0, "dtr", "dtr", 3)));
+    serial.ptt.ptt_port = "COM11".into();
+    serial.freq_control = FreqControl::Flrig;
+    assert_eq!(mercury_ptt_for(&serial, managed), Some(cmd("serial", "COM11", 0, "dtr", "dtr", 3)));
+    let mut cm = with(FreqControl::Flrig, PttMethod::Cm108);
+    cm.ptt.cm108_gpio = 2;
+    assert_eq!(mercury_ptt_for(&cm, managed), Some(cmd("cm108", "", 0, "rts", "none", 2)));
+}
+
+#[test]
+fn cat_ptt_needs_a_rigctld() {
+    for fc in [FreqControl::None, FreqControl::Flrig] {
+        let mut c = RigConfig { freq_control: fc, ..RigConfig::default() };
+        c.ptt.method = PttMethod::Cat;
+        let errs = c.validate();
+        assert_eq!(errs.len(), 1, "{fc:?}: {errs:?}");
+        assert_eq!(errs[0].field, "pttMethod");
+    }
+}

@@ -946,6 +946,7 @@ async fn rig_settings_read_back_config_region_and_schedule() {
 mod m3b1 {
     use super::*;
     use mc_core::app::{CatLink, FreqControl, PttMethod};
+    use mc_core::profile::ModemTarget;
     use mercury_adapter::fake_flrig::FakeFlrig;
     use std::net::SocketAddr;
     use std::path::PathBuf;
@@ -1105,5 +1106,106 @@ mod m3b1 {
             CommandOk::HamlibModels { models, found } => assert!(!found && models.is_empty()),
             other => panic!("{other:?}"),
         }
+    }
+
+    // ---- Task 7: Mercury's PTT set to match --------------------------------
+
+    use mercury_adapter::fake_ws::FakeWs;
+
+    const STATUS: &str = r#"{"type":"status","audio_ok":true}"#;
+    const MERCURY_PTT_NONE: &str = r#"{"type":"radio_list","selected":"0","device_path":"","serial_speed":0,"ptt_method":"none","ptt_line":"rts","ptt_invert":"none","cm108_gpio":3,"list":[]}"#;
+
+    fn with_ws(net: &FakeNet, ws: &FakeWs) -> StationProfile {
+        let mut p = existing(net);
+        if let ModemTarget::Existing { telemetry_url, .. } = &mut p.modem {
+            *telemetry_url = Some(ws.url.clone());
+        }
+        p
+    }
+
+    async fn fake_mercury_ws() -> FakeWs {
+        let ws = FakeWs::start().await;
+        ws.set_status(Some(STATUS));
+        ws.set_radio_list(Some(MERCURY_PTT_NONE));
+        ws
+    }
+
+    fn ptt_sent(ws: &FakeWs) -> Vec<serde_json::Value> {
+        ws.received()
+            .iter()
+            .filter_map(|t| serde_json::from_str::<serde_json::Value>(t).ok())
+            .filter(|v| v["command"] == "set_ptt_config")
+            .collect()
+    }
+
+    async fn ws_until(ws: &FakeWs, secs: u64, what: &str, pred: impl Fn(&FakeWs) -> bool) {
+        let end = Instant::now() + Duration::from_secs(secs);
+        while !pred(ws) {
+            assert!(Instant::now() < end, "timed out waiting for {what}: {:?}", ws.received());
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    fn external_cat(rig: &FakeRigctld) -> RigConfig {
+        let mut c = rigctld(rig);
+        c.ptt.method = PttMethod::Cat;
+        c
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ptt_pushed_on_connect_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        let ws = fake_mercury_ws().await;
+        let (h, _rx) = attached(dir.path(), with_ws(&net, &ws), external_cat(&rig)).await;
+        ws_until(&ws, 10, "one set_ptt_config", |ws| !ptt_sent(ws).is_empty()).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        let sent = ptt_sent(&ws);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        assert_eq!(sent[0]["value"], "hamlib");
+        assert_eq!(sent[0]["value2"], format!("127.0.0.1:{}", rig.addr.port()));
+        assert_eq!(sent[0]["value3"], "2");
+        // Mercury now keys through MercuryChat's rigctld: the owner check agrees.
+        wait_for(&h, 5, "the owner check", |s| s.rig.owner_check == mc_core::app::OwnerCheck::Ok).await;
+        // A reconnect brings Mercury's (now matching) radio_list: nothing more is sent.
+        ws.kill();
+        ws_until(&ws, 30, "a reconnect", |ws| ws.accepted() >= 2).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert_eq!(ptt_sent(&ws).len(), 1, "{:?}", ptt_sent(&ws));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn leave_mercury_sends_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        let ws = fake_mercury_ws().await;
+        let (_h, _rx) = attached(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+        ws_until(&ws, 10, "the UI link", |ws| ws.accepted() >= 1).await;
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+        assert!(ptt_sent(&ws).is_empty(), "{:?}", ptt_sent(&ws));
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn ptt_push_deferred_while_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        let ws = fake_mercury_ws().await;
+        let (h, _rx) = attached(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+        ws_until(&ws, 10, "the UI link", |ws| ws.accepted() >= 1).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        net.set_unanswered_calls(true); // the call stays pending, as Mercury retries
+        h.call(AppCommand::Call { peer: "ZS1XYZ".into() }).await.unwrap();
+        wait_for(&h, 5, "calling", |s| s.modem == ModemState::Calling).await;
+        h.call(AppCommand::SetRigConfig { config: external_cat(&rig) }).await.unwrap();
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let still = snapshot(&h).await.modem == ModemState::Calling;
+        let sent = ptt_sent(&ws);
+        assert!(still, "the call ended before the check could run");
+        assert!(sent.is_empty(), "not while calling: {sent:?}");
+        h.call(AppCommand::CancelCall).await.unwrap();
+        ws_until(&ws, 10, "the deferred set_ptt_config", |ws| ptt_sent(ws).len() == 1).await;
     }
 }

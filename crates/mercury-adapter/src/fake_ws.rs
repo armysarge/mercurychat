@@ -94,6 +94,24 @@ fn answer_command(s: &mut Shared, text: &str) -> Vec<String> {
             }
             None => vec![],
         },
+        Some("set_ptt_config") => {
+            // Mercury applies it and republishes its radio_list.
+            let num = |k: &str| cmd[k].as_str().and_then(|v| v.parse::<i64>().ok()).unwrap_or(0);
+            let rl = serde_json::json!({
+                "type": "radio_list",
+                "selected": cmd["value3"],
+                "device_path": cmd["value2"],
+                "serial_speed": num("value4"),
+                "ptt_method": cmd["value"],
+                "ptt_line": cmd["value5"],
+                "ptt_invert": cmd["value6"],
+                "cm108_gpio": num("value7"),
+                "list": [],
+            })
+            .to_string();
+            s.radio_list = Some(rl.clone());
+            vec![rl]
+        }
         Some("set_audio_config") => {
             s.audio_now = Some(s.audio_result.clone());
             audio_lists_after(s, &cmd)

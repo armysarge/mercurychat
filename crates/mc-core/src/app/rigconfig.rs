@@ -7,6 +7,7 @@
 use crate::profile::FieldError;
 use mc_storage::Store;
 use mercury_adapter::rigctl::RigctldSpec;
+use mercury_adapter::telemetry::{RadioList, TelemetryCmd};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
@@ -270,6 +271,62 @@ pub fn rigctld_spec_for(cfg: &RigConfig, listen: SocketAddr) -> Option<RigctldSp
     Some(RigctldSpec { model, rig_path, baud, conf, ptt_type, ptt_path, listen })
 }
 
+/// Mercury's PTT setting for these settings (M3b.1 §5.2): Mercury keys the
+/// radio in every case. `None`: leave Mercury as it is.
+pub fn mercury_ptt_for(cfg: &RigConfig, managed: SocketAddr) -> Option<TelemetryCmd> {
+    let p = &cfg.ptt;
+    let line = |l: PttLine| match l {
+        PttLine::Rts => "rts",
+        PttLine::Dtr => "dtr",
+    };
+    let cmd = |method: &str, device: String, model: i32, line: &str, invert: &str| TelemetryCmd::SetPttConfig {
+        method: method.into(),
+        device,
+        model,
+        speed: 0,
+        line: line.into(),
+        invert: invert.into(),
+        gpio: p.cm108_gpio,
+    };
+    // Through a rigctld whenever one runs: it holds the CAT port, and on
+    // Windows only one program may open a COM port.
+    let rigctld = match cfg.freq_control {
+        FreqControl::ManagedRigctld => Some(managed.to_string()),
+        FreqControl::ExternalRigctld => Some(format!("{}:{}", cfg.external.host, cfg.external.port)),
+        FreqControl::None | FreqControl::Flrig => None,
+    };
+    match (p.method, rigctld) {
+        (PttMethod::LeaveMercury, _) => None,
+        (PttMethod::NoPtt, _) => Some(cmd("none", String::new(), 0, "rts", "none")),
+        (PttMethod::Cat | PttMethod::SerialLine | PttMethod::Cm108, Some(addr)) => {
+            Some(cmd("hamlib", addr, 2, "rts", "none"))
+        }
+        (PttMethod::SerialLine, None) => {
+            let port = if p.ptt_port.trim().is_empty() { &cfg.cat.serial_port } else { &p.ptt_port };
+            let invert = if p.invert { line(p.line) } else { "none" };
+            Some(cmd("serial", port.trim().to_string(), 0, line(p.line), invert))
+        }
+        (PttMethod::Cm108, None) => Some(cmd("cm108", String::new(), 0, "rts", "none")),
+        // Refused by validate(): CAT PTT needs a rigctld.
+        (PttMethod::Cat, None) => None,
+    }
+}
+
+/// Mercury's `radio_list` already says what `want` would set.
+pub fn ptt_echo_matches(rl: &RadioList, want: &TelemetryCmd) -> bool {
+    let TelemetryCmd::SetPttConfig { method, device, model, line, invert, gpio, .. } = want else { return false };
+    let norm = |a: &str| a.trim().replace("localhost", "127.0.0.1");
+    if rl.ptt_method != *method {
+        return false;
+    }
+    match method.as_str() {
+        "hamlib" => rl.selected_model == Some(*model) && norm(&rl.device_path) == norm(device),
+        "serial" => rl.device_path.trim() == device.trim() && rl.ptt_line == *line && rl.ptt_invert == *invert,
+        "cm108" => rl.cm108_gpio == Some(i32::from(*gpio)),
+        _ => true,
+    }
+}
+
 /// M3b's stored form (`arrangement`, `host`, `port`), converted (M3b.1 §8).
 fn from_legacy(v: &serde_json::Value) -> Option<RigConfig> {
     let arrangement = v.get("arrangement")?.as_str()?;
@@ -338,6 +395,9 @@ impl RigConfig {
         }
         if !(1..=4).contains(&self.ptt.cm108_gpio) {
             errs.push(field("cm108Gpio", "The CM108 GPIO pin must be 1 to 4"));
+        }
+        if self.ptt.method == PttMethod::Cat && matches!(self.freq_control, FreqControl::None | FreqControl::Flrig) {
+            errs.push(field("pttMethod", "CAT PTT needs a rigctld: choose MercuryChat's or an external rigctld"));
         }
         if self.freq_control == FreqControl::ManagedRigctld {
             if self.cat.model.is_none() {

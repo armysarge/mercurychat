@@ -168,6 +168,9 @@ pub fn parse_event(frame: &str) -> Result<Option<Event>, TelemetryError> {
                 ptt_method,
                 selected_model: obj.get("selected").and_then(|v| v.as_str()).and_then(|s| s.trim().parse().ok()),
                 device_path: obj.get("device_path").and_then(text).unwrap_or_default(),
+                ptt_line: obj.get("ptt_line").and_then(text).unwrap_or_default(),
+                ptt_invert: obj.get("ptt_invert").and_then(text).unwrap_or_default(),
+                cm108_gpio: obj.get("cm108_gpio").and_then(|v| v.as_i64()).and_then(|n| i32::try_from(n).ok()),
             })))
         }
         _ => Ok(None),
@@ -311,7 +314,7 @@ pub enum TelemetryMsg {
 }
 
 /// What MercuryChat reads of `radio_list`: how Mercury keys the radio.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct RadioList {
     /// `none`, `hamlib`, `serial`, `cm108`, `hermes_shm`.
     pub ptt_method: String,
@@ -319,6 +322,11 @@ pub struct RadioList {
     pub selected_model: Option<i32>,
     /// The serial device, or `host:port` for a network rig (model 2).
     pub device_path: String,
+    /// Serial PTT: the line (`rts`, `dtr`) and which is inverted (`none`, `rts`, `dtr`).
+    pub ptt_line: String,
+    pub ptt_invert: String,
+    /// CM108 PTT: the GPIO pin.
+    pub cm108_gpio: Option<i32>,
 }
 
 /// One sound device as Mercury lists it.
@@ -357,6 +365,10 @@ pub enum TelemetryCmd {
     /// Mercury's sound devices (`set_audio_config`): it restarts its audio
     /// and saves the choice only if the restart is healthy.
     SetAudioConfig { capture: String, playback: String, channel: String, system: String },
+    /// How Mercury keys the radio (`set_ptt_config`): method (`hamlib`,
+    /// `serial`, `cm108`, `none`), device (`host:port` or a serial port),
+    /// Hamlib model, serial speed, serial line, inverted line, CM108 GPIO.
+    SetPttConfig { method: String, device: String, model: i32, speed: i32, line: String, invert: String, gpio: u8 },
 }
 
 impl TelemetryCmd {
@@ -371,6 +383,17 @@ impl TelemetryCmd {
                 "value2": playback,
                 "value3": channel,
                 "value4": system,
+            })
+            .to_string(),
+            TelemetryCmd::SetPttConfig { method, device, model, speed, line, invert, gpio } => serde_json::json!({
+                "command": "set_ptt_config",
+                "value": method,
+                "value2": device,
+                "value3": model.to_string(),
+                "value4": speed.to_string(),
+                "value5": line,
+                "value6": invert,
+                "value7": gpio.to_string(),
             })
             .to_string(),
         }

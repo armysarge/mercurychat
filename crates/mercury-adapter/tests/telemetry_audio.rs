@@ -70,3 +70,33 @@ fn audio_json_escapes_quotes_and_backslashes() {
     assert_eq!(v["value3"], "left");
     assert_eq!(v["value4"], "wasapi");
 }
+
+// ---- Task 7: Mercury's PTT setting -------------------------------------------
+
+#[test]
+fn ptt_json_hamlib() {
+    let cmd = TelemetryCmd::SetPttConfig {
+        method: "hamlib".into(),
+        device: "127.0.0.1:4532".into(),
+        model: 2,
+        speed: 0,
+        line: "rts".into(),
+        invert: "none".into(),
+        gpio: 3,
+    };
+    let got: serde_json::Value = serde_json::from_str(&cmd.json()).unwrap();
+    let want: serde_json::Value = serde_json::from_str(
+        r#"{"command":"set_ptt_config","value":"hamlib","value2":"127.0.0.1:4532","value3":"2","value4":"0","value5":"rts","value6":"none","value7":"3"}"#,
+    )
+    .unwrap();
+    assert_eq!(got, want);
+}
+
+#[test]
+fn radio_list_reads_serial_and_cm108_fields() {
+    let json = r#"{"type":"radio_list","selected":"0","device_path":"COM11","serial_speed":0,"ptt_method":"serial",
+        "ptt_line":"dtr","ptt_invert":"rts","cm108_gpio":4,"list":[]}"#;
+    let Some(Event::RadioList(rl)) = parse_event(json).unwrap() else { panic!() };
+    assert_eq!((rl.ptt_method.as_str(), rl.device_path.as_str()), ("serial", "COM11"));
+    assert_eq!((rl.ptt_line.as_str(), rl.ptt_invert.as_str(), rl.cm108_gpio), ("dtr", "rts", Some(4)));
+}

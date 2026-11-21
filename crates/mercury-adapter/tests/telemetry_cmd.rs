@@ -33,7 +33,10 @@ fn radio_list_parses() {
         Some(Event::RadioList(RadioList {
             ptt_method: "serial".into(),
             selected_model: None,
-            device_path: "/dev/ttyUSB0".into()
+            device_path: "/dev/ttyUSB0".into(),
+            ptt_line: "rts".into(),
+            ptt_invert: "none".into(),
+            cm108_gpio: Some(1),
         }))
     );
     let net = r#"{"type":"radio_list","selected":"2","device_path":"127.0.0.1:4532","ptt_method":"hamlib","list":[]}"#;
@@ -42,7 +45,8 @@ fn radio_list_parses() {
         Some(Event::RadioList(RadioList {
             ptt_method: "hamlib".into(),
             selected_model: Some(2),
-            device_path: "127.0.0.1:4532".into()
+            device_path: "127.0.0.1:4532".into(),
+            ..RadioList::default()
         }))
     );
     assert!(matches!(parse_event(r#"{"type":"status","snr":1.5}"#).unwrap(), Some(Event::Status(_))));
