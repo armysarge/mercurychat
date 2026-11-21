@@ -39,6 +39,7 @@ struct Station {
     tune_wrong: bool,
     /// The tuning carrier's level while it is on.
     tune: Option<String>,
+    busy_detect: bool,
 }
 
 impl Station {
@@ -407,6 +408,15 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             send_line(&s, i, "OK");
             let (c, bw) = ((*c).to_string(), (*bw).to_string());
             tokio::spawn(transmit_cq(net.clone(), i, c, bw));
+        }
+        // TNC.md BUSYDETECT: ON/OFF acknowledged, the bare query answers the state.
+        ["BUSYDETECT", v @ ("ON" | "OFF")] => {
+            s.st[i].busy_detect = *v == "ON";
+            send_line(&s, i, "OK");
+        }
+        ["BUSYDETECT"] => {
+            let on = if s.st[i].busy_detect { "ON" } else { "OFF" };
+            send_line(&s, i, &format!("BUSYDETECT {on}"));
         }
         ["PUBLIC", _] | ["CHAT", _] | ["COMPRESSION", _] => send_line(&s, i, "OK"),
         [bw] if bw.starts_with("BW") => send_line(&s, i, "OK"),

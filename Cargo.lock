@@ -2380,10 +2380,12 @@ dependencies = [
 name = "mercury-contract"
 version = "0.0.1"
 dependencies = [
+ "futures-util",
  "mch-protocol",
  "mercury-adapter",
  "serde_json",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]

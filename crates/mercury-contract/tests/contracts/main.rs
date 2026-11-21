@@ -5,5 +5,11 @@
 //! `lab/docker/contract/check-mercury.sh`).
 
 mod attach;
+mod broadcast;
+mod busy;
 mod data;
+mod ptt;
 mod session;
+mod settings;
+mod telemetry;
+mod tune;

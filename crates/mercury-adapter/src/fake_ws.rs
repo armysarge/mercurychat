@@ -35,7 +35,9 @@ struct Shared {
     /// Frames sent to each client after the radio_list (device lists).
     hello: Vec<String>,
     /// What `set_audio_config` brings: audio_ok and audio_error in the status.
-    audio_result: (bool, String),
+    /// Set by a test; otherwise derived from the device lists, as Mercury
+    /// fails to open a device it does not list.
+    audio_result: Option<(bool, String)>,
     /// Set once a `set_audio_config` has been carried out.
     audio_now: Option<(bool, String)>,
 }
@@ -51,7 +53,7 @@ impl Default for Shared {
             tx_gain_db: None,
             answer_commands: true,
             hello: vec![],
-            audio_result: (true, String::new()),
+            audio_result: None,
             audio_now: None,
         }
     }
@@ -113,8 +115,9 @@ fn answer_command(s: &mut Shared, text: &str) -> Vec<String> {
             vec![rl]
         }
         Some("set_audio_config") => {
-            s.audio_now = Some(s.audio_result.clone());
-            audio_lists_after(s, &cmd)
+            let result = s.audio_result.clone().unwrap_or_else(|| audio_opens(s, &cmd));
+            s.audio_now = Some(result.clone());
+            audio_lists_after(s, &cmd, result.0)
         }
         _ => vec![],
     }
@@ -122,7 +125,27 @@ fn answer_command(s: &mut Shared, text: &str) -> Vec<String> {
 
 /// The hello frames after a `set_audio_config`: Mercury republishes its
 /// device lists with the new selection (only when the restart was healthy).
-fn audio_lists_after(s: &Shared, cmd: &serde_json::Value) -> Vec<String> {
+/// Whether the requested devices open: an id the matching hello list does not
+/// carry fails, as on Mercury; an empty id leaves the current device.
+fn audio_opens(s: &Shared, cmd: &serde_json::Value) -> (bool, String) {
+    for (kind, key, plane) in [("capture_dev_list", "value", "capture"), ("playback_dev_list", "value2", "playback")] {
+        let Some(id) = cmd[key].as_str().filter(|id| !id.is_empty()) else { continue };
+        let listed = s
+            .hello
+            .iter()
+            .filter_map(|h| serde_json::from_str::<serde_json::Value>(h).ok())
+            .find(|v| v["type"] == kind);
+        if let Some(list) = listed {
+            let known = list["list"].as_array().is_some_and(|a| a.iter().any(|d| d["id"] == id));
+            if !known {
+                return (false, format!("{plane}: cannot open device {id}"));
+            }
+        }
+    }
+    (true, String::new())
+}
+
+fn audio_lists_after(s: &Shared, cmd: &serde_json::Value, ok: bool) -> Vec<String> {
     s.hello
         .iter()
         .filter_map(|h| {
@@ -132,7 +155,7 @@ fn audio_lists_after(s: &Shared, cmd: &serde_json::Value) -> Vec<String> {
                 "playback_dev_list" => "value2",
                 _ => return Some(h.clone()),
             };
-            if s.audio_result.0 {
+            if ok {
                 v["selected"] = cmd[key].clone();
             }
             Some(v.to_string())
@@ -204,7 +227,7 @@ impl FakeWs {
 
     /// What a `set_audio_config` brings (default: healthy).
     pub fn set_audio_result(&self, ok: bool, error: &str) {
-        self.shared.lock().unwrap().audio_result = (ok, error.to_string());
+        self.shared.lock().unwrap().audio_result = Some((ok, error.to_string()));
     }
 
     /// Whether `set_tx_gain` is carried out and answered (default yes).

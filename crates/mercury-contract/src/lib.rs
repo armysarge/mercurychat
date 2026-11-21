@@ -18,7 +18,10 @@
 //! honest. On the fake every contract must pass: the fake is never bent to a
 //! listed divergence (A4).
 
+use futures_util::{SinkExt, StreamExt};
 use mercury_adapter::fake::FakeNet;
+use mercury_adapter::fake_ws::FakeWs;
+use mercury_adapter::telemetry::{self, Event};
 use mercury_adapter::{
     Ack, AdapterEvent, Attachment, Callsign, Command, ControlEvent, Endpoint, MercuryClient, Timeouts,
 };
@@ -60,6 +63,27 @@ pub struct Target {
     pub b: Station,
     pub t: Timeouts,
     fake: Option<Arc<FakeNet>>,
+    fake_ws: Vec<FakeWs>,
+}
+
+/// What a fake station's WebSocket publishes, in the shapes Mercury's
+/// WEBSOCKET_API.md documents (sections 5.1-5.5), with the null-sink devices
+/// of the Docker lab.
+pub const FAKE_HELLO: [&str; 4] = [
+    r#"{"type":"capture_dev_list","selected":"null.monitor","list":[{"name":"Null Output monitor","id":"null.monitor"}]}"#,
+    r#"{"type":"playback_dev_list","selected":"null","list":[{"name":"Null Output","id":"null"}]}"#,
+    r#"{"type":"audio_system","selected":"pulse","list":["pulse","null"]}"#,
+    r#"{"type":"input_channel","selected":"left","list":["left","right","stereo"]}"#,
+];
+pub const FAKE_RADIO_LIST: &str = r#"{"type":"radio_list","selected":"","device_path":"","serial_speed":0,"ptt_method":"none","ptt_line":"rts","ptt_invert":"none","cm108_gpio":3,"list":[{"name":"None","id":"-1"}]}"#;
+pub const FAKE_STATUS: &str = r#"{"type":"status","bitrate":0,"snr":7.5,"user_callsign":"NOCALL","dest_callsign":"","sync":false,"direction":"rx","client_tcp_connected":true,"bytes_transmitted":0,"bytes_received":0,"tx_gain_db":0.0,"tx_peak_dbfs":0.0,"waterfall":true,"audio_ok":true,"audio_error":"","arq_tx_mode":"","arq_rx_mode":"","radio_frequency_hz":14070000,"radio_frequency_age_ms":120,"peer_snr":-99.9,"peer_snr_valid":false,"peer_hears_mode":"","freq_offset_hz":12.5,"freq_offset_age_ms":800,"listen_mode":1,"listen_mode_name":"DATAC3","busy":""}"#;
+
+async fn fake_ws() -> FakeWs {
+    let ws = FakeWs::start().await;
+    ws.set_hello(FAKE_HELLO.iter().map(|s| s.to_string()).collect());
+    ws.set_radio_list(Some(FAKE_RADIO_LIST));
+    ws.set_status(Some(FAKE_STATUS));
+    ws
 }
 
 fn env(name: &str) -> String {
@@ -87,18 +111,20 @@ impl Target {
         match Target::kind() {
             TargetKind::Fake => {
                 let net = FakeNet::start().await;
-                let st = |base: u16, bcast: u16, call: &str| Station {
+                let (wa, wb) = (fake_ws().await, fake_ws().await);
+                let st = |base: u16, bcast: u16, ws: &FakeWs, call: &str| Station {
                     ep: Endpoint::base("127.0.0.1", base),
                     bcast: loopback(bcast),
-                    ws: None,
+                    ws: Some(ws.url.clone()),
                     call: Callsign::parse(call).unwrap(),
                 };
                 Target {
                     kind: TargetKind::Fake,
-                    a: st(net.a_base, net.a_bcast, "N0CTA"),
-                    b: st(net.b_base, net.b_bcast, "N0CTB"),
+                    a: st(net.a_base, net.a_bcast, &wa, "N0CTA"),
+                    b: st(net.b_base, net.b_bcast, &wb, "N0CTB"),
                     t: Timeouts::default(),
                     fake: Some(net),
+                    fake_ws: vec![wa, wb],
                 }
             }
             TargetKind::Real => {
@@ -109,7 +135,7 @@ impl Target {
                     call: Callsign::parse(&env(&format!("MC_{side}_CALL"))).expect("a valid callsign"),
                 };
                 let t = Timeouts { command_ack: Duration::from_secs(10), ..Timeouts::default() };
-                Target { kind: TargetKind::Real, a: st("A"), b: st("B"), t, fake: None }
+                Target { kind: TargetKind::Real, a: st("A"), b: st("B"), t, fake: None, fake_ws: vec![] }
             }
         }
     }
@@ -117,6 +143,11 @@ impl Target {
     /// The fake's knobs (fake-only contracts, and setting up the fake to behave as Mercury does).
     pub fn fake(&self) -> Option<&FakeNet> {
         self.fake.as_deref()
+    }
+
+    /// A fake station's WebSocket (0 = A, 1 = B).
+    pub fn fake_ws(&self, i: usize) -> Option<&FakeWs> {
+        self.fake_ws.get(i)
     }
 
     /// How long an ARQ connect, a delivery or a disconnect may take.
@@ -162,6 +193,66 @@ pub async fn next_event(
             Ok(Some(other)) => panic!("waiting for {what}: {other:?}"),
             Ok(None) => panic!("waiting for {what}: the control connection closed"),
             Err(_) => panic!("no {what} within {} s; seen {seen:?}", within.as_secs()),
+        }
+    }
+}
+
+/// Every control event that arrives within `within`.
+pub async fn collect_for(a: &mut Attachment, within: Duration) -> Vec<ControlEvent> {
+    let end = tokio::time::Instant::now() + within;
+    let mut seen = Vec::new();
+    while let Ok(Some(ev)) = tokio::time::timeout_at(end, a.events.recv()).await {
+        if let AdapterEvent::Control(e) = ev {
+            seen.push(e);
+        }
+    }
+    seen
+}
+
+/// A client of a station's UI WebSocket.
+pub struct Ws {
+    stream: tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+}
+
+impl Ws {
+    pub async fn open(st: &Station) -> Ws {
+        let url = st.ws.as_deref().expect("this target has no WebSocket for the station");
+        let (stream, _) =
+            tokio_tungstenite::connect_async(url).await.unwrap_or_else(|e| panic!("WebSocket {url}: {e}"));
+        Ws { stream }
+    }
+
+    pub async fn send(&mut self, json: serde_json::Value) {
+        self.stream
+            .send(tokio_tungstenite::tungstenite::Message::text(json.to_string()))
+            .await
+            .expect("WebSocket send");
+    }
+
+    /// The next text frame `pred` accepts (raw frame and its parse), within `within`.
+    pub async fn next(
+        &mut self,
+        within: Duration,
+        what: &str,
+        pred: impl Fn(&str, Option<&Event>) -> bool,
+    ) -> (String, Option<Event>) {
+        let end = tokio::time::Instant::now() + within;
+        let mut seen = 0;
+        loop {
+            match tokio::time::timeout_at(end, self.stream.next()).await {
+                Ok(Some(Ok(tokio_tungstenite::tungstenite::Message::Text(t)))) => {
+                    seen += 1;
+                    let raw = t.as_str().to_string();
+                    let ev = telemetry::parse_event(&raw).ok().flatten();
+                    if pred(&raw, ev.as_ref()) {
+                        return (raw, ev);
+                    }
+                }
+                Ok(Some(Ok(_))) => {}
+                Ok(Some(Err(e))) => panic!("waiting for {what}: WebSocket error {e}"),
+                Ok(None) => panic!("waiting for {what}: the WebSocket closed"),
+                Err(_) => panic!("no {what} within {} s ({seen} text frames seen)", within.as_secs()),
+            }
         }
     }
 }
