@@ -65,6 +65,11 @@ pub struct AppOptions {
     pub sim_rig: bool,
     /// How long Tune runs before MercuryChat stops it; `None` is 30 s.
     pub tune_limit: Option<std::time::Duration>,
+    /// The rigctld program MercuryChat starts (tests): `None` looks on the
+    /// PATH and in the profile's Hamlib folder; `Some(None)`: none is found.
+    pub rigctld_program: Option<Option<PathBuf>>,
+    /// Where MercuryChat's own rigctld listens; `None` is 127.0.0.1:4532.
+    pub managed_listen: Option<std::net::SocketAddr>,
     /// The schedule's UTC clock and how often it is looked at (tests);
     /// `None` is the real clock and 15 s.
     pub schedule_clock: Option<fn() -> chrono::NaiveTime>,
@@ -83,6 +88,8 @@ impl Default for AppOptions {
             sim_peer_broadcasts: false,
             sim_rig: false,
             tune_limit: None,
+            rigctld_program: None,
+            managed_listen: None,
             schedule_clock: None,
             schedule_tick: None,
         }
@@ -191,7 +198,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         qso: None,
         mercury_listening: false,
         receive_only_shown: (false, false),
-        rig: RigSide::with_tune_limit(opts.tune_limit),
+        rig: RigSide::with_options(opts.tune_limit, opts.rigctld_program, opts.managed_listen),
         freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
@@ -221,6 +228,10 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                             let cmd = match *cmd {
                                 AppCommand::TestRig { config } => {
                                     app.test_rig(config, reply);
+                                    continue;
+                                }
+                                AppCommand::HamlibModels { hamlib_dir } => {
+                                    app.hamlib_models(hamlib_dir, reply);
                                     continue;
                                 }
                                 other => other,
@@ -713,6 +724,10 @@ impl App {
             AppCommand::RigSettings => self.rig_settings(),
             // Answered from the loop (see `test_rig`), never here.
             AppCommand::TestRig { .. } => Err(AppError::Internal { message: "the rig test runs on its own".into() }),
+            AppCommand::HamlibModels { .. } => {
+                Err(AppError::Internal { message: "the model list runs on its own".into() })
+            }
+            AppCommand::CatLog => self.cat_log(),
             AppCommand::Frequencies => self.frequencies(),
             AppCommand::SaveFrequency { entry } => self.save_frequency(entry),
             AppCommand::DeleteFrequency { id } => self.delete_frequency(&id),

@@ -940,3 +940,170 @@ async fn rig_settings_read_back_config_region_and_schedule() {
     assert_eq!(region, 3);
     assert_eq!(got, schedule);
 }
+
+// ---- M3b.1 Task 5: MercuryChat's own rigctld, FLRig, the offset ------------
+
+mod m3b1 {
+    use super::*;
+    use mc_core::app::{CatLink, FreqControl, PttMethod};
+    use mercury_adapter::fake_flrig::FakeFlrig;
+    use std::net::SocketAddr;
+    use std::path::PathBuf;
+
+    /// mercury-adapter's fake-rigctld program, built on demand (it is another
+    /// package's binary, so Cargo does not hand its path to these tests).
+    fn fake_rigctld() -> PathBuf {
+        let exe = if cfg!(windows) { "fake-rigctld.exe" } else { "fake-rigctld" };
+        // The profile folder (target/debug), where Cargo puts built programs:
+        // the ancestor with Cargo's build lock (newer layout) or deps/ (older).
+        let me = std::env::current_exe().unwrap();
+        let dir = me
+            .ancestors()
+            .find(|a| a.join(".cargo-build-lock").is_file() || a.join("deps").is_dir())
+            .expect("target profile folder")
+            .to_path_buf();
+        let p = dir.join(exe);
+        if !p.is_file() {
+            let ok = std::process::Command::new(env!("CARGO"))
+                .args(["build", "-p", "mercury-adapter", "--bin", "fake-rigctld"])
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok, "build fake-rigctld");
+        }
+        assert!(p.is_file(), "{}", p.display());
+        p
+    }
+
+    fn free_addr() -> SocketAddr {
+        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap()
+    }
+
+    async fn attached_with(
+        o: AppOptions,
+        profile: StationProfile,
+        rig: RigConfig,
+    ) -> (AppHandle, Receiver<EventEnvelope>) {
+        let h = spawn_app(Store::open_in_memory().unwrap(), o);
+        let id = match h.call(AppCommand::SaveProfile { profile }).await.unwrap() {
+            CommandOk::Profile(p) => p.id,
+            other => panic!("{other:?}"),
+        };
+        let mut rx = h.subscribe();
+        h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+        until_state(&mut rx, ModemState::Listening, 15).await;
+        assert_eq!(h.call(AppCommand::SetRigConfig { config: rig }).await.unwrap(), CommandOk::Done);
+        (h, rx)
+    }
+
+    fn managed() -> RigConfig {
+        let mut c = RigConfig { freq_control: FreqControl::ManagedRigctld, ..RigConfig::default() };
+        c.cat.model = Some(1);
+        c.cat.link = CatLink::Serial;
+        c.cat.serial_port = "COM10".into();
+        c.ptt.method = PttMethod::Cat;
+        c
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_starts_daemon_and_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let o = AppOptions {
+            rigctld_program: Some(Some(fake_rigctld())),
+            managed_listen: Some(free_addr()),
+            ..opts(dir.path())
+        };
+        let (h, _rx) = attached_with(o, existing(&net), managed()).await;
+        let s = wait_for(&h, 15, "the managed rig", |s| {
+            s.rig.link == RigLinkView::Up && s.rig.frequency.is_some() && s.rig.daemon.as_deref() == Some("running")
+        })
+        .await;
+        assert_eq!(s.rig.frequency.unwrap().value, 14_074_000);
+        match h.call(AppCommand::CatLog).await.unwrap() {
+            CommandOk::CatLog { lines } => {
+                assert!(lines.iter().any(|l| l.contains("fake-rigctld: ready")), "{lines:?}")
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let o = AppOptions { rigctld_program: Some(None), managed_listen: Some(free_addr()), ..opts(dir.path()) };
+        let (h, _rx) = attached_with(o, existing(&net), managed()).await;
+        let s = wait_for(&h, 5, "not found", |s| s.rig.daemon.as_deref() == Some("notFound")).await;
+        assert_ne!(s.rig.link, RigLinkView::Up);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn flrig_backend_reads() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let fl = FakeFlrig::start().await;
+        fl.set_freq(10_142_000);
+        let mut c = RigConfig { freq_control: FreqControl::Flrig, ..RigConfig::default() };
+        c.flrig.port = fl.addr.port();
+        let (h, _rx) = attached_with(opts(dir.path()), existing(&net), c).await;
+        wait_for(&h, 5, "FLRig's frequency", |s| s.rig.frequency.as_ref().is_some_and(|f| f.value == 10_142_000)).await;
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn offset_applied_both_ways() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        rig.set_freq(14_106_500);
+        let mut c = rigctld(&rig);
+        c.offset_hz = -1500;
+        let (h, _rx) = ready(dir.path(), existing(&net), c).await;
+        wait_for(&h, 3, "the shown frequency", |s| s.rig.frequency.as_ref().is_some_and(|f| f.value == 14_105_000))
+            .await;
+        set(&h, RigChange::Frequency { hz: 7_105_000 }).await.unwrap();
+        wait_for(&h, 3, "the rig's dial", |_| rig.freq() == 7_106_500).await;
+        assert!(rig.log().iter().any(|l| l.ends_with("F 7106500")), "{:?}", rig.log());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn offset_below_zero_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        let mut c = rigctld(&rig);
+        c.offset_hz = 2000;
+        let (h, _rx) = ready(dir.path(), existing(&net), c).await;
+        let before = rig.log().len();
+        match set(&h, RigChange::Frequency { hz: 1000 }).await {
+            Err(AppError::Validation { errors }) => assert_eq!(errors[0].field, "frequency"),
+            other => panic!("{other:?}"),
+        }
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(!rig.log()[before..].iter().any(|l| l.contains("F ")), "{:?}", rig.log());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_every_passed() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        let mut c = rigctld(&rig);
+        c.read_every_s = 5;
+        let (_h, _rx) = ready(dir.path(), existing(&net), c).await;
+        tokio::time::sleep(Duration::from_millis(11_500)).await;
+        let reads = rig.log().iter().filter(|l| l.trim_start_matches('+') == "f").count();
+        assert!((2..=3).contains(&reads), "{reads} frequency reads in 11.5 s at every 5 s: {:?}", rig.log());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hamlib_models_lists_or_says_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let o = AppOptions { rigctld_program: Some(None), ..opts(dir.path()) };
+        let h = spawn_app(Store::open_in_memory().unwrap(), o);
+        match h.call(AppCommand::HamlibModels { hamlib_dir: String::new() }).await.unwrap() {
+            CommandOk::HamlibModels { models, found } => assert!(!found && models.is_empty()),
+            other => panic!("{other:?}"),
+        }
+    }
+}

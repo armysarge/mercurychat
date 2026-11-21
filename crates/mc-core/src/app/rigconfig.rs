@@ -6,8 +6,10 @@
 
 use crate::profile::FieldError;
 use mc_storage::Store;
+use mercury_adapter::rigctl::RigctldSpec;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::net::SocketAddr;
 use ts_rs::TS;
 
 /// Who MercuryChat reads and sets the rig through (M3b.1 §5.1).
@@ -162,6 +164,17 @@ impl Default for PttSettings {
     }
 }
 
+/// One rig model Hamlib supports, for the model picker.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HamlibModelView {
+    pub id: u32,
+    pub mfg: String,
+    pub model: String,
+    pub status: String,
+}
+
 pub const READ_EVERY_CHOICES: [u8; 4] = [1, 2, 5, 10];
 pub const OFFSET_LIMIT_HZ: u32 = 10_000_000;
 
@@ -209,6 +222,52 @@ pub(crate) fn rig_key(profile_id: &str, name: &str) -> String {
 
 fn field(field: &str, message: &str) -> FieldError {
     FieldError { field: field.into(), message: message.into() }
+}
+
+/// MercuryChat's own rigctld for these settings, listening at `listen`
+/// (M3b.1 §5.2, §5.3). `None` without a rig model.
+pub fn rigctld_spec_for(cfg: &RigConfig, listen: SocketAddr) -> Option<RigctldSpec> {
+    let cat = &cfg.cat;
+    let model = cat.model?;
+    let (rig_path, baud, conf) = match cat.link {
+        CatLink::Tcp => (cat.tcp_addr.trim().to_string(), None, vec![]),
+        CatLink::Serial => {
+            let parity = match cat.parity {
+                Parity::None => "None",
+                Parity::Even => "Even",
+                Parity::Odd => "Odd",
+            };
+            let mut conf = vec![
+                ("serial_parity".to_string(), parity.to_string()),
+                ("data_bits".to_string(), cat.data_bits.to_string()),
+                ("stop_bits".to_string(), cat.stop_bits.to_string()),
+                ("post_write_delay".to_string(), cat.wait_ms.to_string()),
+            ];
+            for (name, state) in [("dtr_state", cat.dtr), ("rts_state", cat.rts)] {
+                match state {
+                    LineState::Unset => {}
+                    LineState::On => conf.push((name.to_string(), "ON".to_string())),
+                    LineState::Off => conf.push((name.to_string(), "OFF".to_string())),
+                }
+            }
+            (cat.serial_port.trim().to_string(), Some(cat.baud), conf)
+        }
+    };
+    let (ptt_type, ptt_path) = match cfg.ptt.method {
+        PttMethod::SerialLine => {
+            let line = match cfg.ptt.line {
+                PttLine::Rts => "RTS",
+                PttLine::Dtr => "DTR",
+            };
+            let port = cfg.ptt.ptt_port.trim();
+            (line, (!port.is_empty()).then(|| port.to_string()))
+        }
+        PttMethod::Cm108 => ("CM108", None),
+        PttMethod::NoPtt => ("NONE", None),
+        // Mercury keys however it is set up; through this rigctld, that is CAT.
+        PttMethod::Cat | PttMethod::LeaveMercury => ("RIG", None),
+    };
+    Some(RigctldSpec { model, rig_path, baud, conf, ptt_type, ptt_path, listen })
 }
 
 /// M3b's stored form (`arrangement`, `host`, `port`), converted (M3b.1 §8).

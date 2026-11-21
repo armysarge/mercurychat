@@ -250,6 +250,9 @@ pub struct RigView {
     pub caps: Option<RigCapsView>,
     pub owner_check: OwnerCheck,
     pub tx_level_applied: Option<TxLevelResult>,
+    /// MercuryChat's own rigctld: `starting`, `running`, `reused`,
+    /// `restarting`, `failed: <reason>` or `notFound`; `None` without one.
+    pub daemon: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -322,9 +325,15 @@ pub struct RigPolicy {
     recovery: Recovery,
     owner_check: OwnerCheck,
     tx_level: Option<TxLevelResult>,
+    daemon: Option<String>,
 }
 
 impl RigPolicy {
+    /// MercuryChat's own rigctld, as the view shows it.
+    pub fn set_daemon(&mut self, daemon: Option<String>) {
+        self.daemon = daemon;
+    }
+
     /// `configured`: a rigctld is set up for this profile.
     pub fn new(configured: bool) -> RigPolicy {
         RigPolicy {
@@ -348,6 +357,7 @@ impl RigPolicy {
             recovery: Recovery::default(),
             owner_check: OwnerCheck::Unknown,
             tx_level: None,
+            daemon: None,
         }
     }
 
@@ -483,7 +493,7 @@ impl RigPolicy {
             }
             RigMsg::Ptt(PttReading::On) => self.ptt_reading(true, now),
             RigMsg::Ptt(PttReading::Off) => self.ptt_reading(false, now),
-            RigMsg::Done { .. } => vec![],
+            RigMsg::Done { .. } | RigMsg::Daemon(_) => vec![],
         }
     }
 
@@ -654,6 +664,7 @@ impl RigPolicy {
             caps,
             owner_check: self.owner_check.clone(),
             tx_level_applied: self.tx_level.clone(),
+            daemon: self.daemon.clone(),
         }
     }
 }

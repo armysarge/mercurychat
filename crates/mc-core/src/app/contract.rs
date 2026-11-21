@@ -10,7 +10,7 @@ use super::frequencies::FrequencyEntry;
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
 use super::rig::{RigBanner, RigChange, RigTestStep, RigView, TuneView};
-use super::rigconfig::{BandLevels, RigConfig};
+use super::rigconfig::{BandLevels, HamlibModelView, RigConfig};
 use super::schedule::{Schedule, ScheduleNext};
 use super::telemetry::TelemetryView;
 use crate::macros::MacroDef;
@@ -242,6 +242,14 @@ pub enum AppCommand {
     TestRig {
         config: RigConfig,
     },
+    /// Hamlib's rig models, from `rigctld -l` (rigctld on the PATH, else in
+    /// `hamlib_dir`); `found: false` when there is no rigctld (M3b.1 §5.3).
+    HamlibModels {
+        hamlib_dir: String,
+    },
+    /// The CAT log: MercuryChat's rigctld's stderr, then MercuryChat's own rig
+    /// link errors, each the last 200 lines.
+    CatLog,
     /// The frequency list (shared by every profile), by sort then frequency.
     Frequencies,
     /// Add (empty id) or change an entry; answered with the whole list.
@@ -286,6 +294,8 @@ pub enum CommandOk {
     Restored { added: u32 },
     RigTest { steps: Vec<RigTestStep> },
     RigSettings { config: RigConfig, region: u8, schedule: Schedule },
+    HamlibModels { models: Vec<HamlibModelView>, found: bool },
+    CatLog { lines: Vec<String> },
     BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },
     Qsos { qsos: Vec<Qso> },
     Qso(Qso),

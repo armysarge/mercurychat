@@ -12,14 +12,23 @@ use crate::app::rig::{
     rig_gate, Activity, OwnerCheck, RigAction, RigBanner, RigChange, RigPolicy, RigRefusal, RigTestStep, TuneView,
     TxLevelResult, RIG_SOURCE,
 };
-use crate::app::rigconfig::{rig_key, BandLevels, FreqControl, RigConfig, TUNE_RANGE};
+use crate::app::rigconfig::{
+    rig_key, rigctld_spec_for, BandLevels, FreqControl, HamlibModelView, RigConfig, TUNE_RANGE,
+};
 use crate::app::telemetry::Tuning;
 use crate::band::{band_for, BANDS};
 use mc_storage::now_utc;
-use mercury_adapter::rigctl::{probe, Level, PollRate, RigClient, RigClientCmd, RigLink, RigMsg, RigReply, RigRequest};
+use mercury_adapter::flrig::FlrigClient;
+use mercury_adapter::rigctl::{
+    find_rigctld, parse_model_list, probe, DaemonState, Level, PollRate, RigClient, RigClientCmd, RigLink, RigMsg,
+    RigReply, RigRequest, RigctldDaemon, LOG_LINES,
+};
 use mercury_adapter::telemetry::{RadioList, TelemetryCmd, TelemetryMsg};
 use mercury_adapter::{Callsign, TuneArg};
 use serde::{Deserialize, Serialize};
+use std::collections::VecDeque;
+use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::time::Duration;
 use tokio::sync::mpsc;
 use tokio::task::AbortHandle;
@@ -45,6 +54,25 @@ pub const TUNE_LIMIT: Duration = Duration::from_secs(30);
 
 /// Highest frequency a rig change may ask for (6 m tops out at 54 MHz).
 pub const MAX_FREQ_HZ: u64 = 60_000_000;
+
+/// Where MercuryChat's own rigctld listens (M3b.1 §5.3).
+pub const MANAGED_LISTEN: &str = "127.0.0.1:4532";
+/// How long `rigctld -l` may take.
+pub const MODEL_LIST_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The frequency shown for the rig's dial reading: dial + offset (M3b.1 §5.1).
+pub fn to_display(dial: u64, offset_hz: i32) -> u64 {
+    (dial as i64).saturating_add(i64::from(offset_hz)).max(0) as u64
+}
+
+/// The dial frequency for a frequency shown: shown - offset; refused below 1 Hz.
+pub fn to_dial(shown: u64, offset_hz: i32) -> Result<u64, AppError> {
+    let dial = (shown as i64).saturating_sub(i64::from(offset_hz));
+    if dial < 1 {
+        return Err(invalid("frequency", "With the frequency offset, that is below 0 Hz on the radio's dial"));
+    }
+    Ok(dial as u64)
+}
 
 struct AbortOnDrop(AbortHandle);
 impl Drop for AbortOnDrop {
@@ -131,11 +159,46 @@ pub(super) struct RigSide {
     tune_limit: Duration,
     /// The simulator's fake rigctld, while the simulator runs.
     sim: Option<std::net::SocketAddr>,
+    /// MercuryChat's own rigctld, and the task forwarding what it does.
+    daemon: Option<RigctldDaemon>,
+    daemon_bridge: Option<AbortOnDrop>,
+    /// The rigctld program (tests); `None`: look for it.
+    rigctld_program: Option<Option<PathBuf>>,
+    managed_listen: SocketAddr,
+    /// MercuryChat's own rig link errors, for the CAT log.
+    cat_log: VecDeque<String>,
 }
 
 impl RigSide {
-    pub(super) fn with_tune_limit(limit: Option<Duration>) -> RigSide {
-        RigSide { tune_limit: limit.unwrap_or(TUNE_LIMIT), ..RigSide::default() }
+    pub(super) fn with_options(
+        limit: Option<Duration>,
+        rigctld_program: Option<Option<PathBuf>>,
+        managed_listen: Option<SocketAddr>,
+    ) -> RigSide {
+        RigSide {
+            tune_limit: limit.unwrap_or(TUNE_LIMIT),
+            rigctld_program,
+            managed_listen: managed_listen.unwrap_or_else(|| MANAGED_LISTEN.parse().unwrap()),
+            ..RigSide::default()
+        }
+    }
+
+    fn cat_note(&mut self, line: String) {
+        if self.cat_log.len() == LOG_LINES {
+            self.cat_log.pop_front();
+        }
+        self.cat_log.push_back(format!("{} {line}", now_utc()));
+    }
+
+    /// The rigctld to start: the test's, else on the PATH or in `hamlib_dir`.
+    fn rigctld_program(&self, hamlib_dir: &str) -> Option<PathBuf> {
+        match &self.rigctld_program {
+            Some(p) => p.clone(),
+            None => {
+                let dir = hamlib_dir.trim();
+                find_rigctld((!dir.is_empty()).then(|| std::path::Path::new(dir)))
+            }
+        }
     }
 }
 
@@ -166,17 +229,26 @@ impl Default for RigSide {
             tune: TuneState { shown: Some(TuneView::default()), ..TuneState::default() },
             tune_limit: TUNE_LIMIT,
             sim: None,
+            daemon: None,
+            daemon_bridge: None,
+            rigctld_program: None,
+            managed_listen: MANAGED_LISTEN.parse().unwrap(),
+            cat_log: VecDeque::new(),
         }
     }
 }
 
 /// Does Mercury key through the rigctld MercuryChat reads (RIG-01; design §2.11)?
-fn owner_check(cfg: &RigConfig, rl: Option<&RadioList>) -> OwnerCheck {
+fn owner_check(cfg: &RigConfig, rl: Option<&RadioList>, managed: SocketAddr) -> OwnerCheck {
     let Some(rl) = rl else { return OwnerCheck::Unknown };
-    if cfg.freq_control != FreqControl::ExternalRigctld || rl.ptt_method != "hamlib" {
+    let ours = match cfg.freq_control {
+        FreqControl::ExternalRigctld => format!("{}:{}", cfg.external.host, cfg.external.port),
+        FreqControl::ManagedRigctld => managed.to_string(),
+        FreqControl::Flrig | FreqControl::None => return OwnerCheck::Ok,
+    };
+    if rl.ptt_method != "hamlib" {
         return OwnerCheck::Ok;
     }
-    let ours = format!("{}:{}", cfg.external.host, cfg.external.port);
     let norm = |a: &str| a.trim().replace("localhost", "127.0.0.1");
     match rl.selected_model {
         Some(2) if norm(&rl.device_path) == norm(&ours) => OwnerCheck::Ok,
@@ -277,9 +349,12 @@ impl App {
         r.tx = None;
         r.rate = None;
         r.in_flight.clear();
+        // Stops MercuryChat's own rigctld, if it started one.
+        r.daemon_bridge = None;
+        r.daemon = None;
         let same_station = profile_id.is_some() && r.profile_id.as_deref() == profile_id;
         r.profile_id = profile_id.map(String::from);
-        let configured = profile_id.is_some() && cfg.freq_control == FreqControl::ExternalRigctld;
+        let configured = profile_id.is_some() && cfg.freq_control != FreqControl::None;
         // No rig before and none now: nothing to tell the UI.
         let was_configured = r.policy.configured();
         let old = std::mem::replace(&mut r.policy, RigPolicy::new(configured));
@@ -287,7 +362,7 @@ impl App {
             r.policy.carry_safety(&old);
         }
         r.policy.set_activity(Activity::Idle);
-        let check = owner_check(&cfg, r.radio_list.as_ref());
+        let check = owner_check(&cfg, r.radio_list.as_ref(), r.managed_listen);
         let refused = matches!(check, OwnerCheck::Refused { .. });
         r.policy.set_owner_check(check);
         r.cfg = cfg.clone();
@@ -302,11 +377,119 @@ impl App {
         } else if configured {
             let (cmd_tx, cmd_rx) = mpsc::channel(32);
             let (out_tx, out_rx) = mpsc::channel(256);
-            let task = RigClient::spawn(format!("{}:{}", cfg.external.host, cfg.external.port), cmd_rx, out_tx);
-            r.task = Some(AbortOnDrop(task));
-            r.tx = Some(cmd_tx);
-            r.inbox = Some(out_rx);
+            let read_every = Duration::from_secs(u64::from(cfg.read_every_s.max(1)));
+            let task = match cfg.freq_control {
+                FreqControl::None => None,
+                FreqControl::ExternalRigctld => Some(RigClient::spawn_every(
+                    format!("{}:{}", cfg.external.host, cfg.external.port),
+                    read_every,
+                    cmd_rx,
+                    out_tx,
+                )),
+                FreqControl::Flrig => Some(FlrigClient::spawn(
+                    format!("{}:{}", cfg.flrig.host, cfg.flrig.port),
+                    read_every,
+                    cmd_rx,
+                    out_tx,
+                )),
+                FreqControl::ManagedRigctld => {
+                    let listen = r.managed_listen;
+                    match (r.rigctld_program(&cfg.hamlib_dir), rigctld_spec_for(&cfg, listen)) {
+                        (Some(exe), Some(spec)) => {
+                            let (dtx, mut drx) = mpsc::channel(8);
+                            r.daemon = Some(RigctldDaemon::start(exe, spec, dtx));
+                            let fwd = out_tx.clone();
+                            let bridge = tokio::spawn(async move {
+                                while let Some(state) = drx.recv().await {
+                                    if fwd.send(RigMsg::Daemon(state)).await.is_err() {
+                                        break;
+                                    }
+                                }
+                            });
+                            r.daemon_bridge = Some(AbortOnDrop(bridge.abort_handle()));
+                            r.policy.set_daemon(Some("starting".into()));
+                            Some(RigClient::spawn_every(listen.to_string(), read_every, cmd_rx, out_tx))
+                        }
+                        (None, _) => {
+                            r.policy.set_daemon(Some("notFound".into()));
+                            let reason = "rigctld not found: install Hamlib or choose its folder".to_string();
+                            r.cat_note(reason.clone());
+                            r.policy.on_msg(&RigMsg::Link(RigLink::Lost { reason }), Instant::now());
+                            None
+                        }
+                        (_, None) => {
+                            let reason = "no rig model chosen".to_string();
+                            r.policy.set_daemon(Some(format!("failed: {reason}")));
+                            r.policy.on_msg(&RigMsg::Link(RigLink::Lost { reason }), Instant::now());
+                            None
+                        }
+                    }
+                }
+            };
+            if let Some(task) = task {
+                r.task = Some(AbortOnDrop(task));
+                r.tx = Some(cmd_tx);
+                r.inbox = Some(out_rx);
+            }
         }
+    }
+
+    /// Hamlib's rig models (`rigctld -l`), from its own task.
+    pub(super) fn hamlib_models(&mut self, hamlib_dir: String, reply: super::Reply<CommandOk>) {
+        let Some(exe) = self.rig.rigctld_program(&hamlib_dir) else {
+            let _ = reply.send(Ok(CommandOk::HamlibModels { models: vec![], found: false }));
+            return;
+        };
+        tokio::spawn(async move {
+            let mut cmd = tokio::process::Command::new(&exe);
+            cmd.arg("-l").stdin(std::process::Stdio::null()).kill_on_drop(true);
+            #[cfg(windows)]
+            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+            let result = match tokio::time::timeout(MODEL_LIST_TIMEOUT, cmd.output()).await {
+                Ok(Ok(out)) => {
+                    let models = parse_model_list(&String::from_utf8_lossy(&out.stdout))
+                        .into_iter()
+                        .map(|m| HamlibModelView { id: m.id, mfg: m.mfg, model: m.model, status: m.status })
+                        .collect();
+                    Ok(CommandOk::HamlibModels { models, found: true })
+                }
+                Ok(Err(e)) => Err(conflict(format!("{}: {e}", exe.display()))),
+                Err(_) => Err(conflict("rigctld -l did not finish within 10 s".into())),
+            };
+            let _ = reply.send(result);
+        });
+    }
+
+    /// The CAT log: rigctld's stderr, then MercuryChat's own rig link errors.
+    pub(super) fn cat_log(&self) -> Result<CommandOk, AppError> {
+        let mut lines = self.rig.daemon.as_ref().map(|d| d.log()).unwrap_or_default();
+        lines.extend(self.rig.cat_log.iter().cloned());
+        Ok(CommandOk::CatLog { lines })
+    }
+
+    /// What MercuryChat's own rigctld is doing.
+    fn on_daemon(&mut self, state: DaemonState) {
+        let shown = match &state {
+            DaemonState::Reused => "reused".to_string(),
+            DaemonState::Starting => "starting".to_string(),
+            DaemonState::Running => "running".to_string(),
+            DaemonState::Restarting => "restarting".to_string(),
+            DaemonState::Failed { reason } => format!("failed: {reason}"),
+        };
+        match &state {
+            DaemonState::Reused => {
+                let line = self.discovery.note("rig", "using the rigctld already running on this computer");
+                self.emit(line);
+            }
+            DaemonState::Restarting | DaemonState::Failed { .. } => {
+                self.rig.cat_note(format!("rigctld {shown}"));
+                let line = self.discovery.note("rig", format!("MercuryChat's rigctld: {shown}"));
+                self.emit(line);
+            }
+            _ => {}
+        }
+        self.rig.policy.set_daemon(Some(shown));
+        self.rig.dirty = true;
     }
 
     /// The Settings link test: a separate connection that only reads, run in
@@ -319,7 +502,7 @@ impl App {
             return;
         }
         let cfg = RigConfig::external(&host, config.external.port);
-        let owner = match owner_check(&cfg, self.rig.radio_list.as_ref()) {
+        let owner = match owner_check(&cfg, self.rig.radio_list.as_ref(), self.rig.managed_listen) {
             OwnerCheck::Ok => {
                 RigTestStep { name: "owner".into(), ok: Some(true), detail: "Mercury keys through this rigctld".into() }
             }
@@ -387,8 +570,15 @@ impl App {
             rig_gate(activity, &self.rig.policy, change, self.attached()).map_err(refused)?;
             request_for(change).ok_or_else(|| invalid("change", "not a rig change"))?;
         }
+        let offset = self.rig.cfg.offset_hz;
+        let mut reqs = Vec::with_capacity(changes.len());
         for change in changes {
-            let req = request_for(change).ok_or_else(|| invalid("change", "not a rig change"))?;
+            reqs.push(match request_for(change).ok_or_else(|| invalid("change", "not a rig change"))? {
+                RigRequest::SetFreq(hz) => RigRequest::SetFreq(to_dial(hz, offset)?),
+                other => other,
+            });
+        }
+        for (change, req) in changes.iter().zip(reqs) {
             let id = self.rig_request(req).ok_or_else(|| conflict("the rig link is not accepting commands".into()))?;
             // Tracked as soon as it is sent, so a later failure leaves none untracked.
             self.rig.in_flight.push((id, change.clone()));
@@ -453,6 +643,16 @@ impl App {
 
     /// Something the rigctld client said.
     pub(super) fn on_rig(&mut self, msg: RigMsg) {
+        let msg = match msg {
+            RigMsg::Daemon(state) => return self.on_daemon(state),
+            RigMsg::Freq(dial) => RigMsg::Freq(to_display(dial, self.rig.cfg.offset_hz)),
+            other => other,
+        };
+        match &msg {
+            RigMsg::Link(RigLink::Lost { reason }) => self.rig.cat_note(format!("rig link lost: {reason}")),
+            RigMsg::Done { result: Err(e), .. } => self.rig.cat_note(format!("request failed: {e}")),
+            _ => {}
+        }
         let now = Instant::now();
         if let RigMsg::Done { id, result } = &msg {
             self.rig_done(*id, result.clone(), now);
@@ -565,7 +765,8 @@ impl App {
             self.emit(line);
             return;
         }
-        if let Some(id) = self.rig_request(RigRequest::SetFreq(last.freq_hz)) {
+        let Ok(dial) = to_dial(last.freq_hz, self.rig.cfg.offset_hz) else { return };
+        if let Some(id) = self.rig_request(RigRequest::SetFreq(dial)) {
             self.rig.in_flight.push((id, change));
         }
         if let (Some(mode), Some(pb)) = (last.mode, last.passband_hz) {
@@ -833,7 +1034,7 @@ impl App {
             TelemetryMsg::RadioList(rl) => {
                 let before = self.rig.policy.owner_check().clone();
                 self.rig.radio_list = Some(rl.clone());
-                let after = owner_check(&self.rig.cfg, Some(rl));
+                let after = owner_check(&self.rig.cfg, Some(rl), self.rig.managed_listen);
                 if after != before {
                     let was_refused = matches!(before, OwnerCheck::Refused { .. });
                     let refused = matches!(after, OwnerCheck::Refused { .. });

@@ -21,4 +21,9 @@ fault: RigBanner | null,
 /**
  * Banners shown until dismissed (or, for the critical one, until safe).
  */
-banners: Array<RigBanner>, meters: RigMeters, caps: RigCapsView | null, ownerCheck: OwnerCheck, txLevelApplied: TxLevelResult | null, };
+banners: Array<RigBanner>, meters: RigMeters, caps: RigCapsView | null, ownerCheck: OwnerCheck, txLevelApplied: TxLevelResult | null, 
+/**
+ * MercuryChat's own rigctld: `starting`, `running`, `reused`,
+ * `restarting`, `failed: <reason>` or `notFound`; `None` without one.
+ */
+daemon: string | null, };

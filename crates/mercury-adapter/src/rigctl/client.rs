@@ -85,12 +85,23 @@ pub enum RigMsg {
     Link(RigLink),
     Caps(RigCaps),
     Freq(u64),
-    Mode { mode: String, passband_hz: i32 },
+    Mode {
+        mode: String,
+        passband_hz: i32,
+    },
     Vfo(String),
-    Split { on: bool, tx_vfo: String },
+    Split {
+        on: bool,
+        tx_vfo: String,
+    },
     Ptt(PttReading),
     Meter(Level, f32),
-    Done { id: u64, result: Result<RigReply, String> },
+    Done {
+        id: u64,
+        result: Result<RigReply, String>,
+    },
+    /// What MercuryChat's own rigctld is doing (from its supervisor, not the client).
+    Daemon(super::DaemonState),
 }
 
 /// A connection to rigctld.
@@ -103,7 +114,17 @@ pub struct RigClient;
 impl RigClient {
     /// Connect to rigctld at `addr` (`host:port`) and keep at it until aborted.
     pub fn spawn(addr: String, cmds: mpsc::Receiver<RigClientCmd>, out: mpsc::Sender<RigMsg>) -> AbortHandle {
-        Self::spawn_with(addr, cmds, out, jitter)
+        Self::spawn_every(addr, READ_EVERY, cmds, out)
+    }
+
+    /// As [`RigClient::spawn`], reading frequency and mode every `read_every`.
+    pub fn spawn_every(
+        addr: String,
+        read_every: Duration,
+        cmds: mpsc::Receiver<RigClientCmd>,
+        out: mpsc::Sender<RigMsg>,
+    ) -> AbortHandle {
+        tokio::spawn(run(dial_tcp(addr), cmds, out, jitter, read_every)).abort_handle()
     }
 
     /// As [`RigClient::spawn`], with the backoff jitter supplied (tests
@@ -114,20 +135,7 @@ impl RigClient {
         out: mpsc::Sender<RigMsg>,
         jitter: impl FnMut(Duration) -> Duration + Send + 'static,
     ) -> AbortHandle {
-        let dial = move || {
-            let addr = addr.clone();
-            async move {
-                match tokio::time::timeout(DIAL_TIMEOUT, tokio::net::TcpStream::connect(&addr)).await {
-                    Err(_) => Err(format!("no answer from {addr} within {} s", DIAL_TIMEOUT.as_secs())),
-                    Ok(Err(e)) => Err(format!("{addr}: {e}")),
-                    Ok(Ok(s)) => {
-                        let _ = s.set_nodelay(true);
-                        Ok(Box::pin(s) as RigConn)
-                    }
-                }
-            }
-        };
-        tokio::spawn(run(dial, cmds, out, jitter)).abort_handle()
+        tokio::spawn(run(dial_tcp(addr), cmds, out, jitter, READ_EVERY)).abort_handle()
     }
 
     /// As [`RigClient::spawn`] over any connection (tests, the simulator).
@@ -141,7 +149,24 @@ impl RigClient {
         D: FnMut() -> F + Send + 'static,
         F: Future<Output = Result<RigConn, String>> + Send + 'static,
     {
-        tokio::spawn(run(dial, cmds, out, jitter)).abort_handle()
+        tokio::spawn(run(dial, cmds, out, jitter, READ_EVERY)).abort_handle()
+    }
+}
+
+/// Dial rigctld at `addr` over TCP.
+fn dial_tcp(addr: String) -> impl FnMut() -> Pin<Box<dyn Future<Output = Result<RigConn, String>> + Send>> {
+    move || {
+        let addr = addr.clone();
+        Box::pin(async move {
+            match tokio::time::timeout(DIAL_TIMEOUT, tokio::net::TcpStream::connect(&addr)).await {
+                Err(_) => Err(format!("no answer from {addr} within {} s", DIAL_TIMEOUT.as_secs())),
+                Ok(Err(e)) => Err(format!("{addr}: {e}")),
+                Ok(Ok(s)) => {
+                    let _ = s.set_nodelay(true);
+                    Ok(Box::pin(s) as RigConn)
+                }
+            }
+        })
     }
 }
 
@@ -157,6 +182,7 @@ async fn run<D, F>(
     mut cmds: mpsc::Receiver<RigClientCmd>,
     out: mpsc::Sender<RigMsg>,
     mut jitter: impl FnMut(Duration) -> Duration,
+    read_every: Duration,
 ) where
     D: FnMut() -> F,
     F: Future<Output = Result<RigConn, String>>,
@@ -172,7 +198,7 @@ async fn run<D, F>(
             Err(e) => e,
             Ok(conn) => {
                 let mut s = Session::new(conn, &out);
-                match s.serve(&mut cmds, &mut rate, &mut step, &mut lost_said).await {
+                match s.serve(&mut cmds, &mut rate, &mut step, &mut lost_said, read_every).await {
                     End::Stop => return,
                     End::Lost(r) => r,
                 }
@@ -256,6 +282,7 @@ impl<'a> Session<'a> {
         rate: &mut PollRate,
         step: &mut usize,
         lost_said: &mut bool,
+        read_every: Duration,
     ) -> End {
         match self.request(&RigRequest::DumpCaps, CAPS_TIMEOUT).await {
             Ok(Ok(RigReply::Caps(c))) => self.caps = c,
@@ -299,7 +326,7 @@ impl<'a> Session<'a> {
                 queue.push_back(Queued { id: None, req: RigRequest::GetPtt });
             }
             if now >= next_read {
-                next_read = now + READ_EVERY;
+                next_read = now + read_every;
                 queue.push_back(Queued { id: None, req: RigRequest::GetFreq });
                 queue.push_back(Queued { id: None, req: RigRequest::GetMode });
             }

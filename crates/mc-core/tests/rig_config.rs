@@ -160,3 +160,43 @@ fn band_levels_reject_out_of_range() {
     assert_eq!(BandLevels::load_all(&store, "p1").get("40m"), Some(&l));
     assert_eq!(BandLevels::for_band(&store, "p1", "20m"), BandLevels::default());
 }
+
+#[test]
+fn rigctld_spec_maps_settings() {
+    use mc_core::app::rigctld_spec_for;
+    let listen = "127.0.0.1:4532".parse().unwrap();
+    let mut c = RigConfig { freq_control: FreqControl::ManagedRigctld, ..RigConfig::default() };
+    c.cat.model = Some(3073);
+    c.cat.serial_port = "COM10".into();
+    c.cat.wait_ms = 100;
+    c.cat.dtr = LineState::Off;
+    c.ptt.method = PttMethod::SerialLine;
+    c.ptt.ptt_port = "COM11".into();
+    let s = rigctld_spec_for(&c, listen).unwrap();
+    assert_eq!((s.model, s.rig_path.as_str(), s.baud), (3073, "COM10", Some(9600)));
+    let conf: Vec<String> = s.conf.iter().map(|(k, v)| format!("{k}={v}")).collect();
+    assert_eq!(conf, ["serial_parity=None", "data_bits=8", "stop_bits=1", "post_write_delay=100", "dtr_state=OFF"]);
+    assert_eq!((s.ptt_type, s.ptt_path.as_deref()), ("RTS", Some("COM11")));
+
+    c.ptt.line = PttLine::Dtr;
+    c.ptt.ptt_port = String::new();
+    assert_eq!(rigctld_spec_for(&c, listen).unwrap().ptt_type, "DTR");
+    assert_eq!(rigctld_spec_for(&c, listen).unwrap().ptt_path, None);
+    for (m, want) in [
+        (PttMethod::Cat, "RIG"),
+        (PttMethod::Cm108, "CM108"),
+        (PttMethod::NoPtt, "NONE"),
+        (PttMethod::LeaveMercury, "RIG"),
+    ] {
+        c.ptt.method = m;
+        assert_eq!(rigctld_spec_for(&c, listen).unwrap().ptt_type, want, "{m:?}");
+    }
+
+    c.cat.link = CatLink::Tcp;
+    c.cat.tcp_addr = "192.168.1.20:50001".into();
+    let s = rigctld_spec_for(&c, listen).unwrap();
+    assert_eq!((s.rig_path.as_str(), s.baud, s.conf.len()), ("192.168.1.20:50001", None, 0));
+
+    c.cat.model = None;
+    assert!(rigctld_spec_for(&c, listen).is_none(), "no model: nothing to start");
+}
