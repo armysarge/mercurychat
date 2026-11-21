@@ -2,6 +2,7 @@
 //! rigctld for tests and the simulator (M3b).
 
 mod client;
+mod daemon;
 mod probe;
 mod proto;
 
@@ -10,5 +11,6 @@ pub use client::{
     METER_EVERY, READ_EVERY, REQUEST_TIMEOUT,
 };
 
+pub use daemon::{parse_model_list, rigctld_args, HamlibModel, RigctldSpec};
 pub use probe::{probe, ProbeStep, RPRT_PTT_UNREADABLE};
 pub use proto::{block_complete, parse_reply, Level, RigCaps, RigProtoError, RigReply, RigRequest};
