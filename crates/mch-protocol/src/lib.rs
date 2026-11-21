@@ -23,8 +23,12 @@ use std::fmt;
 
 pub const MAGIC: [u8; 4] = *b"MCH1";
 pub const MAJOR: u8 = 1;
-/// Highest minor version this implementation speaks.
-pub const MINOR: u8 = 0;
+/// Highest minor version this implementation speaks (1: QSY and info, M3c B1-B2).
+pub const MINOR: u8 = 1;
+/// HELLO capability for QSY_PROPOSE / QSY_ANSWER.
+pub const CAP_QSY: &str = "qsy/1";
+/// HELLO capability for INFO_REQUEST / INFO_RESPONSE.
+pub const CAP_INFO: &str = "info/1";
 pub const HEADER_LEN: usize = 28;
 /// Absolute payload ceiling before any allocation.
 pub const MAX_PAYLOAD: usize = 8192;
@@ -47,6 +51,10 @@ pub enum FrameType {
     FileEnd = 0x24,
     FileReceipt = 0x25,
     FileCancel = 0x26,
+    QsyPropose = 0x30,
+    QsyAnswer = 0x31,
+    InfoRequest = 0x40,
+    InfoResponse = 0x41,
     Error = 0x7F,
 }
 
@@ -65,6 +73,10 @@ impl FrameType {
             0x24 => FileEnd,
             0x25 => FileReceipt,
             0x26 => FileCancel,
+            0x30 => QsyPropose,
+            0x31 => QsyAnswer,
+            0x40 => InfoRequest,
+            0x41 => InfoResponse,
             0x7F => Error,
             _ => return None,
         })
@@ -82,6 +94,19 @@ impl FrameType {
             FileAccept => 256,
             FileReject | FileCancel | Error => 256,
             FileChunk => 8 + MAX_CHUNK_DATA,
+            QsyPropose | InfoResponse => 1024,
+            QsyAnswer | InfoRequest => 256,
+        }
+    }
+
+    /// The HELLO capability both peers must list before this type is sent;
+    /// `None` for the minor-0 types every MCH/1 peer speaks (M3c B1).
+    pub fn capability(self) -> Option<&'static str> {
+        use FrameType::*;
+        match self {
+            QsyPropose | QsyAnswer => Some(CAP_QSY),
+            InfoRequest | InfoResponse => Some(CAP_INFO),
+            _ => None,
         }
     }
 }
@@ -271,6 +296,44 @@ mod tests {
 
     fn id(n: u8) -> ObjectId {
         ObjectId([n; 16])
+    }
+
+    #[test]
+    fn minor_is_1() {
+        assert_eq!(MINOR, 1);
+    }
+
+    #[test]
+    fn capability_of_each_type() {
+        use FrameType::*;
+        for t in [QsyPropose, QsyAnswer] {
+            assert_eq!(t.capability(), Some(CAP_QSY));
+        }
+        for t in [InfoRequest, InfoResponse] {
+            assert_eq!(t.capability(), Some(CAP_INFO));
+        }
+        for t in [
+            Hello,
+            HelloAck,
+            Chat,
+            ChatReceipt,
+            FileOffer,
+            FileAccept,
+            FileReject,
+            FileChunk,
+            FileEnd,
+            FileReceipt,
+            FileCancel,
+            Error,
+        ] {
+            assert_eq!(t.capability(), None, "{t:?}");
+        }
+        assert_eq!((CAP_QSY, CAP_INFO), ("qsy/1", "info/1"));
+        let codes =
+            [(QsyPropose, 0x30, 1024), (QsyAnswer, 0x31, 256), (InfoRequest, 0x40, 256), (InfoResponse, 0x41, 1024)];
+        for (t, code, max) in codes {
+            assert_eq!((t as u8, FrameType::from_u8(code), t.max_payload()), (code, Some(t), max));
+        }
     }
 
     #[test]

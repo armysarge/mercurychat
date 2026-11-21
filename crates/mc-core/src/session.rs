@@ -610,6 +610,11 @@ impl<'a> Session<'a> {
                 let r = Reason::from_frame(&f).map_err(proto_err)?;
                 self.emit(SessionEvent::PeerError { code: r.code, text: r.text });
             }
+            // Minor-1 types are not negotiated yet: an unnegotiated type ends
+            // the session (M3c B1).
+            FrameType::QsyPropose | FrameType::QsyAnswer | FrameType::InfoRequest | FrameType::InfoResponse => {
+                return Err(SessionEnd::Protocol(format!("{:?} frame without its negotiated capability", f.ftype)));
+            }
         }
         Ok(())
     }

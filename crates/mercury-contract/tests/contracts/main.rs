@@ -8,6 +8,7 @@ mod attach;
 mod broadcast;
 mod busy;
 mod data;
+mod new_frames;
 mod ptt;
 mod session;
 mod settings;

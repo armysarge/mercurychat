@@ -52,6 +52,66 @@ fn vectors() -> Vec<(&'static str, Frame)> {
         ("file_receipt", Frame::empty(FrameType::FileReceipt, id)),
         ("file_cancel", Reason::new("user", "cancelled").to_frame(FrameType::FileCancel, id).unwrap()),
         ("error", Reason::new("unsupported", "").to_frame(FrameType::Error, ObjectId::ZERO).unwrap()),
+        // Minor 1 (M3c B2).
+        (
+            "qsy_propose",
+            QsyPropose {
+                candidates: vec![
+                    QsyCandidate {
+                        freq_hz: 7_105_000,
+                        mode: "PKTUSB".into(),
+                        passband_hz: 3000,
+                        name: "40m chat".into(),
+                    },
+                    QsyCandidate { freq_hz: 14_105_000, mode: "".into(), passband_hz: 0, name: "".into() },
+                ],
+                note: Some("QRM here".into()),
+            }
+            .to_frame(id)
+            .unwrap(),
+        ),
+        ("qsy_answer_accept", QsyAnswer::Accept { index: 1 }.to_frame(id).unwrap()),
+        ("qsy_answer_decline", QsyAnswer::Decline { reason: Some("rig".into()) }.to_frame(id).unwrap()),
+        ("info_request_snr", InfoRequest { what: InfoWhat::Snr }.to_frame(id).unwrap()),
+        (
+            "info_response_snr",
+            InfoResponse {
+                snr: Some(SnrReport { db: 7.5, age_s: 12, source: "monitor".into() }),
+                station: None,
+                reason: None,
+            }
+            .to_frame(id)
+            .unwrap(),
+        ),
+        (
+            "info_response_station",
+            InfoResponse {
+                snr: None,
+                station: Some(StationShare {
+                    name: Some("Pat".into()),
+                    qth: Some("Pretoria".into()),
+                    locator: Some("KG44dg".into()),
+                    rig: Some("IC-7300".into()),
+                    power: Some("100 W".into()),
+                    antenna: Some("EFHW".into()),
+                    about: None,
+                    email: None,
+                }),
+                reason: None,
+            }
+            .to_frame(id)
+            .unwrap(),
+        ),
+        (
+            "info_response_unsolicited_email",
+            InfoResponse {
+                snr: None,
+                station: Some(StationShare { email: Some("n0call@example.com".into()), ..StationShare::default() }),
+                reason: None,
+            }
+            .to_frame(ObjectId::ZERO)
+            .unwrap(),
+        ),
     ]
 }
 

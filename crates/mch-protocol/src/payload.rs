@@ -213,6 +213,207 @@ pub fn parse_chunk(f: &Frame) -> Result<(u64, &[u8]), ProtocolError> {
     Ok((off, &f.payload[8..]))
 }
 
+// ---- Minor 1 (M3c B2): QSY and info ----
+
+/// Highest frequency a candidate may carry: mc-core's rig limit
+/// (`MAX_FREQ_HZ` in app/service/rig.rs).
+pub const MAX_FREQ_HZ: u64 = 60_000_000;
+/// The modes a candidate may name; empty leaves the mode as it is.
+pub const QSY_MODES: [&str; 7] = ["", "USB", "LSB", "PKTUSB", "PKTLSB", "FM", "PKTFM"];
+pub const MAX_CANDIDATES: usize = 5;
+
+fn check_opt(field: &str, s: &Option<String>, max: usize) -> Result<(), ProtocolError> {
+    s.as_deref().map_or(Ok(()), |s| check_len(field, s, max))
+}
+
+/// One frequency a QSY proposes: a displayed frequency (dial + offset, B4).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QsyCandidate {
+    pub freq_hz: u64,
+    pub mode: String,
+    /// 0 = the rig's default passband.
+    pub passband_hz: u32,
+    pub name: String,
+}
+
+impl QsyCandidate {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if !(1..=MAX_FREQ_HZ).contains(&self.freq_hz) {
+            return Err(bad(format!("frequency {} Hz out of range", self.freq_hz)));
+        }
+        if !QSY_MODES.contains(&self.mode.as_str()) {
+            return Err(bad(format!("mode {:?} not allowed", self.mode)));
+        }
+        check_len("name", &self.name, 32)
+    }
+}
+
+/// QSY_PROPOSE (0x30); the frame id is the proposal id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct QsyPropose {
+    pub candidates: Vec<QsyCandidate>,
+    pub note: Option<String>,
+}
+
+impl QsyPropose {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if !(1..=MAX_CANDIDATES).contains(&self.candidates.len()) {
+            return Err(bad(format!("{} candidates; 1 to {MAX_CANDIDATES} allowed", self.candidates.len())));
+        }
+        self.candidates.iter().try_for_each(QsyCandidate::validate)?;
+        check_opt("note", &self.note, 64)
+    }
+    pub fn to_frame(&self, proposal: ObjectId) -> Result<Frame, ProtocolError> {
+        self.validate()?;
+        Ok(Frame::new(FrameType::QsyPropose, proposal, to_json(self, FrameType::QsyPropose.max_payload())?))
+    }
+    pub fn from_frame(f: &Frame) -> Result<Self, ProtocolError> {
+        let p: QsyPropose = from_json(&f.payload)?;
+        p.validate()?;
+        Ok(p)
+    }
+}
+
+/// QSY_ANSWER (0x31); the frame id is the proposal id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "answer", rename_all = "snake_case", deny_unknown_fields)]
+pub enum QsyAnswer {
+    Accept { index: u8 },
+    Decline { reason: Option<String> },
+}
+
+impl QsyAnswer {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        match self {
+            QsyAnswer::Accept { index } if *index as usize >= MAX_CANDIDATES => {
+                Err(bad(format!("candidate index {index} out of range")))
+            }
+            QsyAnswer::Accept { .. } => Ok(()),
+            QsyAnswer::Decline { reason } => check_opt("reason", reason, 32),
+        }
+    }
+    pub fn to_frame(&self, proposal: ObjectId) -> Result<Frame, ProtocolError> {
+        self.validate()?;
+        Ok(Frame::new(FrameType::QsyAnswer, proposal, to_json(self, FrameType::QsyAnswer.max_payload())?))
+    }
+    pub fn from_frame(f: &Frame) -> Result<Self, ProtocolError> {
+        let a: QsyAnswer = from_json(&f.payload)?;
+        a.validate()?;
+        Ok(a)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InfoWhat {
+    Snr,
+    Station,
+}
+
+/// INFO_REQUEST (0x40); the frame id is the request id.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InfoRequest {
+    pub what: InfoWhat,
+}
+
+impl InfoRequest {
+    pub fn to_frame(&self, request: ObjectId) -> Result<Frame, ProtocolError> {
+        Ok(Frame::new(FrameType::InfoRequest, request, to_json(self, FrameType::InfoRequest.max_payload())?))
+    }
+    pub fn from_frame(f: &Frame) -> Result<Self, ProtocolError> {
+        from_json(&f.payload)
+    }
+}
+
+/// How well the answering station hears the asker.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SnrReport {
+    pub db: f32,
+    pub age_s: u32,
+    pub source: String,
+}
+
+/// The station fields an operator chose to share (B10 limits).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct StationShare {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qth: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub locator: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rig: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub power: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub antenna: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub about: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
+}
+
+impl StationShare {
+    /// The B10 limit of each text field, in bytes (the locator is a Maidenhead grid).
+    pub const LIMITS: [(&'static str, usize); 7] =
+        [("name", 32), ("qth", 48), ("rig", 48), ("power", 16), ("antenna", 48), ("about", 256), ("email", 254)];
+
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        let fields = [&self.name, &self.qth, &self.rig, &self.power, &self.antenna, &self.about, &self.email];
+        for ((field, max), v) in Self::LIMITS.iter().zip(fields) {
+            check_opt(field, v, *max)?;
+        }
+        if self.locator.as_deref().is_some_and(|g| !crate::beacon::valid_grid(g)) {
+            return Err(bad("locator is not a Maidenhead grid"));
+        }
+        Ok(())
+    }
+}
+
+/// INFO_RESPONSE (0x41); the frame id is the request id, or `ObjectId::ZERO`
+/// for an unsolicited share.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InfoResponse {
+    pub snr: Option<SnrReport>,
+    pub station: Option<StationShare>,
+    pub reason: Option<String>,
+}
+
+impl InfoResponse {
+    pub fn validate(&self) -> Result<(), ProtocolError> {
+        if let Some(r) = &self.snr {
+            if !r.db.is_finite() {
+                return Err(bad("SNR is not a finite number"));
+            }
+            check_len("source", &r.source, 16)?;
+        }
+        if let Some(s) = &self.station {
+            s.validate()?;
+        }
+        check_opt("reason", &self.reason, 32)?;
+        if self.snr.is_none() && self.station.is_none() && self.reason.is_none() {
+            return Err(bad("an info response with nothing in it"));
+        }
+        Ok(())
+    }
+    pub fn to_frame(&self, request: ObjectId) -> Result<Frame, ProtocolError> {
+        self.validate()?;
+        Ok(Frame::new(FrameType::InfoResponse, request, to_json(self, FrameType::InfoResponse.max_payload())?))
+    }
+    pub fn from_frame(f: &Frame) -> Result<Self, ProtocolError> {
+        let r: InfoResponse = from_json(&f.payload)?;
+        r.validate()?;
+        Ok(r)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +485,69 @@ mod tests {
     fn offer_hash_must_be_lowercase_hex() {
         let o = FileOffer { name: "a.bin".into(), size: 1, sha256: "A".repeat(64), mime: None };
         assert!(o.validate().is_err());
+    }
+
+    fn candidate(name: &str) -> QsyCandidate {
+        QsyCandidate { freq_hz: 7_105_000, mode: "USB".into(), passband_hz: 2400, name: name.into() }
+    }
+
+    #[test]
+    fn qsy_propose_limits() {
+        let p = |n: usize, name: &str| QsyPropose { candidates: vec![candidate(name); n], note: None };
+        assert!(p(0, "a").validate().is_err(), "no candidates");
+        assert!(p(6, "a").validate().is_err(), "six candidates");
+        assert!(p(5, "a").validate().is_ok());
+        assert!(p(1, &"n".repeat(33)).validate().is_err(), "name of 33 bytes");
+        assert!(p(1, &"n".repeat(32)).validate().is_ok());
+        let mut bad_mode = p(1, "a");
+        bad_mode.candidates[0].mode = "CW".into();
+        assert!(bad_mode.validate().is_err());
+        let mut no_freq = p(1, "a");
+        no_freq.candidates[0].freq_hz = 0;
+        assert!(no_freq.validate().is_err());
+        let mut too_high = p(1, "a");
+        too_high.candidates[0].freq_hz = 60_000_001;
+        assert!(too_high.validate().is_err());
+        let mut long_note = p(1, "a");
+        long_note.note = Some("x".repeat(65));
+        assert!(long_note.validate().is_err());
+        assert!(QsyAnswer::Accept { index: 5 }.validate().is_err());
+        assert!(QsyAnswer::Decline { reason: Some("r".repeat(33)) }.validate().is_err());
+        let bad_grid = StationShare { locator: Some("ZZ99".into()), ..StationShare::default() };
+        assert!(bad_grid.validate().is_err());
+        let long_about = StationShare { about: Some("a".repeat(257)), ..StationShare::default() };
+        assert!(long_about.validate().is_err());
+    }
+
+    #[test]
+    fn unknown_json_field_refused() {
+        let cases: [(FrameType, &[u8]); 4] = [
+            (
+                FrameType::QsyPropose,
+                br#"{"candidates":[{"freq_hz":7105000,"mode":"","passband_hz":0,"name":""}],"note":null,"x":1}"#,
+            ),
+            (FrameType::QsyAnswer, br#"{"answer":"accept","index":0,"x":1}"#),
+            (FrameType::InfoRequest, br#"{"what":"snr","x":1}"#),
+            (FrameType::InfoResponse, br#"{"snr":null,"station":{"name":"a","x":1},"reason":null}"#),
+        ];
+        for (t, json) in cases {
+            let f = Frame::new(t, ObjectId::ZERO, json.to_vec());
+            let refused = match t {
+                FrameType::QsyPropose => QsyPropose::from_frame(&f).is_err(),
+                FrameType::QsyAnswer => QsyAnswer::from_frame(&f).is_err(),
+                FrameType::InfoRequest => InfoRequest::from_frame(&f).is_err(),
+                _ => InfoResponse::from_frame(&f).is_err(),
+            };
+            assert!(refused, "{t:?} took an unknown field");
+        }
+    }
+
+    #[test]
+    fn new_frames_roundtrip() {
+        let p = QsyPropose { candidates: vec![candidate("a")], note: Some("n".into()) };
+        assert_eq!(QsyPropose::from_frame(&p.to_frame(ObjectId::ZERO).unwrap()).unwrap(), p);
+        let r = InfoResponse { snr: None, station: None, reason: Some("no-reading".into()) };
+        assert_eq!(InfoResponse::from_frame(&r.to_frame(ObjectId::ZERO).unwrap()).unwrap(), r);
     }
 
     #[test]
