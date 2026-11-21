@@ -509,7 +509,9 @@ impl Discovery {
             return self.unsupported(format!("broadcast frame with KISS command 0x{:02x}", f.cmd));
         }
         match beacon::classify(&f.payload) {
-            Received::Beacon(b) => {
+            // A kind 2 beacon is heard by its kind 1 fields here; its TLV
+            // fields come in with the extended beacon (M3c Task 11).
+            Received::Beacon(b) | Received::Extended(beacon::ExtendedBeacon { beacon: b, .. }) => {
                 let call = match self.callsign(&b.callsign, "beacon") {
                     Ok(c) => c,
                     Err(evs) => return evs,
@@ -517,6 +519,11 @@ impl Discovery {
                 let row = HeardRow { grid: b.grid, caps: Some(i64::from(b.caps)), ..row(&call, "beacon") };
                 self.record(store, row, "beacon", tuning)
             }
+            // QSY suggestions are handled with M3c Task 10.
+            Received::Qsy(q) => {
+                vec![self.note("broadcast", format!("QSY suggestion from {} to {}", shown(&q.from), shown(&q.to)))]
+            }
+            Received::Unsupported(kind) => self.unsupported(format!("MCB/1 kind {kind}, unknown to this version")),
             Received::Malformed(e) => self.malformed(format!("malformed MCB/1 beacon: {e}")),
             Received::Foreign => {
                 self.unsupported(format!("another application's broadcast ({} bytes)", f.payload.len()))

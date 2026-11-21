@@ -9,6 +9,7 @@ mod broadcast;
 mod busy;
 mod data;
 mod new_frames;
+mod new_kinds;
 mod ptt;
 mod session;
 mod settings;

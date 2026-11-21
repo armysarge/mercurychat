@@ -10,7 +10,7 @@ use mc_core::app::{
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_core::station::{Station, StationConfig};
 use mc_storage::{HeardRow, Store};
-use mch_protocol::beacon::{Beacon, CAP_CHAT, CAP_FILE};
+use mch_protocol::beacon::{Beacon, ExtendedBeacon, Tlv, CAP_CHAT, CAP_FILE};
 use mercury_adapter::broadcast::BroadcastPort;
 use mercury_adapter::fake::FakeNet;
 use mercury_adapter::{Callsign, Endpoint};
@@ -364,6 +364,40 @@ async fn truncated_beacon_is_malformed_not_heard() {
     assert_eq!(snap.discovery.malformed, 1);
     assert_eq!(snap.discovery.unsupported, 0);
     assert!(heard(&h).await.iter().all(|s| s.callsign != "ZS6BAD"), "a malformed beacon is never a station");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn unknown_mcb_kind_counts_as_unsupported_not_malformed() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    let port = peer_broadcast(&net).await;
+    sync_broadcast(&mut rx, &port, "ZS6SYNC").await;
+    let mut future = beacon("ZS6NEW");
+    future[5] = 9; // a kind this version does not know
+    port.send(&future).await.unwrap();
+    activity_event(&mut rx, "unsupported", 10).await;
+    let snap = snapshot(&h).await;
+    assert_eq!((snap.discovery.unsupported, snap.discovery.malformed), (1, 0));
+    assert!(heard(&h).await.iter().all(|s| s.callsign != "ZS6NEW"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn kind2_beacon_is_heard_as_a_beacon() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let (h, mut rx, _) = ready(dir.path(), &net).await;
+    let port = peer_broadcast(&net).await;
+    sync_broadcast(&mut rx, &port, "ZS6SYNC").await;
+    let base = Beacon::new(8, "ZS6EXT", Some("KG44dg"), CAP_CHAT).unwrap();
+    let ext = ExtendedBeacon::new(base, vec![Tlv::Status("QRV".into())]).unwrap();
+    port.send(&ext.encode()).await.unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !heard(&h).await.iter().any(|s| s.callsign == "ZS6EXT" && s.grid.as_deref() == Some("KG44dg")) {
+        assert!(Instant::now() < deadline, "the kind 2 beacon was never heard");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(snapshot(&h).await.discovery.malformed, 0);
 }
 
 #[tokio::test(flavor = "multi_thread")]

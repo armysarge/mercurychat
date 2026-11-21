@@ -19,8 +19,10 @@
 //! listed divergence (A4).
 
 use futures_util::{SinkExt, StreamExt};
+use mercury_adapter::broadcast::BroadcastPort;
 use mercury_adapter::fake::FakeNet;
 use mercury_adapter::fake_ws::FakeWs;
+use mercury_adapter::kiss::{self, KissFrame};
 use mercury_adapter::telemetry::{self, Event};
 use mercury_adapter::{
     Ack, AdapterEvent, Attachment, Callsign, Command, ControlEvent, Endpoint, MercuryClient, Timeouts,
@@ -253,6 +255,39 @@ impl Ws {
                 Ok(None) => panic!("waiting for {what}: the WebSocket closed"),
                 Err(_) => panic!("no {what} within {} s ({seen} text frames seen)", within.as_secs()),
             }
+        }
+    }
+}
+
+/// The listen mode the broadcast contracts put both stations in: DATAC3
+/// (126-byte frames, 123 bytes of wrapped capacity).
+pub const LAB_MODE: u8 = 1;
+
+async fn broadcast_port(st: &Station) -> (BroadcastPort, tokio::sync::mpsc::Receiver<KissFrame>) {
+    BroadcastPort::connect(&st.bcast.ip().to_string(), st.bcast.port(), Duration::from_secs(3))
+        .await
+        .unwrap_or_else(|e| panic!("broadcast port of {}: {e}", st.call))
+}
+
+/// Both stations in `LAB_MODE`; A sends `payload` on its broadcast port, and
+/// this is what B's broadcast port delivers.
+pub async fn broadcast_across(t: &Target, payload: &[u8]) -> Vec<u8> {
+    let a = attach(&t.a, t).await;
+    let b = attach(&t.b, t).await;
+    for x in [&a, &b] {
+        assert_eq!(x.client.command(&Command::Mode(LAB_MODE)).await, Ok(Ack::Ok));
+    }
+    let (pa, _ra) = broadcast_port(&t.a).await;
+    let (_pb, mut rb) = broadcast_port(&t.b).await;
+    pa.send(payload).await.unwrap();
+    let end = tokio::time::Instant::now() + t.arq_timeout();
+    loop {
+        let f = tokio::time::timeout_at(end, rb.recv())
+            .await
+            .expect("a broadcast within the timeout")
+            .expect("broadcast port open");
+        if f.cmd == kiss::CMD_DATA_STD {
+            return f.payload;
         }
     }
 }
