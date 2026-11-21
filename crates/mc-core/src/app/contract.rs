@@ -8,6 +8,7 @@ use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
 use super::frequencies::FrequencyEntry;
+use super::info::ShareConfig;
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
 use super::rig::{RigBanner, RigChange, RigTestStep, RigView, TuneView};
@@ -288,6 +289,20 @@ pub enum AppCommand {
     SetSchedule {
         schedule: Schedule,
     },
+    /// Ask the session's peer for its SNR of us or its station info (M3c B6).
+    /// Refused without a session or when the peer lacks `info/1`.
+    RequestInfo {
+        #[ts(type = "\"snr\" | \"station\"")]
+        what: mch_protocol::payload::InfoWhat,
+    },
+    /// Send the profile's email to the peer, once, as an unsolicited answer.
+    /// The UI asks for confirmation first. Refused with no email or no `info/1`.
+    SendEmail,
+    /// What the active profile shares in answers.
+    ShareSettings,
+    SetShareSettings {
+        config: ShareConfig,
+    },
 }
 
 // Every float in a command is validated finite before use.
@@ -317,6 +332,7 @@ pub enum CommandOk {
     Macros { macros: Vec<MacroDef> },
     Macro(MacroDef),
     Expanded { text: String, missing: Vec<String> },
+    Share(ShareConfig),
     Done,
 }
 

@@ -898,5 +898,12 @@
     "ok": "L'audio de Mercury fonctionne.",
     "bad": "Échec de l'audio de Mercury : {error}",
     "hint": "Mercury redémarre son audio avec ces périphériques et ne les garde que s'ils fonctionnent."
+  },
+  "info": {
+    "refused": {
+      "unsupported": "non pris en charge par cette station",
+      "noSession": "aucune session en cours",
+      "noEmail": "aucune adresse e-mail pour cette station"
+    }
   }
 }

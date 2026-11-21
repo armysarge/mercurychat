@@ -4,7 +4,8 @@ use crate::{message_row, MessageRow, QsoEdit, QsoRow, Result, StorageError, Stor
 use rusqlite::{params, OptionalExtension};
 
 const QSO_COLUMNS: &str = "id, session_id, peer, start_utc, end_utc, grid, band, freq_hz, freq_source, freq_age_ms,
-     bandwidth, tx_modes, rx_modes, rst_sent, rst_rcvd, name, qth, my_power, notes, state";
+     bandwidth, tx_modes, rx_modes, rst_sent, rst_rcvd, name, qth, my_power, notes, state,
+     rst_rcvd_source, name_source, qth_source";
 
 fn qso_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<QsoRow> {
     Ok(QsoRow {
@@ -28,6 +29,9 @@ fn qso_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<QsoRow> {
         my_power: r.get(17)?,
         notes: r.get(18)?,
         state: r.get(19)?,
+        rst_rcvd_source: r.get(20)?,
+        name_source: r.get(21)?,
+        qth_source: r.get(22)?,
     })
 }
 
@@ -55,7 +59,8 @@ impl Store {
         self.conn.execute(
             &format!(
                 "INSERT INTO qso_records ({QSO_COLUMNS})
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)"
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20,
+                         ?21, ?22, ?23)"
             ),
             params![
                 q.id,
@@ -77,7 +82,10 @@ impl Store {
                 q.qth,
                 q.my_power,
                 q.notes,
-                q.state
+                q.state,
+                q.rst_rcvd_source,
+                q.name_source,
+                q.qth_source
             ],
         )?;
         Ok(())
@@ -97,6 +105,9 @@ impl Store {
                bandwidth = COALESCE(?7, bandwidth), tx_modes = COALESCE(?8, tx_modes),
                rx_modes = COALESCE(?9, rx_modes), rst_sent = COALESCE(?10, rst_sent),
                rst_rcvd = COALESCE(?11, rst_rcvd), name = COALESCE(?12, name), qth = COALESCE(?13, qth),
+               rst_rcvd_source = CASE WHEN ?11 IS NOT NULL THEN NULL ELSE rst_rcvd_source END,
+               name_source = CASE WHEN ?12 IS NOT NULL THEN NULL ELSE name_source END,
+               qth_source = CASE WHEN ?13 IS NOT NULL THEN NULL ELSE qth_source END,
                my_power = COALESCE(?14, my_power), notes = COALESCE(?15, notes)
              WHERE id = ?1 AND state = 'draft'",
             params![
@@ -125,6 +136,31 @@ impl Store {
     }
 
     /// Lock a record against further edits (idempotent).
+    /// Fill a draft's empty RST received, name and QTH from a peer's report,
+    /// each marked `source` (M3c B6). A field that has a value, typed or
+    /// not, is left as it is.
+    pub fn fill_qso_from_peer(
+        &mut self,
+        id: &str,
+        rst_rcvd: Option<&str>,
+        name: Option<&str>,
+        qth: Option<&str>,
+        source: &str,
+    ) -> Result<QsoRow> {
+        self.conn.execute(
+            "UPDATE qso_records SET
+               rst_rcvd_source = CASE WHEN COALESCE(rst_rcvd, '') = '' AND ?2 IS NOT NULL THEN ?5 ELSE rst_rcvd_source END,
+               rst_rcvd = CASE WHEN COALESCE(rst_rcvd, '') = '' AND ?2 IS NOT NULL THEN ?2 ELSE rst_rcvd END,
+               name_source = CASE WHEN COALESCE(name, '') = '' AND ?3 IS NOT NULL THEN ?5 ELSE name_source END,
+               name = CASE WHEN COALESCE(name, '') = '' AND ?3 IS NOT NULL THEN ?3 ELSE name END,
+               qth_source = CASE WHEN COALESCE(qth, '') = '' AND ?4 IS NOT NULL THEN ?5 ELSE qth_source END,
+               qth = CASE WHEN COALESCE(qth, '') = '' AND ?4 IS NOT NULL THEN ?4 ELSE qth END
+             WHERE id = ?1 AND state = 'draft'",
+            params![id, rst_rcvd, name, qth, source],
+        )?;
+        self.qso(id)
+    }
+
     pub fn finalise_qso(&mut self, id: &str) -> Result<QsoRow> {
         self.conn.execute("UPDATE qso_records SET state = 'final' WHERE id = ?1", params![id])?;
         self.qso(id)

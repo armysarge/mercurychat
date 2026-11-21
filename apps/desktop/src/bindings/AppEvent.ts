@@ -6,6 +6,8 @@ import type { BroadcastOutcome } from "./BroadcastOutcome";
 import type { ChatMessage } from "./ChatMessage";
 import type { HeardStation } from "./HeardStation";
 import type { ModemState } from "./ModemState";
+import type { PeerSnr } from "./PeerSnr";
+import type { PeerStation } from "./PeerStation";
 import type { Qso } from "./Qso";
 import type { RigView } from "./RigView";
 import type { ScheduleNext } from "./ScheduleNext";
@@ -13,4 +15,4 @@ import type { SessionInfo } from "./SessionInfo";
 import type { TelemetryView } from "./TelemetryView";
 import type { TuneView } from "./TuneView";
 
-export type AppEvent = { "type": "modemState", state: ModemState, detail: string | null, } | { "type": "session", session: SessionInfo | null, } | { "type": "callFailed", peer: string, reason: string, } | { "type": "messageChanged", message: ChatMessage, } | { "type": "profilesChanged" } | { "type": "receiveOnly", on: boolean, pending: boolean, } | { "type": "activeProfileChanged", id: string | null, } | { "type": "fault", code: string, message: string, } | { "type": "heard", station: HeardStation, } | { "type": "heardUpdated", station: HeardStation, } | { "type": "activity", entry: ActivityEntry, } | { "type": "broadcast", kind: BroadcastKind, outcome: BroadcastOutcome, } | { "type": "beacon", status: BeaconStatus, } | { "type": "telemetry", telemetry: TelemetryView, } | { "type": "qso", qso: Qso, } | { "type": "rig", rig: RigView, } | { "type": "tune", tune: TuneView, } | { "type": "frequenciesChanged" } | { "type": "scheduleNext", next: ScheduleNext | null, };
+export type AppEvent = { "type": "modemState", state: ModemState, detail: string | null, } | { "type": "session", session: SessionInfo | null, } | { "type": "callFailed", peer: string, reason: string, } | { "type": "messageChanged", message: ChatMessage, } | { "type": "profilesChanged" } | { "type": "receiveOnly", on: boolean, pending: boolean, } | { "type": "activeProfileChanged", id: string | null, } | { "type": "fault", code: string, message: string, } | { "type": "heard", station: HeardStation, } | { "type": "heardUpdated", station: HeardStation, } | { "type": "activity", entry: ActivityEntry, } | { "type": "broadcast", kind: BroadcastKind, outcome: BroadcastOutcome, } | { "type": "beacon", status: BeaconStatus, } | { "type": "telemetry", telemetry: TelemetryView, } | { "type": "qso", qso: Qso, } | { "type": "peerInfo", peer: string, snr: PeerSnr | null, station: PeerStation | null, reason: string | null, } | { "type": "rig", rig: RigView, } | { "type": "tune", tune: TuneView, } | { "type": "frequenciesChanged" } | { "type": "scheduleNext", next: ScheduleNext | null, };

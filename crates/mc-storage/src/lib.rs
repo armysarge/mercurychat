@@ -173,6 +173,10 @@ pub struct QsoRow {
     pub my_power: Option<String>,
     pub notes: Option<String>,
     pub state: String,
+    /// `peer report` when a peer's answer filled the field (M3c B6).
+    pub rst_rcvd_source: Option<String>,
+    pub name_source: Option<String>,
+    pub qth_source: Option<String>,
 }
 
 /// A partial QSO edit: only `Some` fields are written.

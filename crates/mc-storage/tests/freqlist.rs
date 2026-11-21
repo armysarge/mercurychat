@@ -32,7 +32,7 @@ fn migration_6_creates_frequency_list() {
     let dir = tempfile::tempdir().unwrap();
     let fresh = dir.path().join("fresh.db");
     let s = Store::open(&fresh).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 6);
+    assert!(s.schema_version().unwrap() >= 6);
     assert!(s.frequencies().unwrap().is_empty());
     drop(s);
 
@@ -40,7 +40,7 @@ fn migration_6_creates_frequency_list() {
     drop(Store::open_with_migrations(&old, &MIGRATIONS[..5]).unwrap());
     assert_eq!(version(&old), 5);
     let s = Store::open(&old).unwrap();
-    assert_eq!(s.schema_version().unwrap(), 6);
+    assert!(s.schema_version().unwrap() >= 6);
     assert!(s.frequencies().unwrap().is_empty());
 }
 

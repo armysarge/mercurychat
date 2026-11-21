@@ -3,7 +3,9 @@ import type { ModemTarget } from "./ModemTarget";
 
 export type StationProfile = { id: string, callsign: string, name: string | null, grid: string | null, modem: ModemTarget, lab: boolean, receiveOnly: boolean, 
 /**
- * Station information (CHT-06): optional, at most 128 characters each,
- * inserted into drafts by macro tags. Never sent by themselves.
+ * Station information (CHT-06): optional, each within its M3c B10 limit
+ * in bytes (QTH, rig and antenna 48, power 16, email 254, about 256),
+ * inserted into drafts by macro tags, and shared only as the operator
+ * chooses (B6); the email only by its own command.
  */
 qth?: string | null, rig?: string | null, power?: string | null, antenna?: string | null, email?: string | null, about?: string | null, };

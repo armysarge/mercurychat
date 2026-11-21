@@ -898,5 +898,12 @@
     "ok": "O áudio do Mercury está funcionando.",
     "bad": "O áudio do Mercury falhou: {error}",
     "hint": "O Mercury reinicia o áudio com estes dispositivos e só os mantém se funcionarem."
+  },
+  "info": {
+    "refused": {
+      "unsupported": "não suportado por esta estação",
+      "noSession": "não há sessão",
+      "noEmail": "nenhum e-mail definido para esta estação"
+    }
   }
 }

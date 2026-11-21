@@ -48,6 +48,11 @@ pub struct Qso {
     pub notes: Option<String>,
     /// `draft` or `final`.
     pub state: String,
+    /// `peer report` when the peer's answer filled the field (M3c B6); none
+    /// when the operator typed it.
+    pub rst_rcvd_source: Option<String>,
+    pub name_source: Option<String>,
+    pub qth_source: Option<String>,
 }
 
 impl From<&QsoRow> for Qso {
@@ -80,6 +85,9 @@ impl From<&QsoRow> for Qso {
             my_power: r.my_power.clone(),
             notes: r.notes.clone(),
             state: r.state.clone(),
+            rst_rcvd_source: r.rst_rcvd_source.clone(),
+            name_source: r.name_source.clone(),
+            qth_source: r.qth_source.clone(),
         }
     }
 }
@@ -197,6 +205,9 @@ pub fn draft_row(s: &Start<'_>) -> QsoRow {
         my_power: None,
         notes: None,
         state: "draft".into(),
+        rst_rcvd_source: None,
+        name_source: None,
+        qth_source: None,
     }
 }
 

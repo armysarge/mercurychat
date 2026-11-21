@@ -9,6 +9,7 @@ mod contract;
 mod discovery;
 mod events;
 mod frequencies;
+pub mod info;
 mod logbook;
 mod modem;
 mod notify;

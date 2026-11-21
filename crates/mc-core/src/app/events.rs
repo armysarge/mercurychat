@@ -7,6 +7,7 @@ use super::beacon::BeaconStatus;
 use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
+use super::info::{PeerSnr, PeerStation};
 use super::logbook::Qso;
 use super::rig::{RigView, TuneView};
 use super::schedule::ScheduleNext;
@@ -124,6 +125,14 @@ pub enum AppEvent {
     /// A QSO record was drafted, edited, ended or finalised.
     Qso {
         qso: Qso,
+    },
+    /// The session's peer answered an information request, or shared its
+    /// email (M3c B6). `reason` is `no-reading` or `rate` for an empty answer.
+    PeerInfo {
+        peer: String,
+        snr: Option<PeerSnr>,
+        station: Option<PeerStation>,
+        reason: Option<String>,
     },
     /// The rig changed (M3b): a reading, its link, a fault or a banner. At
     /// most 2 a second; the snapshot always has the latest.

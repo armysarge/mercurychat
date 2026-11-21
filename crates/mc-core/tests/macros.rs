@@ -300,23 +300,26 @@ async fn profile_station_info_validation() {
         CommandOk::Snapshot(s) => assert_eq!(s.profiles, std::slice::from_ref(&saved)),
         other => panic!("{other:?}"),
     }
-    // Every field is bounded at 128 characters and refuses control characters.
+    // Every field is bounded in bytes by its M3c B10 limit (what a
+    // station-info answer may carry) and refuses control characters.
     type Set = fn(&mut StationProfile, String);
-    let fields: [(&str, Set); 6] = [
-        ("qth", |p, v| p.qth = Some(v)),
-        ("rig", |p, v| p.rig = Some(v)),
-        ("power", |p, v| p.power = Some(v)),
-        ("antenna", |p, v| p.antenna = Some(v)),
-        ("email", |p, v| p.email = Some(v)),
-        ("about", |p, v| p.about = Some(v)),
+    let fields: [(&str, Set, usize); 6] = [
+        ("qth", |p, v| p.qth = Some(v), 48),
+        ("rig", |p, v| p.rig = Some(v), 48),
+        ("power", |p, v| p.power = Some(v), 16),
+        ("antenna", |p, v| p.antenna = Some(v), 48),
+        ("email", |p, v| p.email = Some(v), 254),
+        ("about", |p, v| p.about = Some(v), 256),
     ];
-    for (name, set) in fields {
+    for (name, set, max) in fields {
         let mut p = sim_profile();
-        set(&mut p, "é".repeat(128));
-        p.validate().unwrap_or_else(|e| panic!("{name}: 128 characters fit: {e:?}"));
-        set(&mut p, "é".repeat(129));
+        // "é" is 2 bytes: a limit of 16 holds 8 of them.
+        set(&mut p, "é".repeat(max / 2));
+        p.validate().unwrap_or_else(|e| panic!("{name}: {max} bytes fit: {e:?}"));
+        set(&mut p, "é".repeat(max / 2) + "x");
         let errs = p.validate().unwrap_err();
-        assert_eq!((errs[0].field.as_str(), errs[0].message.as_str()), (name, "At most 128 characters"));
+        let want = format!("At most {max} bytes");
+        assert_eq!((errs[0].field.as_str(), errs[0].message.as_str()), (name, want.as_str()));
         for bad in ["a\nb", "a\u{0}b", "a\u{7f}b", "a\tb"] {
             set(&mut p, bad.into());
             let errs = p.validate().unwrap_err();

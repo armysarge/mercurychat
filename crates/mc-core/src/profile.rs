@@ -20,8 +20,10 @@ pub struct StationProfile {
     pub modem: ModemTarget,
     pub lab: bool,
     pub receive_only: bool,
-    /// Station information (CHT-06): optional, at most 128 characters each,
-    /// inserted into drafts by macro tags. Never sent by themselves.
+    /// Station information (CHT-06): optional, each within its M3c B10 limit
+    /// in bytes (QTH, rig and antenna 48, power 16, email 254, about 256),
+    /// inserted into drafts by macro tags, and shared only as the operator
+    /// chooses (B6); the email only by its own command.
     #[serde(default)]
     #[ts(optional = nullable)]
     pub qth: Option<String>,
@@ -70,8 +72,17 @@ fn err(field: &str, message: &str) -> FieldError {
 }
 
 const NAME_MAX: usize = 64;
-/// Most characters in one station-information field (CHT-06).
-const INFO_MAX: usize = 128;
+/// Most bytes in each station-information field: the limits of what a
+/// station-info answer may carry (M3c B10).
+fn info_max(field: &str) -> usize {
+    match field {
+        "qth" | "rig" | "antenna" => 48,
+        "power" => 16,
+        "email" => 254,
+        "about" => 256,
+        _ => 128,
+    }
+}
 const HOST_MAX: usize = 253;
 const TELEMETRY_URL_MAX: usize = 256;
 
@@ -118,13 +129,14 @@ fn telemetry_url_error(url: &str) -> Option<&'static str> {
 
 /// Normalise a station-information field in place (trim; blank means none)
 /// and say why it is refused, if it is.
-fn station_info(value: &mut Option<String>) -> Option<&'static str> {
+fn station_info(field: &str, value: &mut Option<String>) -> Option<String> {
     *value = value.as_deref().map(str::trim).filter(|v| !v.is_empty()).map(String::from);
     let v = value.as_deref()?;
-    if v.chars().count() > INFO_MAX {
-        Some("At most 128 characters")
+    let max = info_max(field);
+    if v.len() > max {
+        Some(format!("At most {max} bytes"))
     } else if v.chars().any(char::is_control) {
-        Some("No control characters")
+        Some("No control characters".into())
     } else {
         None
     }
@@ -230,8 +242,8 @@ impl StationProfile {
             ("email", &mut p.email),
             ("about", &mut p.about),
         ] {
-            if let Some(why) = station_info(value) {
-                errors.push(err(field, why));
+            if let Some(why) = station_info(field, value) {
+                errors.push(err(field, &why));
             }
         }
 

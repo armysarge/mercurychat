@@ -16,4 +16,9 @@ txModes: string | null, rxModes: string | null, rstSent: string | null, rstRcvd:
 /**
  * `draft` or `final`.
  */
-state: string, };
+state: string, 
+/**
+ * `peer report` when the peer's answer filled the field (M3c B6); none
+ * when the operator typed it.
+ */
+rstRcvdSource: string | null, nameSource: string | null, qthSource: string | null, };

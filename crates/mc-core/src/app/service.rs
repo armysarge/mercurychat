@@ -30,6 +30,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 mod audio;
 mod freq;
+mod info;
 mod rig;
 use freq::FreqSide;
 use rig::RigSide;
@@ -202,6 +203,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         rig: RigSide::with_options(opts.tune_limit, opts.rigctld_program, opts.managed_listen),
         audio: crate::app::audio::AudioSide::default(),
         freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
+        info: info::InfoSide::default(),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -333,6 +335,7 @@ struct App {
     rig: RigSide,
     audio: crate::app::audio::AudioSide,
     freq: FreqSide,
+    info: info::InfoSide,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -747,6 +750,10 @@ impl App {
             AppCommand::SetRegion { region } => self.set_region(region),
             AppCommand::TuneToEntry { id } => self.tune_to_entry(&id),
             AppCommand::SetSchedule { schedule } => self.set_schedule(schedule),
+            AppCommand::RequestInfo { what } => self.request_info(what),
+            AppCommand::SendEmail => self.send_email(),
+            AppCommand::ShareSettings => self.share_settings(),
+            AppCommand::SetShareSettings { config } => self.set_share_settings(config),
         }
     }
 
@@ -1151,6 +1158,7 @@ impl App {
                     let heard = self.discovery.session(self.chat.as_mut(), &s.peer, &tuning);
                     self.emit_all(heard);
                     self.telemetry.session_started(now);
+                    self.info_session_started();
                     self.begin_qso(s, grid, &tuning);
                 }
                 if session.is_none() {
@@ -1185,8 +1193,7 @@ impl App {
             }
             ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
             ReportKind::Tune(result) => self.tune_report(result),
-            // Information requests (M3c Task 7) and QSY (Task 9) take these.
-            ReportKind::Peer(m) => tracing::debug!(?m, "a peer message with nothing to take it yet"),
+            ReportKind::Peer(m) => self.on_peer(m),
             ReportKind::SimRig(addr) => self.rig_sim(addr),
             ReportKind::Telemetry(msg) => {
                 self.rig_telemetry_msg(&msg);

@@ -41,6 +41,9 @@ fn qso(id: &str, session: Option<&str>) -> QsoRow {
         my_power: None,
         notes: None,
         state: "draft".into(),
+        rst_rcvd_source: None,
+        name_source: None,
+        qth_source: None,
     }
 }
 

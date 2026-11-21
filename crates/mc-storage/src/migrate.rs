@@ -23,6 +23,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 4, sql: MIGRATION_4 },
     Migration { to: 5, sql: MIGRATION_5 },
     Migration { to: 6, sql: MIGRATION_6 },
+    Migration { to: 7, sql: MIGRATION_7 },
 ];
 
 const MIGRATION_1: &str = r#"
@@ -222,6 +223,14 @@ ALTER TABLE station_profiles ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0;
 /// The frequency list (M3b, D15): the operator's named entries and the
 /// suggested presets (`preset_key` set), shared by every station profile.
 /// Created in station databases too, where it stays empty.
+/// Where a QSO field's value came from (M3c B6): `peer report` when a
+/// peer's answer filled it; none when the operator typed it or before M3c.
+const MIGRATION_7: &str = r#"
+ALTER TABLE qso_records ADD COLUMN rst_rcvd_source TEXT;
+ALTER TABLE qso_records ADD COLUMN name_source TEXT;
+ALTER TABLE qso_records ADD COLUMN qth_source TEXT;
+"#;
+
 const MIGRATION_6: &str = r#"
 CREATE TABLE frequency_list (
   id          TEXT PRIMARY KEY,

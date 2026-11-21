@@ -185,3 +185,36 @@ fn deleting_a_profile_deletes_its_macros() {
     assert!(s.macros("p1").unwrap().is_empty(), "the deleted profile's macros went with it");
     assert_eq!(s.macros("p2").unwrap().len(), 1, "another profile's macros stay");
 }
+
+#[test]
+fn migration_7_adds_source_columns() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("station.db");
+    {
+        let s = Store::open_with_migrations(&path, &MIGRATIONS[..6]).unwrap();
+        drop(s);
+        Connection::open(&path)
+            .unwrap()
+            .execute(
+                "INSERT INTO qso_records (id, peer, start_utc, rst_rcvd, name, state)
+                 VALUES ('q6', 'ZS6ABC', '2026-11-01T00:00:00Z', '59', 'Pat', 'draft')",
+                [],
+            )
+            .unwrap();
+    }
+    assert_eq!(version(&path), 6);
+    let s = Store::open(&path).unwrap();
+    assert!(version(&path) >= 7);
+    let cols: Vec<String> = {
+        let conn = Connection::open(&path).unwrap();
+        let mut st = conn.prepare("SELECT name FROM pragma_table_info('qso_records')").unwrap();
+        st.query_map([], |r| r.get(0)).unwrap().map(Result::unwrap).collect()
+    };
+    for c in ["rst_rcvd_source", "name_source", "qth_source"] {
+        assert!(cols.iter().any(|n| n == c), "no {c} in {cols:?}");
+    }
+    // A record from before keeps its values, with no source.
+    let q = &s.qsos(10).unwrap()[0];
+    assert_eq!((q.rst_rcvd.as_deref(), q.name.as_deref()), (Some("59"), Some("Pat")));
+    assert_eq!((&q.rst_rcvd_source, &q.name_source, &q.qth_source), (&None, &None, &None));
+}
