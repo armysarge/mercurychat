@@ -1,0 +1,4 @@
+# Contracts that fail on real Mercury because Mercury looks wrong (M3c design A4).
+# One contract name per line; each has a note in lab/upstream/M3c-<name>.md.
+# A listed contract that passes on real Mercury fails with DIVERGENCE-FIXED:
+# take it off the list. The fake is never bent to a listed divergence.

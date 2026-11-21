@@ -73,17 +73,21 @@ async fn cqframe_and_monitor_lines_parse() {
         let cq = Command::CqFrame { source: t.a.call.clone(), bw: Bandwidth::Bw2300 };
         assert_eq!(a.client.command(&cq).await, Ok(Ack::Ok));
         let call = t.a.call.as_str().to_string();
-        let ev =
-            next_event(&mut b, t.arq_timeout(), "CQFRAME on B", |e| matches!(e, ControlEvent::CqFrame { .. })).await;
-        assert_eq!(ev, ControlEvent::CqFrame { source: call.clone(), bandwidth: "2300".into() });
-        let ev = next_event(
-            &mut b,
-            t.arq_timeout(),
-            "MONITOR ... CQ on B",
-            |e| matches!(e, ControlEvent::Monitor(m) if m.contains(" CQ ")),
-        )
-        .await;
-        let ControlEvent::Monitor(rest) = ev else { unreachable!() };
+        // Both lines come for one CQ, in no fixed order (real Mercury has sent
+        // the MONITOR line first).
+        let (mut cqframe, mut monitor) = (None, None);
+        while cqframe.is_none() || monitor.is_none() {
+            let ev = next_event(&mut b, t.arq_timeout(), "CQFRAME and MONITOR ... CQ on B", |e| {
+                matches!(e, ControlEvent::CqFrame { .. }) || matches!(e, ControlEvent::Monitor(m) if m.contains(" CQ "))
+            })
+            .await;
+            match ev {
+                ControlEvent::Monitor(rest) => monitor = Some(rest),
+                other => cqframe = Some(other),
+            }
+        }
+        assert_eq!(cqframe.unwrap(), ControlEvent::CqFrame { source: call.clone(), bandwidth: "2300".into() });
+        let rest = monitor.unwrap();
         let cq = parse_cq(&rest).unwrap_or_else(|| panic!("MONITOR line does not parse: {rest:?}"));
         assert_eq!(cq.from, call);
         assert_eq!(b.client.command(&Command::Monitor(false)).await, Ok(Ack::Ok));

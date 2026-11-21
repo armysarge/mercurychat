@@ -145,8 +145,17 @@ async fn set_ptt_config_hamlib_keys_through_rigctld() {
 async fn set_ptt_config_methods_echoed() {
     contract("set_ptt_config_methods_echoed", Tag::Both, |t| async move {
         let mut ws = Ws::open(&t.a).await;
-        for (method, path) in [("serial", "/dev/null"), ("cm108", ""), ("none", "")] {
-            ws.send(ptt_config(method, path, "0")).await;
+        // Real Mercury takes a method only once its device opens, and the lab
+        // has no serial port and no hidraw (by design): serial and cm108 are
+        // echoed on the fake only; on real Mercury their refusal is
+        // set_ptt_config_unusable_device_refused. Hamlib goes to the lab's rigctld.
+        let rig = std::env::var("MC_A_RIGCTLD").unwrap_or_else(|_| "127.0.0.1:4532".into());
+        let mut methods = vec![("hamlib", rig.as_str(), "2"), ("none", "", "0")];
+        if t.kind == TargetKind::Fake {
+            methods.splice(0..0, [("serial", "/dev/ttyUSB0", "0"), ("cm108", "/dev/hidraw0", "0")]);
+        }
+        for (method, path, model) in methods {
+            ws.send(ptt_config(method, path, model)).await;
             ws.next(
                 t.reply(),
                 &format!("radio_list with {method}"),
@@ -154,6 +163,36 @@ async fn set_ptt_config_methods_echoed() {
             )
             .await;
         }
+    })
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn set_ptt_config_unusable_device_refused() {
+    // Mercury answers {"status":"error"} and keeps its PTT when the device
+    // does not open: a serial device that is not a serial port (/dev/null),
+    // or cm108 with no hidraw. MercuryChat reads the PTT only from
+    // radio_list, so a refusal never shows as applied.
+    contract("set_ptt_config_unusable_device_refused", Tag::RealOnly, |t| async move {
+        let mut ws = Ws::open(&t.a).await;
+        for (method, path) in [("serial", "/dev/null"), ("cm108", "")] {
+            ws.send(ptt_config(method, path, "0")).await;
+            let (raw, _) =
+                ws.next(t.reply(), "the reply to set_ptt_config", |raw, _| raw.contains(r#""status""#)).await;
+            assert!(raw.contains(r#""error""#), "an unusable {method} device was accepted: {raw}");
+            let switched = tokio::time::timeout(
+                Duration::from_secs(3),
+                // The outer 3 s ends the wait first; this one only bounds the stream.
+                ws.next(
+                    Duration::from_secs(30),
+                    "radio_list",
+                    |_, e| matches!(e, Some(Event::RadioList(r)) if r.ptt_method == method),
+                ),
+            )
+            .await;
+            assert!(switched.is_err(), "radio_list switched to {method} after a refusal");
+        }
+        ws.send(ptt_config("none", "", "0")).await;
     })
     .await;
 }

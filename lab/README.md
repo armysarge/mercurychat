@@ -44,7 +44,7 @@ docker build -t mercurychat-lab:m0 lab/docker
 ```
 
 ```bash
-MSYS_NO_PATHCONV=1 docker run --rm -v "F:/Programming/mercury:/src:ro" -v "$PWD/lab/bin:/out" -v "$PWD/lab/docker:/scripts:ro" mercurychat-lab:m0 bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh'
+MSYS_NO_PATHCONV=1 docker run --rm -v "E:/Programming/mercury-fork:/src:ro" -v "$PWD/lab/bin:/out" -v "$PWD/lab/docker:/scripts:ro" mercurychat-lab:m0 bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh'
 ```
 
 Output: `lab/bin/{linux-amd64,linux-arm64,windows-x64}/` with `MANIFEST.txt` (commit, compiler, sha256). The script clones the pinned commit instead of copying the Windows checkout, whose CRLF endings break Mercury's build scripts.
@@ -54,21 +54,21 @@ Output: `lab/bin/{linux-amd64,linux-arm64,windows-x64}/` with `MANIFEST.txt` (co
 `lab/mercury-patches/*.patch` are applied in order to the pinned commit by `build-mercury.sh` when mounted at `/patches`; each build's `MANIFEST.txt` lists them. Currently: upstream PR #565 (`bind_address`), PR #566 (WebSocket Origin/Host checks, `ui_allowed_origins`; `0002` is #566 merged onto #565) and the Hamlib reopen fix from the fork's `radio-hamlib-reopen` branch (`0003`, upstream PR #571). Patched builds go to `lab/bin-patched/`:
 
 ```bash
-MSYS_NO_PATHCONV=1 docker run --rm -v "F:/Programming/mercury:/src:ro" -v "$PWD/lab/bin-patched:/out" -v "$PWD/lab/docker:/scripts:ro" -v "$PWD/lab/mercury-patches:/patches:ro" mercurychat-lab:m0 bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh'
+MSYS_NO_PATHCONV=1 docker run --rm -v "E:/Programming/mercury-fork:/src:ro" -v "$PWD/lab/bin-patched:/out" -v "$PWD/lab/docker:/scripts:ro" -v "$PWD/lab/mercury-patches:/patches:ro" mercurychat-lab:m0 bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh'
 ```
 
 Exposure check (Windows; null audio, PTT none): `bash lab/windows/exposure-check.sh <mercury.exe> <out-dir> [bind_address]`. WebSocket Origin/Host check (stock vs patched, four configurations): `python lab/windows/ws-origin-check.py lab/bin/windows-x64/mercury.exe lab/bin-patched/windows-x64/mercury.exe lab/run/ws-origin`. For the cable lab bound to loopback, add `BIND=127.0.0.1` and `M=lab/bin-patched/windows-x64/mercury.exe` to `run-win-lab.sh`.
 
 ### Testing Mercury changes for upstream
 
-Changes meant for Mercury upstream live on branches of the owner's fork ([armysarge/mercury](https://github.com/armysarge/mercury)), cloned at `F:\Programming\mercury-fork`. `lab/docker/mercury-it/run-it.sh` builds the branch's merge base with upstream and the working tree, runs the named unit tests, and runs a Go integration test against both builds, so a new test is seen to fail before and pass after:
+Changes meant for Mercury upstream live on branches of the owner's fork ([armysarge/mercury](https://github.com/armysarge/mercury)), cloned at `E:\Programming\mercury-fork` (read-only: the lab only mounts it). `lab/docker/mercury-it/run-it.sh` builds the branch's merge base with upstream and the working tree, runs the named unit tests, and runs a Go integration test against both builds, so a new test is seen to fail before and pass after:
 
 ```bash
 docker build -t mercurychat-lab:it lab/docker/mercury-it
 ```
 
 ```bash
-MSYS_NO_PATHCONV=1 docker run --rm -v "F:/Programming/mercury-fork:/src:ro" -v "$PWD/lab/run/it-N:/out" -v "$PWD/lab/docker/mercury-it:/scripts:ro" mercurychat-lab:it bash /scripts/run-it.sh TestHamlibSessionSurvivesRigctldRestart test_radio_io_frequency test_radio_port
+MSYS_NO_PATHCONV=1 docker run --rm -v "E:/Programming/mercury-fork:/src:ro" -v "$PWD/lab/run/it-N:/out" -v "$PWD/lab/docker/mercury-it:/scripts:ro" mercurychat-lab:it bash /scripts/run-it.sh TestHamlibSessionSurvivesRigctldRestart test_radio_io_frequency test_radio_port
 ```
 
 To run the rig lab on a fork build, build `linux-amd64` with `/src` mounted from the fork into `lab/bin-fork/<branch>` and mount that at `/mercury`. Add `-e EXPECT_REOPEN=1` for a build with the Hamlib reopen fix: the post-restart keying finding then becomes a check. PR drafts are in `lab/upstream/`.
@@ -144,6 +144,10 @@ Results: `report-m3b.txt` (one PASS or FAIL line per check), `activity-m3b.txt`,
 - check 7 repeats the run against unpatched upstream Mercury.
 
 What each check proves, and the commands, are in [`docker/rig/M3b1-checks.md`](docker/rig/M3b1-checks.md). On Windows, `node lab/windows/m3b1-exit-check.mjs <mercurychat.exe> <fake-rigctld.exe> <empty dir>` checks that closing the real window stops the app's rigctld (with a fake rigctld; nothing must be listening on 4532).
+
+## 3b. Mercury contracts — the fake and real Mercury, one suite
+
+`crates/mercury-contract` holds every Mercury behaviour MercuryChat relies on, written once. `scripts/check.sh` runs it against the fake on every check. `lab/docker/contract/check-mercury.sh` (Git Bash) runs the same suite against two real Mercury stations: it builds the pinned Mercury (`lab/mercury-pin.env`: the fork's commit plus the listed patches), builds the contract binary, and runs it in `mercurychat-lab:rig`. `--latest` tests the fork's `upstream/mercuryv2` instead, with no patches and no network fetch. Output goes to `E:/mc-lab-out/m3c/contracts-<sha7>[-latest]`, and `run/summary.txt` there has one line per contract. Details, and how a failure is triaged, are in [`docker/contract/README.md`](docker/contract/README.md).
 
 ## 4. Desktop shell
 
