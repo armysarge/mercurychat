@@ -56,6 +56,12 @@
 //   S3 a custom entry added in Settings appears in the strip's frequency list
 //   S4 a suggested entry deleted comes back with Restore suggested (added 1)
 //   S5 the chosen tab survives a window reload
+// M3b.1 Task 8 (Settings → Rig in VarAC's layout; Settings → Audio):
+//   S6 Rig is two columns in a desktop-sized window; the sim station reads as "External rigctld";
+//      switching (unsaved) to the managed rigctld shows the CAT box and hides the
+//      external one, and FLRig takes CAT out of the PTT choices
+//   S7 Audio, with no Mercury UI link in the simulator, says to start Mercury with -G;
+//      no console errors from S1 to here
 // Usage: node lab/windows/m3-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
@@ -297,6 +303,15 @@ try {
   await s.eval("document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   results.push(`PASS rig panel: Split ${panel.split ? "shown" : "hidden"} as the rig's caps say (canSplit ${canSplit})`);
 
+  // Console errors from here to S7 (the Settings tabs, Rig and Audio) fail the check.
+  await s.eval(`(() => {
+    window.__uiErrors = [];
+    const keep = (x) => window.__uiErrors.push(String(x?.stack ?? x?.message ?? x).slice(0, 300));
+    const err = console.error.bind(console);
+    console.error = (...a) => { keep(a.join(' ')); err(...a); };
+    addEventListener('error', (e) => keep(e.error ?? e.message));
+    addEventListener('unhandledrejection', (e) => keep(e.reason));
+  })()`);
   // ---- S1. Settings in tabs
   await s.eval(`${rail("Settings")}.click()`);
   await until(s, "document.querySelectorAll('.settings [role=tab]').length >= 6", "the Settings tabs");
@@ -321,6 +336,41 @@ try {
   const stepsShown = await s.eval("[...document.querySelectorAll('.rig-test-steps li')].map(l => l.dataset.step + ':' + l.className.split(' ').pop())");
   if (stepsShown.some((x) => !x.endsWith(":ok"))) throw new Error(`rig test: ${stepsShown.join(", ")}`);
   results.push(`PASS rig test: ${stepsShown.join(", ")}`);
+
+  // ---- S6. Rig in VarAC's layout (nothing saved: the choices go back before leaving)
+  const layout = await s.eval(`(() => {
+    const cols = [...document.querySelector('.rig-settings .cols').children].map(c => Math.round(c.getBoundingClientRect().left));
+    const legends = [...document.querySelectorAll('.rig-settings legend')].map(l => l.textContent.trim());
+    const box = Math.round(document.querySelector('.rig-settings .cols').getBoundingClientRect().width);
+    return { cols, freq: document.querySelector('.rig-settings select.rig-freq-control').value, legends, width: innerWidth, box };
+  })()`);
+  if (layout.cols.length !== 2 || layout.cols[0] === layout.cols[1]) throw new Error(`rig columns: ${JSON.stringify(layout)}`);
+  if (layout.freq !== "externalRigctld") throw new Error(`the sim station's frequency control is ${layout.freq}`);
+  const pickFreq = (v) => s.eval(`(() => { const fc = document.querySelector('.rig-settings select.rig-freq-control'); fc.value = ${JSON.stringify(v)}; fc.dispatchEvent(new Event('change')); })()`);
+  const legends = () => s.eval("[...document.querySelectorAll('.rig-settings legend')].map(l => l.textContent.trim())");
+  const pttOpts = () => s.eval("[...document.querySelectorAll('.rig-settings select.rig-ptt option')].map(o => o.value)");
+  await pickFreq("managedRigctld");
+  await until(s, "[...document.querySelectorAll('.rig-settings legend')].some(l => l.textContent.trim() === 'CAT')", "the CAT box");
+  const managed = await legends();
+  if (managed.includes("External rigctld")) throw new Error(`managed rigctld still shows the external box: ${managed}`);
+  await pickFreq("flrig");
+  await until(s, "[...document.querySelectorAll('.rig-settings legend')].some(l => l.textContent.trim() === 'FLRig')", "the FLRig box");
+  const flrigPtt = await pttOpts();
+  if (flrigPtt.includes("cat")) throw new Error(`FLRig offers CAT PTT: ${flrigPtt}`);
+  await pickFreq("externalRigctld");
+  await until(s, "[...document.querySelectorAll('.rig-settings legend')].some(l => l.textContent.trim() === 'External rigctld')", "the external box back");
+  results.push(`PASS rig layout: two columns at ${layout.width} px (left edges ${layout.cols.join(", ")}); sim station "externalRigctld" (${layout.legends.join(", ")}); managed shows ${managed.join(", ")}; FLRig PTT choices ${flrigPtt.join(", ")}`);
+
+  // ---- S7. Audio without Mercury's UI link
+  await s.eval("document.getElementById('tab-audio').click()");
+  await until(s, "!!document.querySelector('.audio-settings .audio-unavailable')", "the audio tab's -G message");
+  const audioText = await s.eval("document.querySelector('.audio-settings .audio-unavailable').textContent.trim()");
+  if (!audioText.includes("-G")) throw new Error(`audio tab: ${audioText}`);
+  results.push(`PASS audio tab: without Mercury's UI link it says "${audioText.slice(0, 60)}…"`);
+  const uiErrors = await s.eval("window.__uiErrors");
+  if (uiErrors.length) throw new Error(`console errors in Settings: ${uiErrors.join(" | ")}`);
+  results.push("PASS settings console: no errors while the tabs, Rig and Audio were used");
+  await s.eval("document.getElementById('tab-rig').click()");
 
   // ---- S3. a custom entry reaches the strip's list
   await s.eval(setInput(".freq-list-editor input.entry-name", "UI check net"));

@@ -234,6 +234,7 @@
       "station": "Estação",
       "profiles": "Perfis",
       "rig": "Rádio",
+      "audio": "Áudio",
       "notifications": "Notificações",
       "appearance": "Aparência",
       "about": "Sobre"
@@ -724,13 +725,6 @@
   "rigSettings": {
     "title": "Rádio",
     "noStation": "Escolha uma estação para configurar o rádio.",
-    "arrangement": "Como o MercuryChat lê o rádio",
-    "arrangementOpt": {
-      "none": "Nenhum",
-      "rigctld": "rigctld, compartilhado com o Mercury",
-      "mercury": "Só o Mercury (frequência, somente leitura)"
-    },
-    "hint": "Com o rigctld, o MercuryChat e o Mercury compartilham um rigctld que você executa: o Mercury aciona o PTT por ele (Hamlib modelo 2) e o MercuryChat verifica se o rádio acompanha.",
     "host": "Host",
     "port": "Porta",
     "restore": "Voltar à última frequência quando o link com o rádio subir",
@@ -748,7 +742,92 @@
       "mode": "Modo",
       "ptt": "Leitura do PTT",
       "owner": "PTT do Mercury"
-    }
+    },
+    "pttMethod": "Método de PTT",
+    "ptt": "PTT",
+    "pttOpt": {
+      "cat": "CAT (via rigctld)",
+      "serialLine": "Linha serial RTS/DTR",
+      "cm108": "GPIO CM108 (placa de som USB)",
+      "noPtt": "Sem PTT (VOX)",
+      "leaveMercury": "Não mexer na configuração do Mercury"
+    },
+    "pttLine": "Linha",
+    "pttLineOpt": {
+      "rts": "RTS",
+      "dtr": "DTR"
+    },
+    "pttPort": "Porta de PTT",
+    "pttPortHint": "A porta serial (COM3, /dev/ttyUSB0) ou, para CM108, o dispositivo HID; o Mercury a abre.",
+    "invert": "Inverter",
+    "cm108Gpio": "Pino GPIO",
+    "pttTest": "Testar PTT",
+    "pttStop": "Parar",
+    "pttTestHint": "O Mercury aciona o rádio para uma sintonia curta: verifique antes a antena e a potência.",
+    "pttHint": "O Mercury aciona o rádio. O MercuryChat só diz ao Mercury qual PTT usar e verifica se o rádio acompanha.",
+    "cat": "CAT",
+    "model": "Modelo do rádio",
+    "modelSearch": "Digite para buscar na lista do Hamlib",
+    "hamlibNotFound": "O rigctld do Hamlib não foi encontrado. Instale o Hamlib ou informe a pasta abaixo.",
+    "getHamlib": "Obter o Hamlib",
+    "hamlibDir": "Pasta do Hamlib (opcional)",
+    "link": "Ligação",
+    "linkOpt": {
+      "serial": "Porta serial",
+      "tcp": "Rede (TCP)"
+    },
+    "serialPort": "Porta serial",
+    "serialPortExample": "COM3 ou /dev/ttyUSB0",
+    "tcpAddr": "Endereço (host:porta)",
+    "tcpAddrExample": "192.168.1.20:50001",
+    "baud": "Baud",
+    "parity": "Paridade",
+    "parityOpt": {
+      "none": "Nenhuma",
+      "even": "Par",
+      "odd": "Ímpar"
+    },
+    "dataBits": "Bits de dados",
+    "stopBits": "Bits de parada",
+    "waitMs": "Espera entre comandos (ms)",
+    "dtr": "DTR",
+    "rts": "RTS",
+    "lineState": {
+      "unset": "Não mexer",
+      "on": "Ligada",
+      "off": "Desligada"
+    },
+    "daemon": {
+      "starting": "Iniciando o rigctld…",
+      "running": "rigctld em execução",
+      "reused": "Usando o rigctld que já roda nesta porta",
+      "restarting": "O rigctld parou; reiniciando…",
+      "notFound": "rigctld não encontrado",
+      "failed": "O rigctld falhou: {reason}"
+    },
+    "catLog": "Registro CAT",
+    "logEmpty": "Nada registrado ainda.",
+    "copy": "Copiar",
+    "copied": "Copiado",
+    "freqControl": "Controle de frequência",
+    "freqControlOpt": {
+      "managedRigctld": "Hamlib (o MercuryChat roda o rigctld)",
+      "externalRigctld": "Hamlib (um rigctld que já rodo)",
+      "flrig": "FLRig (frequência e modo)",
+      "none": "Nenhum"
+    },
+    "offset": "Deslocamento de frequência (Hz)",
+    "readEvery": "Ler o rádio a cada",
+    "seconds": "{n} s",
+    "dataMode": "Modo de dados",
+    "freqTestHz": "Frequência de teste (Hz)",
+    "freqTest": "Sintonizar",
+    "freqTestHint": "Coloca o rádio nesta frequência e depois a lê de volta.",
+    "freqTestNone": "O rádio não informou nenhuma frequência.",
+    "freqTestResult": "O rádio informa {freq} Hz, {mode}.",
+    "external": "rigctld externo",
+    "flrig": "FLRig",
+    "flrigHint": "O FLRig só ajusta frequência e modo; escolha um método de PTT separado."
   },
   "freqList": {
     "title": "Lista de frequências",
@@ -801,5 +880,23 @@
     "save": "Salvar agenda",
     "saved": "Agenda salva",
     "needEntries": "Adicione primeiro entradas à lista de frequências."
+  },
+  "audioSettings": {
+    "title": "Áudio",
+    "noStation": "Escolha uma estação para configurar o áudio do Mercury.",
+    "system": "Sistema de som",
+    "input": "Entrada (do rádio)",
+    "output": "Saída (para o rádio)",
+    "channel": "Canal de entrada",
+    "channelOpt": {
+      "left": "Esquerdo",
+      "right": "Direito",
+      "stereo": "Estéreo"
+    },
+    "apply": "Aplicar",
+    "sent": "Enviado ao Mercury",
+    "ok": "O áudio do Mercury está funcionando.",
+    "bad": "O áudio do Mercury falhou: {error}",
+    "hint": "O Mercury reinicia o áudio com estes dispositivos e só os mantém se funcionarem."
   }
 }

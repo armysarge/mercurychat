@@ -108,7 +108,10 @@ async fn audio_view_from_events() {
     let net = FakeNet::start().await;
     let ws = fake_mercury_ws().await;
     let (h, _rx) = start(dir.path(), existing(&net, Some(ws.url.clone()))).await;
-    let v = audio_until(&h, "the device lists", |v| v.available && v.inputs.len() == 2 && v.outputs.len() == 2).await;
+    let v = audio_until(&h, "the device lists", |v| {
+        v.available && v.inputs.len() == 2 && v.outputs.len() == 2 && v.audio_ok.is_some()
+    })
+    .await;
     assert_eq!((v.input.as_str(), v.output.as_str()), ("in1", "out1"));
     assert_eq!((v.system.as_str(), v.channel.as_str()), ("wasapi", "left"));
     assert_eq!(v.systems, vec!["wasapi".to_string()]);

@@ -25,6 +25,8 @@ node --test apps/desktop/scripts/apply.test.mjs
 node --test apps/desktop/scripts/notify.test.mjs
 # The station strip's tuning arithmetic (freqStep.ts).
 node --test apps/desktop/scripts/freqStep.test.mjs
+# Settings → Rig: which boxes show, which PTT choices fit (rigForm.ts).
+node --test apps/desktop/scripts/rigForm.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

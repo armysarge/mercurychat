@@ -256,7 +256,14 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "banner.rig.": () => unionOf("RigBanner.ts"),
     "rig.refused.": () => constOf("rig.ts", "REFUSALS"),
     "settings.tabs.": () => constOf("views/Settings.vue", "TABS"),
-    "rigSettings.arrangementOpt.": () => constOf("components/RigSettings.vue", "ARRANGEMENTS"),
+    // M3b.1: Settings → Rig's dropdowns (rigForm.ts) and Settings → Audio's channels.
+    "rigSettings.freqControlOpt.": () => constOf("rigForm.ts", "FREQ_CONTROLS"),
+    "rigSettings.pttOpt.": () => constOf("rigForm.ts", "PTT_METHODS"),
+    "rigSettings.pttLineOpt.": () => constOf("rigForm.ts", "PTT_LINES"),
+    "rigSettings.linkOpt.": () => constOf("rigForm.ts", "LINKS"),
+    "rigSettings.parityOpt.": () => constOf("rigForm.ts", "PARITIES"),
+    "rigSettings.lineState.": () => constOf("rigForm.ts", "LINE_STATES"),
+    "audioSettings.channelOpt.": () => constOf("components/AudioSettings.vue", "CHANNELS"),
     "rigSettings.step.": () => constOf("components/RigSettings.vue", "STEPS"),
     "freqList.purposeOpt.": () => constOf("components/FrequencyListEditor.vue", "PURPOSES"),
     "transcript.status.": () => {
