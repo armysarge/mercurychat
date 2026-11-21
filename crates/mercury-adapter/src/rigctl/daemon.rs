@@ -218,6 +218,14 @@ impl RigctldDaemon {
         RigctldDaemon { log, stop, task: Some(task) }
     }
 
+    /// Let rigctld outlive this handle: the app is exiting while Mercury may
+    /// be keying through it, and a radio left keyed is worse than a rigctld
+    /// left running. The handle is forgotten on purpose: dropping it, or its
+    /// stop signal, would kill rigctld.
+    pub fn leave_running(self) {
+        std::mem::forget(self);
+    }
+
     /// Stop rigctld, if this handle started it, and return once it has exited
     /// (its port is free). The app calls this on exit: a dropped handle is
     /// not enough then, as the runtime may stop before the kill is sent.

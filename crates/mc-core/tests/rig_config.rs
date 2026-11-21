@@ -184,7 +184,8 @@ fn rigctld_spec_maps_settings() {
     assert_eq!(rigctld_spec_for(&c, listen).unwrap().ptt_path, None);
     for (m, want) in [
         (PttMethod::Cat, "RIG"),
-        (PttMethod::Cm108, "CM108"),
+        // CM108 is Mercury's own (spec §5.2): rigctld reads PTT from the rig.
+        (PttMethod::Cm108, "RIG"),
         (PttMethod::NoPtt, "NONE"),
         (PttMethod::LeaveMercury, "RIG"),
     ] {
@@ -226,7 +227,7 @@ fn mercury_ptt_mapping_table() {
         assert_eq!(mercury_ptt_for(&with(fc, PttMethod::LeaveMercury), managed), None, "{fc:?}");
         assert_eq!(mercury_ptt_for(&with(fc, PttMethod::NoPtt), managed), Some(cmd("none", "", 0, "rts", "none", 3)));
     }
-    for m in [PttMethod::Cat, PttMethod::SerialLine, PttMethod::Cm108] {
+    for m in [PttMethod::Cat, PttMethod::SerialLine] {
         assert_eq!(
             mercury_ptt_for(&with(FreqControl::ManagedRigctld, m), managed),
             Some(cmd("hamlib", "127.0.0.1:4532", 2, "rts", "none", 3)),
@@ -245,9 +246,13 @@ fn mercury_ptt_mapping_table() {
     serial.ptt.ptt_port = "COM11".into();
     serial.freq_control = FreqControl::Flrig;
     assert_eq!(mercury_ptt_for(&serial, managed), Some(cmd("serial", "COM11", 0, "dtr", "dtr", 3)));
-    let mut cm = with(FreqControl::Flrig, PttMethod::Cm108);
-    cm.ptt.cm108_gpio = 2;
-    assert_eq!(mercury_ptt_for(&cm, managed), Some(cmd("cm108", "", 0, "rts", "none", 2)));
+    // CM108 is a HID device, not the COM port: Mercury drives it with the
+    // chosen GPIO whatever runs the CAT (spec §5.2; final review).
+    for fc in [FreqControl::None, FreqControl::ManagedRigctld, FreqControl::ExternalRigctld, FreqControl::Flrig] {
+        let mut cm = with(fc, PttMethod::Cm108);
+        cm.ptt.cm108_gpio = 2;
+        assert_eq!(mercury_ptt_for(&cm, managed), Some(cmd("cm108", "", 0, "rts", "none", 2)), "{fc:?}");
+    }
 }
 
 #[test]

@@ -454,16 +454,37 @@ impl App {
     /// The app is exiting: stop MercuryChat's own rigctld and answer once it
     /// has gone (a dropped handle would only be killed if the runtime lived on).
     pub(super) fn shutdown(&mut self, reply: super::Reply<CommandOk>) {
+        // Busy or keyed: Mercury may be keying through this rigctld, and its
+        // unkey must still reach the radio. Leave it running (final review).
+        let keyed = self.busy_refusal().is_some() || self.rig.policy.rig_ptt() == crate::app::rig::RigPttView::On;
         self.rig.task = None;
         self.rig.tx = None;
         self.rig.daemon_bridge = None;
-        let daemon = self.rig.daemon.take();
+        let mut daemon = self.rig.daemon.take();
+        if keyed {
+            if let Some(d) = daemon.take() {
+                d.leave_running();
+            }
+        }
         tokio::spawn(async move {
             if let Some(d) = daemon {
                 d.shutdown().await;
             }
             let _ = reply.send(Ok(CommandOk::Done));
         });
+    }
+
+    /// Why a rig-settings change is refused now, if it is.
+    fn busy_refusal(&self) -> Option<RigRefusal> {
+        match self.activity() {
+            _ if self.rig.tune.active => Some(RigRefusal::Tuning),
+            Activity::Idle => None,
+            Activity::Calling => Some(RigRefusal::Calling),
+            Activity::Connected => Some(RigRefusal::Connected),
+            Activity::Draining => Some(RigRefusal::Draining),
+            Activity::Broadcasting => Some(RigRefusal::Broadcasting),
+            Activity::Tuning => Some(RigRefusal::Tuning),
+        }
     }
 
     /// Hamlib's rig models (`rigctld -l`), from its own task.
@@ -562,6 +583,11 @@ impl App {
         let Some(id) = self.active_profile().map(|p| p.id) else {
             return Err(conflict("no station is selected".into()));
         };
+        // Saving restarts the rig link and MercuryChat's rigctld, which Mercury
+        // may be keying through: never while busy (final review).
+        if let Some(r) = self.busy_refusal() {
+            return Err(AppError::Refused { reason: r.key(), message: r.message().to_string() });
+        }
         if let Some(e) = config.validate().into_iter().next() {
             return Err(invalid(&e.field, &e.message));
         }

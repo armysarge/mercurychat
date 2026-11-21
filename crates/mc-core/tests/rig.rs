@@ -1231,19 +1231,23 @@ mod m3b1 {
         assert!(ptt_sent(&ws).is_empty(), "{:?}", ptt_sent(&ws));
     }
 
+    // Mercury's radio_list arrives while a call is pending: the push waits
+    // for the station to be idle.
     #[tokio::test(flavor = "multi_thread")]
     async fn ptt_push_deferred_while_busy() {
         let dir = tempfile::tempdir().unwrap();
         let net = FakeNet::start().await;
         let rig = FakeRigctld::start().await;
         let ws = fake_mercury_ws().await;
-        let (h, _rx) = attached(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+        ws.set_radio_list(None); // nothing to compare with yet: nothing is pushed
+        let (h, _rx) = attached(dir.path(), with_ws(&net, &ws), external_cat(&rig)).await;
         ws_until(&ws, 10, "the UI link", |ws| ws.accepted() >= 1).await;
         tokio::time::sleep(Duration::from_millis(500)).await;
+        assert!(ptt_sent(&ws).is_empty());
         net.set_unanswered_calls(true); // the call stays pending, as Mercury retries
         h.call(AppCommand::Call { peer: "ZS1XYZ".into() }).await.unwrap();
         wait_for(&h, 5, "calling", |s| s.modem == ModemState::Calling).await;
-        h.call(AppCommand::SetRigConfig { config: external_cat(&rig) }).await.unwrap();
+        ws.send_text(MERCURY_PTT_NONE.into());
         tokio::time::sleep(Duration::from_millis(300)).await;
         let still = snapshot(&h).await.modem == ModemState::Calling;
         let sent = ptt_sent(&ws);
@@ -1251,5 +1255,54 @@ mod m3b1 {
         assert!(sent.is_empty(), "not while calling: {sent:?}");
         h.call(AppCommand::CancelCall).await.unwrap();
         ws_until(&ws, 10, "the deferred set_ptt_config", |ws| ptt_sent(ws).len() == 1).await;
+    }
+
+    // Final review: saving the rig settings restarts the rig link (and
+    // MercuryChat's rigctld, which Mercury may be keying through), so it is
+    // refused while busy, and nothing is saved or sent.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn rig_config_refused_while_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let rig = FakeRigctld::start().await;
+        let ws = fake_mercury_ws().await;
+        let (h, _rx) = attached(dir.path(), with_ws(&net, &ws), rigctld(&rig)).await;
+        ws_until(&ws, 10, "the UI link", |ws| ws.accepted() >= 1).await;
+        net.set_unanswered_calls(true);
+        h.call(AppCommand::Call { peer: "ZS1XYZ".into() }).await.unwrap();
+        wait_for(&h, 5, "calling", |s| s.modem == ModemState::Calling).await;
+        let r = h.call(AppCommand::SetRigConfig { config: external_cat(&rig) }).await;
+        assert!(matches!(&r, Err(AppError::Refused { reason, .. }) if *reason == "rig.refused.calling"), "{r:?}");
+        match h.call(AppCommand::RigSettings).await.unwrap() {
+            CommandOk::RigSettings { config, .. } => assert_eq!(config.ptt.method, rigctld(&rig).ptt.method),
+            other => panic!("{other:?}"),
+        }
+        assert!(ptt_sent(&ws).is_empty());
+        h.call(AppCommand::CancelCall).await.unwrap();
+    }
+
+    // Final review: closing the app while busy must not kill the rigctld
+    // Mercury may be keying through (its unkey would go nowhere): leave it.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_leaves_rigctld_while_busy() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let listen = free_addr();
+        let o = AppOptions {
+            rigctld_program: Some(Some(fake_rigctld())),
+            managed_listen: Some(listen),
+            ..opts(dir.path())
+        };
+        let (h, _rx) = attached_with(o, existing(&net), managed()).await;
+        wait_for(&h, 15, "the managed rig", |s| s.rig.daemon.as_deref() == Some("running")).await;
+        net.set_unanswered_calls(true);
+        h.call(AppCommand::Call { peer: "ZS1XYZ".into() }).await.unwrap();
+        wait_for(&h, 5, "calling", |s| s.modem == ModemState::Calling).await;
+        assert!(matches!(h.call(AppCommand::Shutdown).await, Ok(CommandOk::Done)));
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let answers = tokio::time::timeout(Duration::from_millis(500), tokio::net::TcpStream::connect(listen))
+            .await
+            .is_ok_and(|r| r.is_ok());
+        assert!(answers, "MercuryChat's rigctld was stopped while the station was busy");
     }
 }

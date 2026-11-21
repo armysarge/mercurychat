@@ -263,10 +263,10 @@ pub fn rigctld_spec_for(cfg: &RigConfig, listen: SocketAddr) -> Option<RigctldSp
             let port = cfg.ptt.ptt_port.trim();
             (line, (!port.is_empty()).then(|| port.to_string()))
         }
-        PttMethod::Cm108 => ("CM108", None),
         PttMethod::NoPtt => ("NONE", None),
         // Mercury keys however it is set up; through this rigctld, that is CAT.
-        PttMethod::Cat | PttMethod::LeaveMercury => ("RIG", None),
+        // CM108 is Mercury's own (a HID device, §5.2): rigctld only reads PTT.
+        PttMethod::Cat | PttMethod::LeaveMercury | PttMethod::Cm108 => ("RIG", None),
     };
     Some(RigctldSpec { model, rig_path, baud, conf, ptt_type, ptt_path, listen })
 }
@@ -298,15 +298,15 @@ pub fn mercury_ptt_for(cfg: &RigConfig, managed: SocketAddr) -> Option<Telemetry
     match (p.method, rigctld) {
         (PttMethod::LeaveMercury, _) => None,
         (PttMethod::NoPtt, _) => Some(cmd("none", String::new(), 0, "rts", "none")),
-        (PttMethod::Cat | PttMethod::SerialLine | PttMethod::Cm108, Some(addr)) => {
-            Some(cmd("hamlib", addr, 2, "rts", "none"))
-        }
+        // CM108 is a HID device, not the COM port rigctld holds: Mercury
+        // drives it with the chosen GPIO whatever runs the CAT (§5.2).
+        (PttMethod::Cm108, _) => Some(cmd("cm108", String::new(), 0, "rts", "none")),
+        (PttMethod::Cat | PttMethod::SerialLine, Some(addr)) => Some(cmd("hamlib", addr, 2, "rts", "none")),
         (PttMethod::SerialLine, None) => {
             let port = if p.ptt_port.trim().is_empty() { &cfg.cat.serial_port } else { &p.ptt_port };
             let invert = if p.invert { line(p.line) } else { "none" };
             Some(cmd("serial", port.trim().to_string(), 0, line(p.line), invert))
         }
-        (PttMethod::Cm108, None) => Some(cmd("cm108", String::new(), 0, "rts", "none")),
         // Refused by validate(): CAT PTT needs a rigctld.
         (PttMethod::Cat, None) => None,
     }
