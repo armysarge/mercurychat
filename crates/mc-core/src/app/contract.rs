@@ -251,6 +251,9 @@ pub enum AppCommand {
     /// The CAT log: MercuryChat's rigctld's stderr, then MercuryChat's own rig
     /// link errors, each the last 200 lines.
     CatLog,
+    /// The app is exiting: stop what MercuryChat started (its own rigctld)
+    /// and answer once it has gone (M3b.1 §5.3).
+    Shutdown,
     /// Mercury's sound devices, from its UI link (M3b.1 §6).
     AudioSettings,
     /// Apply sound devices in Mercury (`set_audio_config`); refused while the

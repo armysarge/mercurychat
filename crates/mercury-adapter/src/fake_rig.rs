@@ -44,6 +44,25 @@ pub fn dummy_caps() -> RigCaps {
     }
 }
 
+/// An address on 127.0.0.1 for a rigctld that a test starts later (the
+/// supervisor's tests). Not port 0's pick: on Windows that comes from the
+/// range outgoing connections use, and another test's long-lived client can
+/// take it before the program binds it. These are below every OS's
+/// ephemeral range, spread by process id, and checked free now.
+pub fn listen_addr() -> std::net::SocketAddr {
+    use std::sync::atomic::{AtomicU32, Ordering};
+    static NEXT: AtomicU32 = AtomicU32::new(0);
+    let spread = (std::process::id() % 1_000) * 10;
+    loop {
+        let n = NEXT.fetch_add(1, Ordering::Relaxed);
+        let port = (15_000 + (spread + n) % 15_000) as u16;
+        let addr = std::net::SocketAddr::from(([127, 0, 0, 1], port));
+        if std::net::TcpListener::bind(addr).is_ok() {
+            return addr;
+        }
+    }
+}
+
 pub struct FakeRigctld {
     pub addr: SocketAddr,
     state: Arc<Mutex<State>>,

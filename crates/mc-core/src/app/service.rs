@@ -236,6 +236,10 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                                     app.hamlib_models(hamlib_dir, reply);
                                     continue;
                                 }
+                                AppCommand::Shutdown => {
+                                    app.shutdown(reply);
+                                    continue;
+                                }
                                 other => other,
                             };
                             let _ = reply.send(app.handle(cmd));
@@ -731,6 +735,8 @@ impl App {
             AppCommand::HamlibModels { .. } => {
                 Err(AppError::Internal { message: "the model list runs on its own".into() })
             }
+            // Answered from the loop (see `shutdown`), never here.
+            AppCommand::Shutdown => Err(AppError::Internal { message: "shutdown runs on its own".into() }),
             AppCommand::CatLog => self.cat_log(),
             AppCommand::AudioSettings => self.audio_settings(),
             AppCommand::SetAudio { system, input, output, channel } => self.set_audio(system, input, output, channel),

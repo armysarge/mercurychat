@@ -361,9 +361,10 @@ impl App {
         r.tx = None;
         r.rate = None;
         r.in_flight.clear();
-        // Stops MercuryChat's own rigctld, if it started one.
+        // MercuryChat's own rigctld, if it started one: a new one starts once
+        // it has gone (below), or it is stopped at the end.
         r.daemon_bridge = None;
-        r.daemon = None;
+        let mut previous = r.daemon.take();
         let same_station = profile_id.is_some() && r.profile_id.as_deref() == profile_id;
         r.profile_id = profile_id.map(String::from);
         let configured = profile_id.is_some() && cfg.freq_control != FreqControl::None;
@@ -409,7 +410,7 @@ impl App {
                     match (r.rigctld_program(&cfg.hamlib_dir), rigctld_spec_for(&cfg, listen)) {
                         (Some(exe), Some(spec)) => {
                             let (dtx, mut drx) = mpsc::channel(8);
-                            r.daemon = Some(RigctldDaemon::start(exe, spec, dtx));
+                            r.daemon = Some(RigctldDaemon::start_after(exe, spec, dtx, previous.take()));
                             let fwd = out_tx.clone();
                             let bridge = tokio::spawn(async move {
                                 while let Some(state) = drx.recv().await {
@@ -444,6 +445,25 @@ impl App {
                 r.inbox = Some(out_rx);
             }
         }
+        // No new rigctld took over from the old one: stop it.
+        if let Some(p) = previous {
+            tokio::spawn(p.shutdown());
+        }
+    }
+
+    /// The app is exiting: stop MercuryChat's own rigctld and answer once it
+    /// has gone (a dropped handle would only be killed if the runtime lived on).
+    pub(super) fn shutdown(&mut self, reply: super::Reply<CommandOk>) {
+        self.rig.task = None;
+        self.rig.tx = None;
+        self.rig.daemon_bridge = None;
+        let daemon = self.rig.daemon.take();
+        tokio::spawn(async move {
+            if let Some(d) = daemon {
+                d.shutdown().await;
+            }
+            let _ = reply.send(Ok(CommandOk::Done));
+        });
     }
 
     /// Hamlib's rig models (`rigctld -l`), from its own task.

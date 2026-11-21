@@ -8,8 +8,16 @@ set -euo pipefail
 targets=("$@")
 [ ${#targets[@]} -eq 0 ] && targets=(linux-amd64 linux-arm64 windows-x64)
 
-commit=$(git -C /src rev-parse HEAD 2>/dev/null || echo unknown)
-dirty=$(git -C /src status --porcelain --untracked-files=no 2>/dev/null | wc -l || echo unknown)
+# MERCURY_COMMIT builds that commit instead of the checkout's HEAD (it must be
+# reachable from one of the checkout's branches); the tree check then reads 0.
+if [ -n "${MERCURY_COMMIT:-}" ]; then
+  commit=$(git -C /src rev-parse "$MERCURY_COMMIT^{commit}")
+else
+  commit=$(git -C /src rev-parse HEAD 2>/dev/null || echo unknown)
+fi
+if [ -n "${MERCURY_COMMIT:-}" ]; then dirty=0; else
+  dirty=$(git -C /src status --porcelain --untracked-files=no 2>/dev/null | wc -l || echo unknown)
+fi
 
 for t in "${targets[@]}"; do
   echo "=== building $t ==="

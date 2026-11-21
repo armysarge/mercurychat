@@ -116,8 +116,7 @@ mod supervisor {
     const FAKE: &str = env!("CARGO_BIN_EXE_fake-rigctld");
 
     fn free_addr() -> SocketAddr {
-        let l = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        l.local_addr().unwrap()
+        mercury_adapter::fake_rig::listen_addr()
     }
 
     fn spec(listen: SocketAddr) -> RigctldSpec {
@@ -206,6 +205,32 @@ mod supervisor {
         })
         .await;
         assert!(gone.is_ok(), "MercuryChat's own rigctld is stopped with it");
+    }
+
+    // M3b.1 Task 9 (the lab found rigctld left running after the app exited):
+    // shutdown() returns only once MercuryChat's rigctld has gone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_waits_for_exit() {
+        let addr = free_addr();
+        let (d, mut rx) = start(addr, &[]);
+        assert_eq!(next(&mut rx).await, DaemonState::Starting);
+        assert_eq!(next(&mut rx).await, DaemonState::Running);
+        tokio::time::timeout(Duration::from_secs(5), d.shutdown()).await.expect("shutdown in time");
+        assert!(!answers(addr).await, "rigctld still answers after shutdown returned");
+    }
+
+    // A settings change replaces the daemon: the new one starts only after
+    // the old one has gone, so it never "reuses" its own predecessor.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn replacement_waits_for_previous() {
+        let addr = free_addr();
+        let (d, mut rx) = start(addr, &[]);
+        assert_eq!(next(&mut rx).await, DaemonState::Starting);
+        assert_eq!(next(&mut rx).await, DaemonState::Running);
+        let (tx2, mut rx2) = mpsc::channel(16);
+        let _d2 = RigctldDaemon::start_after(PathBuf::from(FAKE), spec(addr), tx2, Some(d));
+        assert_eq!(next(&mut rx2).await, DaemonState::Starting);
+        assert_eq!(next(&mut rx2).await, DaemonState::Running);
     }
 
     #[tokio::test(flavor = "multi_thread")]

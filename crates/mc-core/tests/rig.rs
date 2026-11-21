@@ -977,7 +977,7 @@ mod m3b1 {
     }
 
     fn free_addr() -> SocketAddr {
-        std::net::TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap()
+        mercury_adapter::fake_rig::listen_addr()
     }
 
     async fn attached_with(
@@ -1027,6 +1027,50 @@ mod m3b1 {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    // M3b.1 Task 9: the lab found MercuryChat's rigctld left running after the
+    // app exited. Shutdown answers only once it has gone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn shutdown_stops_managed_rigctld() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let listen = free_addr();
+        let o = AppOptions {
+            rigctld_program: Some(Some(fake_rigctld())),
+            managed_listen: Some(listen),
+            ..opts(dir.path())
+        };
+        let (h, _rx) = attached_with(o, existing(&net), managed()).await;
+        wait_for(&h, 15, "the managed rig", |s| s.rig.daemon.as_deref() == Some("running")).await;
+        assert!(matches!(h.call(AppCommand::Shutdown).await, Ok(CommandOk::Done)));
+        let answers = tokio::time::timeout(Duration::from_millis(500), tokio::net::TcpStream::connect(listen))
+            .await
+            .is_ok_and(|r| r.is_ok());
+        assert!(!answers, "MercuryChat's rigctld still answers after Shutdown");
+    }
+
+    // A settings change restarts the managed rigctld: the new one must be ours,
+    // not the old one "reused" as it exits.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn managed_restart_is_not_reuse() {
+        let dir = tempfile::tempdir().unwrap();
+        let net = FakeNet::start().await;
+        let o = AppOptions {
+            rigctld_program: Some(Some(fake_rigctld())),
+            managed_listen: Some(free_addr()),
+            ..opts(dir.path())
+        };
+        let (h, _rx) = attached_with(o, existing(&net), managed()).await;
+        wait_for(&h, 15, "the managed rig", |s| s.rig.daemon.as_deref() == Some("running")).await;
+        let mut c = managed();
+        c.offset_hz = 1500;
+        h.call(AppCommand::SetRigConfig { config: c }).await.unwrap();
+        let s = wait_for(&h, 15, "the restarted rig", |s| {
+            matches!(s.rig.daemon.as_deref(), Some("running") | Some("reused")) && s.rig.link == RigLinkView::Up
+        })
+        .await;
+        assert_eq!(s.rig.daemon.as_deref(), Some("running"));
     }
 
     #[tokio::test(flavor = "multi_thread")]

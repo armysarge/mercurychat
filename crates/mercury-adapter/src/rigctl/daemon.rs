@@ -9,8 +9,8 @@ use std::process::Stdio;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
-use tokio::task::AbortHandle;
+use tokio::sync::{mpsc, watch};
+use tokio::task::JoinHandle;
 
 /// What MercuryChat starts rigctld with.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -153,23 +153,40 @@ pub async fn answers_as_rigctld(addr: SocketAddr) -> bool {
     matches!(tokio::time::timeout(PROBE_TIMEOUT, attempt).await, Ok(Some(_)))
 }
 
-/// MercuryChat's own rigctld. Dropping the handle stops it, if this handle
-/// started it; a reused rigctld is never touched.
+/// MercuryChat's own rigctld. [`RigctldDaemon::shutdown`] stops it and waits
+/// until it has gone; dropping the handle stops it without waiting. Either
+/// way only a rigctld this handle started is stopped; a reused one is never
+/// touched.
 pub struct RigctldDaemon {
     log: Arc<Mutex<VecDeque<String>>>,
-    task: AbortHandle,
+    stop: watch::Sender<bool>,
+    task: Option<JoinHandle<()>>,
 }
 
 impl Drop for RigctldDaemon {
     fn drop(&mut self) {
         // The task owns the child, spawned with kill_on_drop: aborting it stops rigctld.
-        self.task.abort();
+        if let Some(t) = &self.task {
+            t.abort();
+        }
     }
 }
 
 impl RigctldDaemon {
     pub fn start(exe: PathBuf, spec: RigctldSpec, events: mpsc::Sender<DaemonState>) -> RigctldDaemon {
-        Self::start_with_env(exe, spec, events, Vec::new())
+        Self::spawn(exe, spec, events, Vec::new(), None)
+    }
+
+    /// As [`RigctldDaemon::start`], once `previous` (the daemon this one
+    /// replaces) has stopped: otherwise the new one could find the old one
+    /// still answering on the same address and "reuse" it as it exits.
+    pub fn start_after(
+        exe: PathBuf,
+        spec: RigctldSpec,
+        events: mpsc::Sender<DaemonState>,
+        previous: Option<RigctldDaemon>,
+    ) -> RigctldDaemon {
+        Self::spawn(exe, spec, events, Vec::new(), previous)
     }
 
     /// As [`RigctldDaemon::start`], with extra environment for the program (tests).
@@ -179,9 +196,36 @@ impl RigctldDaemon {
         events: mpsc::Sender<DaemonState>,
         env: Vec<(String, String)>,
     ) -> RigctldDaemon {
+        Self::spawn(exe, spec, events, env, None)
+    }
+
+    fn spawn(
+        exe: PathBuf,
+        spec: RigctldSpec,
+        events: mpsc::Sender<DaemonState>,
+        env: Vec<(String, String)>,
+        previous: Option<RigctldDaemon>,
+    ) -> RigctldDaemon {
         let log = Arc::new(Mutex::new(VecDeque::with_capacity(LOG_LINES)));
-        let task = tokio::spawn(supervise(exe, spec, events, env, log.clone())).abort_handle();
-        RigctldDaemon { log, task }
+        let (stop, stopped) = watch::channel(false);
+        let l = log.clone();
+        let task = tokio::spawn(async move {
+            if let Some(p) = previous {
+                p.shutdown().await;
+            }
+            supervise(exe, spec, events, env, l, stopped).await;
+        });
+        RigctldDaemon { log, stop, task: Some(task) }
+    }
+
+    /// Stop rigctld, if this handle started it, and return once it has exited
+    /// (its port is free). The app calls this on exit: a dropped handle is
+    /// not enough then, as the runtime may stop before the kill is sent.
+    pub async fn shutdown(mut self) {
+        let _ = self.stop.send(true);
+        if let Some(t) = self.task.take() {
+            let _ = t.await;
+        }
     }
 
     /// The last [`LOG_LINES`] lines rigctld wrote to stderr, oldest first.
@@ -204,7 +248,11 @@ async fn supervise(
     events: mpsc::Sender<DaemonState>,
     env: Vec<(String, String)>,
     log: Arc<Mutex<VecDeque<String>>>,
+    mut stop: watch::Receiver<bool>,
 ) {
+    if *stop.borrow() {
+        return;
+    }
     if answers_as_rigctld(spec.listen).await {
         let _ = events.send(DaemonState::Reused).await;
         return;
@@ -214,16 +262,27 @@ async fn supervise(
     for attempt in 0..2 {
         if attempt == 1 {
             let _ = events.send(DaemonState::Restarting).await;
-            tokio::time::sleep(RESTART_AFTER).await;
+            tokio::select! {
+                _ = tokio::time::sleep(RESTART_AFTER) => {}
+                _ = stopped(&mut stop) => return,
+            }
         }
-        let why = run_once(&exe, &args, &env, spec.listen, &events, &log).await;
+        let Some(why) = run_once(&exe, &args, &env, spec.listen, &events, &log, &mut stop).await else {
+            return; // stopped
+        };
         if attempt == 1 {
             let _ = events.send(DaemonState::Failed { reason: why }).await;
         }
     }
 }
 
-/// Start rigctld once and wait for it to stop; why it stopped.
+/// Resolves once `stop` says stop (or its sender has gone).
+async fn stopped(stop: &mut watch::Receiver<bool>) {
+    let _ = stop.wait_for(|s| *s).await;
+}
+
+/// Start rigctld once and wait for it to stop; why it stopped, or None when
+/// `stop` ended it (killed and waited for).
 async fn run_once(
     exe: &Path,
     args: &[String],
@@ -231,7 +290,8 @@ async fn run_once(
     listen: SocketAddr,
     events: &mpsc::Sender<DaemonState>,
     log: &Arc<Mutex<VecDeque<String>>>,
-) -> String {
+    stop: &mut watch::Receiver<bool>,
+) -> Option<String> {
     let mut cmd = tokio::process::Command::new(exe);
     cmd.args(args)
         .envs(env.iter().map(|(k, v)| (k, v)))
@@ -246,7 +306,7 @@ async fn run_once(
     }
     let mut child = match cmd.spawn() {
         Ok(c) => c,
-        Err(e) => return format!("{}: {e}", exe.display()),
+        Err(e) => return Some(format!("{}: {e}", exe.display())),
     };
     let last = Arc::new(Mutex::new(None::<String>));
     let reader = child.stderr.take().map(|err| {
@@ -268,25 +328,35 @@ async fn run_once(
     // Ready: answering within READY_WITHIN, unless it exits first.
     let deadline = tokio::time::Instant::now() + READY_WITHIN;
     loop {
+        if *stop.borrow() {
+            let _ = child.kill().await; // kills and waits
+            return None;
+        }
         if let Ok(Some(status)) = child.try_wait() {
             if let Some(r) = reader {
                 let _ = r.await; // the whole of stderr, for the reason
             }
-            return reason(status.code(), &last);
+            return Some(reason(status.code(), &last));
         }
         if answers_as_rigctld(listen).await {
             break;
         }
         if tokio::time::Instant::now() >= deadline {
             let _ = child.kill().await;
-            return format!("rigctld did not answer on {listen} within {} s", READY_WITHIN.as_secs());
+            return Some(format!("rigctld did not answer on {listen} within {} s", READY_WITHIN.as_secs()));
         }
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     let _ = events.send(DaemonState::Running).await;
-    let status = child.wait().await;
+    let status = tokio::select! {
+        s = child.wait() => s,
+        _ = stopped(stop) => {
+            let _ = child.kill().await;
+            return None;
+        }
+    };
     if let Some(r) = reader {
         let _ = r.await;
     }
-    reason(status.ok().and_then(|s| s.code()), &last)
+    Some(reason(status.ok().and_then(|s| s.code()), &last))
 }

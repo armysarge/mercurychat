@@ -401,6 +401,27 @@ pub fn run() {
             windows::splash_status,
             windows::quit_app
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running MercuryChat");
+        .build(tauri::generate_context!())
+        .expect("error while running MercuryChat")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                shut_down(app);
+            }
+        });
 }
+
+/// The app is exiting: let the core stop what it started (MercuryChat's own
+/// rigctld, M3b.1 §5.3) before the process ends, as the runtime goes with it.
+fn shut_down(app: &tauri::AppHandle) {
+    let Some(shell) = app.try_state::<Shell>() else { return };
+    let Ok(core) = shell.core() else { return };
+    let done = tauri::async_runtime::block_on(async move {
+        tokio::time::timeout(SHUTDOWN_WITHIN, core.call(AppCommand::Shutdown)).await
+    });
+    if done.is_err() {
+        eprintln!("MercuryChat: shutdown took longer than {} s", SHUTDOWN_WITHIN.as_secs());
+    }
+}
+
+/// How long exit waits for the core to stop what it started.
+const SHUTDOWN_WITHIN: Duration = Duration::from_secs(3);

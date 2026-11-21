@@ -133,7 +133,17 @@ It checks:
 8. rigctld without `-P` turns the PTT check off, raises no fault and refuses Tune;
 9. a Mercury with its own CAT connection is refused as a second owner, with the reason.
 
-Results: `report.txt` (one PASS or FAIL line per check), `activity.txt`, and the rigctld and Mercury logs. About three minutes.
+Results: `report-m3b.txt` (one PASS or FAIL line per check), `activity-m3b.txt`, and the rigctld and Mercury logs. About three minutes. `run-m3b-lab.sh` is now a wrapper for `run-rig-lab-checks.sh m3b`.
+
+### M3b.1: MercuryChat's own rigctld, Mercury's PTT and audio
+
+`run-rig-lab-checks.sh m3b1` runs seven checks:
+- MercuryChat starts its own rigctld (dummy rig) and stops it on exit, or reuses one that's already there;
+- it sets Mercury's PTT and audio over Mercury's UI link;
+- it shows the frequency offset;
+- check 7 repeats the run against unpatched upstream Mercury.
+
+What each check proves, and the commands, are in [`docker/rig/M3b1-checks.md`](docker/rig/M3b1-checks.md). On Windows, `node lab/windows/m3b1-exit-check.mjs <mercurychat.exe> <fake-rigctld.exe> <empty dir>` checks that closing the real window stops the app's rigctld (with a fake rigctld; nothing must be listening on 4532).
 
 ## 4. Desktop shell
 

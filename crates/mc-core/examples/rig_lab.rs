@@ -12,10 +12,18 @@
 //! and check 9 starts a third Mercury with a serial Hamlib model through
 //! `MERCURY_C_START` (telemetry on `MERCURY_C_WS`, TNC on 8500).
 //! `RIG_LOG` is rigctld A's `-vvvv` log, read to see what reached the rig.
+//!
+//! M3b.1 (lab/docker/rig/run-rig-lab-checks.sh, lab/docker/rig/M3b1-checks.md):
+//! `rig_lab <out> m3b1` runs against a Mercury A started with `-P none` and no
+//! rigctld on 4532: MercuryChat starts its own (managed), sets Mercury's PTT,
+//! shows the offset, and sets Mercury's audio. `rig_lab <out> reuse` finds a
+//! rigctld already on 4532 and uses it. `WS_SNOOP` is a command that prints
+//! Mercury's own view (ws-snoop.py); `MERCURY_A_INI` is Mercury A's ini.
 
 use mc_core::app::{
-    spawn_app, ActivityEntry, AppCommand, AppHandle, AppOptions, AppSnapshot, BandLevels, CommandOk, ModemState,
-    OwnerCheck, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView, TxLevelResult,
+    spawn_app, ActivityEntry, AppCommand, AppHandle, AppOptions, AppSnapshot, AudioSettingsView, BandLevels, CommandOk,
+    FreqControl, ModemState, OwnerCheck, PttMethod, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView,
+    TxLevelResult,
 };
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_core::station::{Station, StationConfig};
@@ -125,13 +133,8 @@ async fn watch(h: AppHandle, stop: tokio::sync::watch::Receiver<bool>) -> (bool,
     (keyed, faults)
 }
 
-#[tokio::main(flavor = "multi_thread")]
-async fn main() {
-    let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "/out".into()));
-    let data = out.join("app");
-    std::fs::create_dir_all(&data).unwrap();
-
-    // Station B: a headless peer that answers calls and echoes chats.
+/// Station B: a headless peer that answers calls and echoes chats.
+async fn start_peer(data: &std::path::Path) {
     let mut peer_cfg = StationConfig::defaults(
         Callsign::parse("ZS6PEER").unwrap(),
         Endpoint::base("127.0.0.1", 8400),
@@ -143,16 +146,46 @@ async fn main() {
     peer.attach().await.expect("peer attach");
     peer.set_listen(true).await.expect("peer listen");
     tokio::spawn(mc_core::sim::serve_peer(peer, true, None));
+}
 
+/// The app with station A selected and attached.
+async fn start_lab(out: &std::path::Path, data: &std::path::Path) -> Lab {
     let opts = AppOptions { stations_root: Some(data.join("stations")), ..AppOptions::default() };
     let h = spawn_app(Store::open_in_memory().unwrap(), opts);
-    let mut lab = Lab { h: h.clone(), out: out.clone(), results: vec![] };
+    let lab = Lab { h: h.clone(), out: out.to_path_buf(), results: vec![] };
     let id = match h.call(AppCommand::SaveProfile { profile: profile("ZS6LAB", 8300, 10000) }).await.unwrap() {
         CommandOk::Profile(p) => p.id,
         other => panic!("{other:?}"),
     };
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
     assert!(lab.wait(30.0, |s| s.modem == ModemState::Listening).await.0, "station A did not attach");
+    lab
+}
+
+#[tokio::main(flavor = "multi_thread")]
+async fn main() {
+    let out = PathBuf::from(std::env::args().nth(1).unwrap_or_else(|| "/out".into()));
+    let mode = std::env::args().nth(2).unwrap_or_else(|| "m3b".into());
+    let data = out.join("app");
+    std::fs::create_dir_all(&data).unwrap();
+    let lab = match mode.as_str() {
+        "m3b" => {
+            start_peer(&data).await;
+            m3b(start_lab(&out, &data).await).await
+        }
+        "m3b1" => {
+            start_peer(&data).await;
+            m3b1(start_lab(&out, &data).await).await
+        }
+        "reuse" => reuse(start_lab(&out, &data).await).await,
+        other => panic!("unknown mode {other}: m3b, m3b1 or reuse"),
+    };
+    lab.finish(&mode).await
+}
+
+/// The M3b exit checks (1-9).
+async fn m3b(mut lab: Lab) -> Lab {
+    let h = lab.h.clone();
     h.call(AppCommand::SetRigConfig { config: rig(4532) }).await.unwrap();
     assert!(lab.rig_up().await, "the rig link did not come up");
     let (_, s) =
@@ -311,13 +344,197 @@ async fn main() {
         format!("owner check {:?}; link {:?}; a change {set:?}", s.rig.owner_check, s.rig.link),
     );
 
-    let log: Vec<String> =
-        lab.activity().await.iter().map(|e| format!("{} [{}] {}", e.at_utc, e.kind, e.text)).collect();
-    std::fs::write(lab.out.join("activity.txt"), log.join("\n") + "\n").unwrap();
-    let failed = lab.results.iter().filter(|r| r.starts_with("FAIL")).count();
-    let report =
-        format!("{}\n{} of {} passed\n", lab.results.join("\n"), lab.results.len() - failed, lab.results.len());
-    std::fs::write(lab.out.join("report.txt"), &report).unwrap();
-    print!("{report}");
-    std::process::exit(if failed == 0 { 0 } else { 1 });
+    lab
+}
+
+/// The managed rigctld's configuration for station A (M3b.1 checks 1, 3, 5).
+fn managed(offset_hz: i32) -> RigConfig {
+    let mut c = RigConfig { freq_control: FreqControl::ManagedRigctld, offset_hz, ..RigConfig::default() };
+    c.cat.model = Some(1); // Hamlib's dummy rig: no serial port, no radio
+                           // The dummy rig opens no port, but the settings need one: nothing is a device here.
+    c.cat.serial_port = "/dev/null".into();
+    c.hamlib_dir = "/usr/bin".into();
+    c.ptt.method = PttMethod::Cat;
+    c
+}
+
+/// Mercury's own view (ws-snoop.py), as JSON.
+fn snoop() -> serde_json::Value {
+    let out = std::process::Command::new("bash").arg("-c").arg(env("WS_SNOOP")).output().expect("ws snoop");
+    serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        eprintln!("ws snoop: {e}: {}", String::from_utf8_lossy(&out.stdout));
+        serde_json::Value::Null
+    })
+}
+
+/// Lines of `pgrep -a rigctld` that listen on 4532.
+fn rigctld_4532() -> Vec<String> {
+    let out = std::process::Command::new("pgrep").args(["-a", "rigctld"]).output().expect("pgrep");
+    String::from_utf8_lossy(&out.stdout).lines().filter(|l| l.contains("4532")).map(String::from).collect()
+}
+
+impl Lab {
+    async fn audio(&self) -> AudioSettingsView {
+        match self.h.call(AppCommand::AudioSettings).await.expect("audio settings") {
+            CommandOk::Audio(v) => v,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    async fn audio_until(&self, secs: f64, pred: impl Fn(&AudioSettingsView) -> bool) -> (bool, AudioSettingsView) {
+        let end = Instant::now() + Duration::from_secs_f64(secs);
+        loop {
+            let v = self.audio().await;
+            if pred(&v) || Instant::now() >= end {
+                return (pred(&v), v);
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
+
+    async fn daemon(&self, secs: f64, want: &str) -> (bool, AppSnapshot) {
+        self.wait(secs, |s| s.rig.daemon.as_deref() == Some(want) && s.rig.link == RigLinkView::Up).await
+    }
+
+    /// Stop what the app started (as the window does on exit), write the
+    /// activity log and the report; exit non-zero on any FAIL.
+    async fn finish(self, mode: &str) -> ! {
+        let stopped = tokio::time::timeout(Duration::from_secs(10), self.h.call(AppCommand::Shutdown)).await;
+        println!("INFO shutdown: {stopped:?}");
+        let log: Vec<String> =
+            self.activity().await.iter().map(|e| format!("{} [{}] {}", e.at_utc, e.kind, e.text)).collect();
+        std::fs::write(self.out.join(format!("activity-{mode}.txt")), log.join("\n") + "\n").unwrap();
+        let failed = self.results.iter().filter(|r| r.starts_with("FAIL")).count();
+        let report =
+            format!("{}\n{} of {} passed\n", self.results.join("\n"), self.results.len() - failed, self.results.len());
+        std::fs::write(self.out.join(format!("report-{mode}.txt")), &report).unwrap();
+        print!("{report}");
+        std::process::exit(if failed == 0 { 0 } else { 1 });
+    }
+}
+
+/// M3b.1 checks 1, 3, 4 and 5 (M3b1-checks.md); 1's "nothing left after
+/// exit" and check 2 are the script's.
+async fn m3b1(mut lab: Lab) -> Lab {
+    let h = lab.h.clone();
+
+    // ---- 1 managed: MercuryChat starts rigctld itself and reads the rig through it.
+    let before = rigctld_4532();
+    h.call(AppCommand::SetRigConfig { config: managed(0) }).await.unwrap();
+    let (running, s) = lab.daemon(15.0, "running").await;
+    let up = lab.rig_up().await;
+    let ours = rigctld_4532();
+    lab.record(
+        "1 managed rigctld",
+        before.is_empty() && running && up && ours.len() == 1 && ours[0].contains("-m 1"),
+        format!("before {before:?}; daemon {:?}; link up {up}; process {ours:?}", s.rig.daemon),
+    );
+
+    // ---- 5 offset: the dummy rig's dial at 14 100 000 shows as 14 101 500.
+    h.call(AppCommand::SetRigConfig { config: managed(1500) }).await.unwrap();
+    lab.daemon(15.0, "running").await;
+    lab.rig_up().await;
+    shell("rigctl -m 2 -r 127.0.0.1:4532 F 14100000");
+    let (shown, s) = lab.wait(10.0, |s| s.rig.frequency.as_ref().is_some_and(|f| f.value == 14_101_500)).await;
+    lab.record("5 offset", shown, format!("dial 14100000 + 1500 -> view {:?}", s.rig.frequency.map(|f| f.value)));
+
+    // ---- 3 PTT push: Mercury (started with -P none) is set to key through our rigctld.
+    let (_, s) = lab.wait(15.0, |_| snoop()["radio_list"]["ptt_method"] == "hamlib").await;
+    let mut rl = snoop()["radio_list"].clone();
+    if let Some(o) = rl.as_object_mut() {
+        o.remove("list"); // Hamlib's whole model list
+    }
+    let pushed = rl["ptt_method"] == "hamlib" && rl["device_path"] == "127.0.0.1:4532";
+    let noted = lab.activity().await.iter().any(|e| e.text.contains("set Mercury's PTT"));
+    // A separate rigctl client watches the rig's PTT through the session.
+    let mut poll = std::process::Command::new("bash")
+        .arg("-c")
+        .arg("while :; do rigctl -m 2 -r 127.0.0.1:4532 t; sleep 0.1; done")
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("rigctl poll");
+    h.call(AppCommand::Call { peer: "ZS6PEER".into() }).await.unwrap();
+    let (session, _) = lab.wait(120.0, |s| s.modem == ModemState::Connected).await;
+    if session {
+        let _ = h.call(AppCommand::SendChat { peer: "ZS6PEER".into(), text: "M3b.1 rig lab".into() }).await;
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        let _ = h.call(AppCommand::Disconnect).await;
+    }
+    lab.idle().await;
+    let _ = poll.kill();
+    let polled = String::from_utf8_lossy(&poll.wait_with_output().expect("rigctl poll output").stdout).to_string();
+    let ones = polled.lines().filter(|l| l.trim() == "1").count();
+    let zeros = polled.lines().filter(|l| l.trim() == "0").count();
+    lab.record(
+        "3 PTT push",
+        pushed && noted && session && ones > 0,
+        format!(
+            "radio_list {rl}; activity note {noted}; session {session}; rigctl t saw 1 x{ones}, 0 x{zeros}; rig view PTT {:?}",
+            s.rig.ptt
+        ),
+    );
+
+    // ---- 4 audio: Mercury's devices, a change it accepts and saves, and one it refuses.
+    let ini = || std::fs::read_to_string(env("MERCURY_A_INI")).unwrap_or_default();
+    let (listed, v) = lab
+        .audio_until(10.0, |v| {
+            let ins: Vec<&str> = v.inputs.iter().map(|d| d.id.as_str()).collect();
+            let outs: Vec<&str> = v.outputs.iter().map(|d| d.id.as_str()).collect();
+            v.available && ins.contains(&"a_to_b.monitor") && outs.contains(&"b_to_a")
+        })
+        .await;
+    let system = v.system.clone();
+    let set = |input: &str, output: &str| AppCommand::SetAudio {
+        system: system.clone(),
+        input: input.into(),
+        output: output.into(),
+        channel: "left".into(),
+    };
+    let r1 = h.call(set("a_to_b.monitor", "b_to_a")).await;
+    let (applied, v1) = lab
+        .audio_until(15.0, |v| v.input == "a_to_b.monitor" && v.output == "b_to_a" && v.audio_ok == Some(true))
+        .await;
+    let saved = ini();
+    let in_ini = saved.contains("a_to_b.monitor") && saved.contains("b_to_a");
+    let r2 = h.call(set("mc_lab_no_such_source", "b_to_a")).await;
+    let (refused, v2) = lab.audio_until(15.0, |v| v.audio_ok == Some(false)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    let unchanged = ini() == saved;
+    // Back to the crossed routing, so Mercury A hears B again.
+    let r3 = h.call(set("b_to_a.monitor", "a_to_b")).await;
+    let (back, _) = lab
+        .audio_until(15.0, |v| v.input == "b_to_a.monitor" && v.output == "a_to_b" && v.audio_ok == Some(true))
+        .await;
+    let ids = |v: &AudioSettingsView| {
+        format!(
+            "in {:?} out {:?}",
+            v.inputs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>(),
+            v.outputs.iter().map(|d| d.id.as_str()).collect::<Vec<_>>()
+        )
+    };
+    lab.record(
+        "4 audio",
+        listed && r1.is_ok() && applied && in_ini && r2.is_ok() && refused && unchanged && r3.is_ok() && back,
+        format!(
+            "{} (system {system}); set {r1:?} -> audio_ok {:?}, ini holds both {in_ini}; bogus {r2:?} -> audio_ok {:?} ({:?}), ini unchanged {unchanged}; restored {back}",
+            ids(&v),
+            v1.audio_ok,
+            v2.audio_ok,
+            v2.audio_error
+        ),
+    );
+    lab
+}
+
+/// M3b.1 check 2: a rigctld already on 4532 is used, and left running.
+async fn reuse(mut lab: Lab) -> Lab {
+    let before = rigctld_4532();
+    lab.h.call(AppCommand::SetRigConfig { config: managed(0) }).await.unwrap();
+    let (reused, s) = lab.daemon(15.0, "reused").await;
+    lab.record(
+        "2 reuse",
+        before.len() == 1 && reused,
+        format!("before {before:?}; daemon {:?}; link {:?}", s.rig.daemon, s.rig.link),
+    );
+    lab
 }
