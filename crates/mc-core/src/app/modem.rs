@@ -12,7 +12,7 @@ use super::broadcast::{broadcast_gate, BroadcastKind, GateRefusal};
 use super::chat::ChatMessage;
 use super::events::{ModemState, SessionDirection, SessionInfo};
 use crate::profile::{ModemTarget, StationProfile};
-use crate::session::{SessionCommand, SessionEnd, SessionEvent};
+use crate::session::{PeerMsg, SessionCommand, SessionEnd, SessionEvent};
 use crate::station::{ConnectInfo, Observation, Station, StationConfig, StationError, StationRequest};
 use mc_storage::{SessionRow, Store};
 use mch_protocol::ObjectId;
@@ -88,6 +88,9 @@ pub enum ModemCmd {
     /// Mercury's tuning carrier (M3b). Carried out while idle; `Off` also
     /// during a link (harmless there, and never left unsent).
     Tune(TuneArg),
+    /// A minor-1 message for the running session (M3c B1); dropped, with a
+    /// log line, when there is none.
+    Peer(PeerMsg),
     Shutdown,
 }
 
@@ -150,6 +153,8 @@ pub enum ReportKind {
     Telemetry(TelemetryMsg),
     /// What became of a TUNE command, or the probe after attach.
     Tune(TuneResult),
+    /// A minor-1 message from the session's peer (M3c B1).
+    Peer(PeerMsg),
     /// The simulator's fake rigctld listens here (M3b).
     SimRig(std::net::SocketAddr),
     /// Where to send commands for this modem's telemetry client (M3b: the
@@ -1020,7 +1025,7 @@ impl Link {
 
     async fn on_event(&mut self, r: &Reporter, ev: SessionEvent) {
         match ev {
-            SessionEvent::Negotiated { peer_app, .. } if !self.negotiated => {
+            SessionEvent::Negotiated { peer_app, caps, .. } if !self.negotiated => {
                 self.negotiated = true;
                 let since = mc_storage::now_utc();
                 if let Some(rec) = self.records.as_mut() {
@@ -1050,6 +1055,7 @@ impl Link {
                     peer_app: Some(peer_app),
                     session_id: self.session_id.clone(),
                     bandwidth: self.info.bandwidth.clone(),
+                    caps,
                 }))
                 .await;
                 // The outbox for this peer goes out in order, after HELLO.
@@ -1069,6 +1075,10 @@ impl Link {
                 self.report(r, &id.0).await
             }
             SessionEvent::ChatReceived { id, duplicate: false, .. } => self.report(r, &id.0).await,
+            SessionEvent::Peer(m) => r.send(ReportKind::Peer(m)).await,
+            SessionEvent::PeerSendRefused { what, reason } => {
+                tracing::warn!("{what} not sent: {reason}");
+            }
             other => tracing::debug!(?other, "session event"),
         }
     }
@@ -1173,6 +1183,11 @@ async fn link(
                         }
                     }
                     Some(ModemCmd::Tune(TuneArg::Off)) => send_wire(Command::Tune(TuneArg::Off)),
+                    Some(ModemCmd::Peer(m)) => {
+                        if ending || aborted || link.chats.try_send(SessionCommand::Peer(m)).is_err() {
+                            tracing::warn!("a peer message was dropped: the session is ending or not taking it");
+                        }
+                    }
                     Some(ModemCmd::Submit { peer, id }) => {
                         if peer == link.info.peer && !ending && !aborted {
                             link.submit(r, id.0).await;

@@ -53,6 +53,9 @@ pub struct SessionInfo {
     pub session_id: String,
     /// The negotiated bandwidth token the modem reported.
     pub bandwidth: String,
+    /// The MCH/1 capabilities both stations listed (M3c B1): a control for
+    /// one the peer lacks shows "not supported by this station".
+    pub caps: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]

@@ -31,6 +31,68 @@ pub struct SessionConfig {
     pub hello_timeout: Duration,
     /// Pace file chunks so at most this many bytes sit in the modem queue.
     pub modem_window: u64,
+    /// The MCH/1 minor this side announces (`MINOR`; lower only to act as an older peer).
+    pub proto_minor: u8,
+    /// The capabilities this side announces (`default_capabilities()`).
+    pub capabilities: Vec<String>,
+}
+
+/// What this version announces in HELLO: chat, files, QSY and info (M3c B1).
+pub fn default_capabilities() -> Vec<String> {
+    ["chat", "file", mch_protocol::CAP_QSY, mch_protocol::CAP_INFO].iter().map(|c| c.to_string()).collect()
+}
+
+/// A minor-1 message to or from the peer; each goes on the wire only when
+/// its capability was negotiated (M3c B1). The id is the proposal or request
+/// id (`ObjectId::ZERO` for an unsolicited info response).
+#[derive(Debug, Clone, PartialEq)]
+pub enum PeerMsg {
+    QsyPropose(ObjectId, QsyPropose),
+    QsyAnswer(ObjectId, QsyAnswer),
+    InfoRequest(ObjectId, InfoRequest),
+    /// Boxed: a station share is large next to the other messages.
+    InfoResponse(ObjectId, Box<InfoResponse>),
+}
+
+impl PeerMsg {
+    pub fn ftype(&self) -> FrameType {
+        match self {
+            PeerMsg::QsyPropose(..) => FrameType::QsyPropose,
+            PeerMsg::QsyAnswer(..) => FrameType::QsyAnswer,
+            PeerMsg::InfoRequest(..) => FrameType::InfoRequest,
+            PeerMsg::InfoResponse(..) => FrameType::InfoResponse,
+        }
+    }
+
+    /// What it is, for the operator.
+    pub fn what(&self) -> &'static str {
+        match self {
+            PeerMsg::QsyPropose(..) => "QSY proposal",
+            PeerMsg::QsyAnswer(..) => "QSY answer",
+            PeerMsg::InfoRequest(..) => "information request",
+            PeerMsg::InfoResponse(..) => "information",
+        }
+    }
+
+    pub fn to_frame(&self) -> Result<Frame, ProtocolError> {
+        match self {
+            PeerMsg::QsyPropose(id, p) => p.to_frame(*id),
+            PeerMsg::QsyAnswer(id, a) => a.to_frame(*id),
+            PeerMsg::InfoRequest(id, r) => r.to_frame(*id),
+            PeerMsg::InfoResponse(id, r) => r.to_frame(*id),
+        }
+    }
+
+    /// The message a minor-1 frame carries; `None` for any other type.
+    pub fn from_frame(f: &Frame) -> Option<Result<PeerMsg, ProtocolError>> {
+        Some(match f.ftype {
+            FrameType::QsyPropose => QsyPropose::from_frame(f).map(|p| PeerMsg::QsyPropose(f.id, p)),
+            FrameType::QsyAnswer => QsyAnswer::from_frame(f).map(|a| PeerMsg::QsyAnswer(f.id, a)),
+            FrameType::InfoRequest => InfoRequest::from_frame(f).map(|r| PeerMsg::InfoRequest(f.id, r)),
+            FrameType::InfoResponse => InfoResponse::from_frame(f).map(|r| PeerMsg::InfoResponse(f.id, Box::new(r))),
+            _ => return None,
+        })
+    }
 }
 
 #[derive(Debug)]
@@ -53,6 +115,8 @@ pub enum SessionCommand {
     CancelFile {
         id: ObjectId,
     },
+    /// A minor-1 message; refused (`PeerSendRefused`) when not negotiated.
+    Peer(PeerMsg),
 }
 
 #[derive(Debug, Clone, Default)]
@@ -71,18 +135,68 @@ pub enum ModemSignal {
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SessionEvent {
-    Negotiated { peer_app: String, peer_version: String, minor: u8, chunk: u32 },
-    ChatSubmitted { id: ObjectId, at: Instant },
-    ChatReceived { id: ObjectId, text: String, duplicate: bool },
-    ChatDelivered { id: ObjectId, at: Instant },
-    FileOffered { id: ObjectId, name: String, size: u64 },
-    FileSending { id: ObjectId, sha256: String },
-    FileProgress { id: ObjectId, bytes: u64, total: u64 },
-    FileDelivered { id: ObjectId },
-    FileReceived { id: ObjectId, path: PathBuf, sha256: String },
-    FileRejected { id: ObjectId, reason: String },
-    FileFailed { id: ObjectId, reason: String },
-    PeerError { code: String, text: String },
+    /// `minor` is the peer's; `caps` are ours ∩ the peer's.
+    Negotiated {
+        peer_app: String,
+        peer_version: String,
+        minor: u8,
+        chunk: u32,
+        caps: Vec<String>,
+    },
+    ChatSubmitted {
+        id: ObjectId,
+        at: Instant,
+    },
+    ChatReceived {
+        id: ObjectId,
+        text: String,
+        duplicate: bool,
+    },
+    ChatDelivered {
+        id: ObjectId,
+        at: Instant,
+    },
+    FileOffered {
+        id: ObjectId,
+        name: String,
+        size: u64,
+    },
+    FileSending {
+        id: ObjectId,
+        sha256: String,
+    },
+    FileProgress {
+        id: ObjectId,
+        bytes: u64,
+        total: u64,
+    },
+    FileDelivered {
+        id: ObjectId,
+    },
+    FileReceived {
+        id: ObjectId,
+        path: PathBuf,
+        sha256: String,
+    },
+    FileRejected {
+        id: ObjectId,
+        reason: String,
+    },
+    FileFailed {
+        id: ObjectId,
+        reason: String,
+    },
+    PeerError {
+        code: String,
+        text: String,
+    },
+    /// A minor-1 message from the peer.
+    Peer(PeerMsg),
+    /// A minor-1 send that never went on the wire.
+    PeerSendRefused {
+        what: &'static str,
+        reason: String,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -136,6 +250,8 @@ pub struct Session<'a> {
     ack_seen: bool,
     peer_max_chunk: u32,
     peer_info: Option<(String, String, u8)>,
+    /// Ours ∩ the peer's, once its HELLO is in.
+    caps: Vec<String>,
     q_proto: VecDeque<Frame>,
     q_chat: VecDeque<(ObjectId, Frame)>,
     pending_user: VecDeque<SessionCommand>,
@@ -178,6 +294,7 @@ impl<'a> Session<'a> {
             ack_seen: false,
             peer_max_chunk: 0,
             peer_info: None,
+            caps: Vec::new(),
             q_proto: VecDeque::new(),
             q_chat: VecDeque::new(),
             pending_user: VecDeque::new(),
@@ -187,6 +304,12 @@ impl<'a> Session<'a> {
             modem_reported: 0,
             written_since_report: 0,
         }
+    }
+
+    /// Whether a frame of this type may cross: minor-0 types always, minor-1
+    /// types only with their capability in the negotiated set.
+    fn negotiated(&self, t: FrameType) -> bool {
+        t.capability().is_none_or(|c| self.caps.iter().any(|n| n == c))
     }
 
     fn ready(&self) -> bool {
@@ -199,7 +322,8 @@ impl<'a> Session<'a> {
         if self.ready() {
             if let Some((app, ver, minor)) = self.peer_info.take() {
                 let chunk = self.agreed_chunk();
-                self.emit(SessionEvent::Negotiated { peer_app: app, peer_version: ver, minor, chunk });
+                let caps = self.caps.clone();
+                self.emit(SessionEvent::Negotiated { peer_app: app, peer_version: ver, minor, chunk, caps });
             }
         }
     }
@@ -265,10 +389,10 @@ impl<'a> Session<'a> {
         let hello = Hello {
             app: APP_NAME.into(),
             app_version: APP_VERSION.into(),
-            proto_minor: mch_protocol::MINOR,
+            proto_minor: self.cfg.proto_minor,
             nonce: self.nonce.to_hex(),
             callsign: self.cfg.local_call.clone(),
-            capabilities: vec!["chat".into(), "file".into()],
+            capabilities: self.cfg.capabilities.clone(),
             max_frame: mch_protocol::MAX_PAYLOAD as u32,
             max_file: self.cfg.max_file,
             max_chunk: self.cfg.chunk,
@@ -450,6 +574,18 @@ impl<'a> Session<'a> {
                     self.start_next_file().await;
                 }
             }
+            SessionCommand::Peer(m) => {
+                let what = m.what();
+                if !self.negotiated(m.ftype()) {
+                    let reason = "not supported by this station".to_string();
+                    self.emit(SessionEvent::PeerSendRefused { what, reason });
+                    return;
+                }
+                match m.to_frame() {
+                    Ok(f) => self.q_proto.push_back(f),
+                    Err(e) => self.emit(SessionEvent::PeerSendRefused { what, reason: e.to_string() }),
+                }
+            }
         }
     }
 
@@ -505,12 +641,14 @@ impl<'a> Session<'a> {
                 self.peer_hello_seen = true;
                 self.peer_max_chunk = h.max_chunk;
                 let caps: Vec<String> =
-                    h.capabilities.iter().filter(|c| *c == "chat" || *c == "file").cloned().collect();
-                let ack = HelloAck { nonce: h.nonce.clone(), major: 1, minor: mch_protocol::MINOR, capabilities: caps };
+                    self.cfg.capabilities.iter().filter(|c| h.capabilities.contains(c)).cloned().collect();
+                self.caps = caps.clone();
+                let minor = self.cfg.proto_minor.min(h.proto_minor);
+                let ack = HelloAck { nonce: h.nonce.clone(), major: 1, minor, capabilities: caps };
                 self.q_proto.push_back(ack.to_frame().map_err(proto_err)?);
                 let chunk = self.agreed_chunk();
                 self.decoder.set_chunk_limit(chunk as usize);
-                self.peer_info = Some((h.app, h.app_version, mch_protocol::MINOR));
+                self.peer_info = Some((h.app, h.app_version, h.proto_minor));
                 self.maybe_ready();
             }
             FrameType::HelloAck => {
@@ -610,10 +748,14 @@ impl<'a> Session<'a> {
                 let r = Reason::from_frame(&f).map_err(proto_err)?;
                 self.emit(SessionEvent::PeerError { code: r.code, text: r.text });
             }
-            // Minor-1 types are not negotiated yet: an unnegotiated type ends
-            // the session (M3c B1).
+            // A minor-1 type without its negotiated capability ends the session (B1).
             FrameType::QsyPropose | FrameType::QsyAnswer | FrameType::InfoRequest | FrameType::InfoResponse => {
-                return Err(SessionEnd::Protocol(format!("{:?} frame without its negotiated capability", f.ftype)));
+                if !self.negotiated(f.ftype) {
+                    return Err(SessionEnd::Protocol(format!("{:?} frame without its negotiated capability", f.ftype)));
+                }
+                if let Some(m) = PeerMsg::from_frame(&f) {
+                    self.emit(SessionEvent::Peer(m.map_err(proto_err)?));
+                }
             }
         }
         Ok(())

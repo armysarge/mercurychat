@@ -1185,6 +1185,8 @@ impl App {
             }
             ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
             ReportKind::Tune(result) => self.tune_report(result),
+            // Information requests (M3c Task 7) and QSY (Task 9) take these.
+            ReportKind::Peer(m) => tracing::debug!(?m, "a peer message with nothing to take it yet"),
             ReportKind::SimRig(addr) => self.rig_sim(addr),
             ReportKind::Telemetry(msg) => {
                 self.rig_telemetry_msg(&msg);

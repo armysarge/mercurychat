@@ -59,6 +59,9 @@ pub struct StationConfig {
     pub hello_timeout: Duration,
     pub modem_window: u64,
     pub timeouts: Timeouts,
+    /// The MCH/1 minor and capabilities sessions announce (M3c B1).
+    pub proto_minor: u8,
+    pub capabilities: Vec<String>,
 }
 
 impl StationConfig {
@@ -76,6 +79,8 @@ impl StationConfig {
             hello_timeout: Duration::from_secs(5),
             modem_window: 2 * 1024 + 256,
             timeouts: Timeouts::default(),
+            proto_minor: mch_protocol::MINOR,
+            capabilities: crate::session::default_capabilities(),
         }
     }
 }
@@ -566,6 +571,8 @@ impl Station {
             auto_accept_files: self.cfg.auto_accept_files,
             hello_timeout: self.cfg.hello_timeout,
             modem_window: self.cfg.modem_window,
+            proto_minor: self.cfg.proto_minor,
+            capabilities: self.cfg.capabilities.clone(),
         };
         let Some(att) = self.att.as_mut() else { return SessionEnd::ControlLost };
         let (sig_tx, mut sig_rx) = mpsc::channel(256);
