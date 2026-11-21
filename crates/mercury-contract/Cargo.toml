@@ -1,0 +1,17 @@
+[package]
+name = "mercury-contract"
+description = "The Mercury contract suite: one set of tests against the fake and against real Mercury (M3c Part A)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+
+[dependencies]
+mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }
+mch-protocol = { path = "../mch-protocol" }
+tokio = { version = "1", features = ["full"] }
+serde_json = "1"
+
+[[test]]
+name = "contracts"
+path = "tests/contracts/main.rs"

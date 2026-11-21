@@ -423,6 +423,8 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
                 let mut s = net2.shared.lock().unwrap();
                 if reachable && s.session.is_none() {
                     s.session = Some((a.clone(), b.clone()));
+                    // Like Mercury: the callee hears the CALL (PENDING) before the link is up.
+                    send_line(&s, j, "PENDING");
                     for k in 0..2 {
                         send_line(&s, k, &format!("CONNECTED {a} {b} 2300"));
                     }

@@ -2377,6 +2377,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "mercury-contract"
+version = "0.0.1"
+dependencies = [
+ "mch-protocol",
+ "mercury-adapter",
+ "serde_json",
+ "tokio",
+]
+
+[[package]]
 name = "mercurychat"
 version = "0.0.1"
 dependencies = [

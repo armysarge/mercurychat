@@ -5,6 +5,7 @@ members = [
   "crates/mercury-adapter",
   "crates/mc-storage",
   "crates/mc-core",
+  "crates/mercury-contract",
   "tools/m0-client",
   "src-tauri",
 ]
