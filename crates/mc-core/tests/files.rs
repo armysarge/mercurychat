@@ -101,9 +101,20 @@ fn run(mut st: Station, info: mc_core::ConnectInfo, dir: PathBuf) -> Side {
 
 /// A calls B; `tweak_b` sets B's station config.
 async fn pair(root: &Path, tweak_b: &dyn Fn(&mut StationConfig)) -> (Arc<FakeNet>, Side, Side) {
+    pair_with(root, &|_| {}, tweak_b, |_| {}).await
+}
+
+/// A calls B with both configs set, and `net` set up before the call.
+async fn pair_with(
+    root: &Path,
+    tweak_a: &dyn Fn(&mut StationConfig),
+    tweak_b: &dyn Fn(&mut StationConfig),
+    net_setup: impl FnOnce(&FakeNet),
+) -> (Arc<FakeNet>, Side, Side) {
     let net = FakeNet::start().await;
+    net_setup(&net);
     let (da, db) = (root.join("a"), root.join("b"));
-    let mut a = station(A, net.a_base, &da, &|_| {});
+    let mut a = station(A, net.a_base, &da, tweak_a);
     let mut b = station(B, net.b_base, &db, tweak_b);
     a.attach().await.unwrap();
     b.attach().await.unwrap();
@@ -112,7 +123,7 @@ async fn pair(root: &Path, tweak_b: &dyn Fn(&mut StationConfig)) -> (Arc<FakeNet
     let (ia, ib) = tokio::join!(a.call(&callee, Duration::from_secs(10)), b.wait_incoming(Duration::from_secs(10)));
     let (mut a, mut b) = (run(a, ia.unwrap(), da), run(b, ib.unwrap(), db));
     for s in [&mut a, &mut b] {
-        s.next(10, "Negotiated", |e| matches!(e, SessionEvent::Negotiated { .. })).await;
+        s.next(60, "Negotiated", |e| matches!(e, SessionEvent::Negotiated { .. })).await;
     }
     (net, a, b)
 }
@@ -376,4 +387,34 @@ async fn sender_cancel_is_seen_by_both() {
     a.next(10, "own FileCancelled", |e| matches!(e, SessionEvent::FileCancelled { by_peer: false, .. })).await;
     assert_eq!(a.row(Direction::Out, id).state, TransferState::Cancelled);
     assert_eq!(b.row(Direction::In, id).state, TransferState::Cancelled);
+}
+
+/// M4 C4 / G5: at BW500 (19 B/s on the air, both ways) a chat sent while a
+/// file is going is receipted within 30 s: file data in the modem queue is
+/// bounded by airtime. Real time: the fake modem is real loopback I/O.
+#[tokio::test(flavor = "multi_thread")]
+async fn chat_waits_less_than_30s_at_bw500() {
+    let dir = tempfile::tempdir().unwrap();
+    let bw500 = |c: &mut StationConfig| {
+        c.bandwidth = mercury_adapter::Bandwidth::Bw500;
+        c.hello_timeout = mc_core::station::RADIO_HELLO_TIMEOUT;
+    };
+    let (_net, mut a, mut b) = pair_with(dir.path(), &bw500, &bw500, |n| {
+        n.set_drain_rate(0, 19.0);
+        n.set_drain_rate(1, 19.0);
+    })
+    .await;
+    let id = ObjectId::random();
+    a.send(SessionCommand::SendFile { id, prepared: prepared(&a, "photo.bin", &noise(8 * 1024)) }).await;
+    let offered = b.next(30, "FileOffered", |e| matches!(e, SessionEvent::FileOffered { .. })).await;
+    let SessionEvent::FileOffered { id: got, .. } = offered else { unreachable!() };
+    b.send(SessionCommand::AcceptFile { id: got }).await;
+    // The file is going: its first chunk is in A's modem queue.
+    a.next(60, "FileProgress", |e| matches!(e, SessionEvent::FileProgress { .. })).await;
+    let chat = ObjectId::random();
+    let t = tokio::time::Instant::now();
+    a.send(SessionCommand::SendChat { id: chat, text: "73, chat during a file".into() }).await;
+    a.next(30, "ChatDelivered", move |e| matches!(e, SessionEvent::ChatDelivered { id, .. } if *id == chat)).await;
+    let waited = t.elapsed();
+    assert!(waited < Duration::from_secs(30), "chat waited {waited:?}");
 }

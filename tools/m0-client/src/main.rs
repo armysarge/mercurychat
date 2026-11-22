@@ -133,7 +133,6 @@ fn station(
         offer_timeout: Duration::from_secs(120),
         free_space: mc_core::station::FreeSpace::system(),
         hello_timeout: if radio { Duration::from_secs(240) } else { Duration::from_secs(5) },
-        modem_window: 2 * 1024 + 256,
         timeouts: Timeouts::default(),
         proto_minor: mch_protocol::MINOR,
         capabilities: mc_core::session::default_capabilities(),

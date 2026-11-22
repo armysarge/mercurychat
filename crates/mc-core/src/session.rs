@@ -3,8 +3,10 @@
 //! The session is a single task: it reads the data stream, drains operator
 //! commands and modem signals, and writes frames in priority order
 //! (protocol/receipts, then chat, then file chunks). File chunks are paced by
-//! the modem's reported BUFFER so chat is not stuck behind a large backlog.
+//! airtime (M4 C4): about 12 s of file data in the modem queue at the rate
+//! `BUFFER` is seen to drain, so chat is not stuck behind a large backlog.
 
+use crate::files::pace::Pacer;
 use crate::files::{sanitize_name, unique_target, unpack_zstd, Prepared, UnpackError};
 use mc_storage::{Direction, OutState, Store, Stored, TransferRow, TransferState};
 use mch_protocol::payload::*;
@@ -36,8 +38,9 @@ pub struct SessionConfig {
     pub offer_timeout: Duration,
     pub free_space: crate::station::FreeSpace,
     pub hello_timeout: Duration,
-    /// Pace file chunks so at most this many bytes sit in the modem queue.
-    pub modem_window: u64,
+    /// The bandwidth's nominal throughput in bytes per second, until the
+    /// drain rate is measured (M4 C4).
+    pub nominal_bps: f64,
     /// The MCH/1 minor this side announces (`MINOR`; lower only to act as an older peer).
     pub proto_minor: u8,
     /// The capabilities this side announces (`default_capabilities()`).
@@ -297,6 +300,7 @@ pub struct Session<'a> {
     in_file: Option<InFile>,
     peer_max_file: u64,
     verify: Option<(ObjectId, oneshot::Receiver<Verdict>)>,
+    pacer: Pacer,
     modem_reported: u64,
     written_since_report: u64,
 }
@@ -307,6 +311,7 @@ fn proto_err(e: impl std::fmt::Display) -> SessionEnd {
 
 impl<'a> Session<'a> {
     pub fn new(cfg: SessionConfig, store: &'a mut Store, events: mpsc::UnboundedSender<SessionEvent>) -> Self {
+        let pacer = Pacer::new(cfg.nominal_bps, cfg.chunk as usize);
         Session {
             cfg,
             store,
@@ -326,6 +331,7 @@ impl<'a> Session<'a> {
             in_file: None,
             peer_max_file: 0,
             verify: None,
+            pacer,
             modem_reported: 0,
             written_since_report: 0,
         }
@@ -452,7 +458,11 @@ impl<'a> Session<'a> {
             tokio::select! {
                 biased;
                 sig = modem.recv() => match sig {
-                    Some(ModemSignal::Buffer(n)) => { self.modem_reported = n; self.written_since_report = 0; }
+                    Some(ModemSignal::Buffer(n)) => {
+                        self.modem_reported = n;
+                        self.written_since_report = 0;
+                        self.pacer.observe_buffer(n, std::time::Instant::now());
+                    }
                     Some(ModemSignal::Disconnected) => return SessionEnd::Disconnected,
                     Some(ModemSignal::ControlLost) | None => return SessionEnd::ControlLost,
                 },
@@ -523,12 +533,12 @@ impl<'a> Session<'a> {
             let _ = self.store.set_out_state(&peer, &id.0, OutState::AwaitingReceipt, None);
             self.emit(SessionEvent::ChatSubmitted { id, at: Instant::now() });
         }
-        // File chunks only while the modem queue estimate is below the window,
-        // and only when no chat/protocol frame is waiting.
+        // File chunks only while the queue holds under ~12 s of airtime (M4
+        // C4), and only when no chat/protocol frame is waiting.
         loop {
             let est = self.modem_reported + self.written_since_report;
             let Some(of) = self.out_file.as_mut() else { break };
-            if of.state != OutFileState::Sending || est >= self.cfg.modem_window {
+            if of.state != OutFileState::Sending || !self.pacer.may_send(est) {
                 break;
             }
             let id = of.id;
@@ -540,7 +550,7 @@ impl<'a> Session<'a> {
                 let _ = self.store.transfer_set_state(Direction::Out, &id.0, TransferState::Sending, sent, None);
                 break;
             }
-            let want = (of.size - of.sent).min(of.chunk as u64) as usize;
+            let want = (of.size - of.sent).min(self.pacer.chunk_size().min(of.chunk) as u64) as usize;
             let mut chunk = vec![0u8; want];
             let file = of.file.as_mut().expect("open while sending");
             if file.read_exact(&mut chunk).await.is_err() {

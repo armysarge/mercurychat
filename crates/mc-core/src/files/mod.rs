@@ -1,6 +1,7 @@
 //! Incoming-file safety (FIL-03/FIL-04): sanitised names, temp files,
 //! verification and atomic, non-overwriting publication.
 
+pub mod pace;
 pub mod prepare;
 pub mod unpack;
 

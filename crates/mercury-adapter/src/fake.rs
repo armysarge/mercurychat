@@ -60,6 +60,10 @@ struct Shared {
     /// DISCONNECT is acknowledged but the link stays up until `drop_link`.
     hold_disconnect: bool,
     held: Vec<(usize, Vec<u8>)>,
+    /// Drain model: what station `i` sent waits here and leaves at `drain[i]`
+    /// bytes a second, with `BUFFER` reporting what remains.
+    drain: [Option<f64>; 2],
+    txq: [Vec<u8>; 2],
     /// Bytes delivered to the far data socket, per direction (0: A->B, 1: B->A).
     delivered: [u64; 2],
     log: Vec<String>,
@@ -175,9 +179,24 @@ impl FakeNet {
     }
 
     /// RF link lost: both hosts hear DISCONNECTED, held bytes vanish.
+    /// Model a slow link from station `i`: its bytes leave the modem queue at
+    /// `bytes_per_sec` (reported by `BUFFER` every 100 ms), as on the air.
+    pub fn set_drain_rate(&self, i: usize, bytes_per_sec: f64) {
+        let first = {
+            let mut s = self.shared.lock().unwrap();
+            let first = s.drain[i].is_none();
+            s.drain[i] = Some(bytes_per_sec);
+            first
+        };
+        if first {
+            tokio::spawn(drain_queue(self.shared.clone(), i));
+        }
+    }
+
     pub fn drop_link(&self) {
         let mut s = self.shared.lock().unwrap();
         s.held.clear();
+        s.txq = Default::default();
         if s.session.take().is_some() {
             for i in 0..2 {
                 send_line(&s, i, "DISCONNECTED");
@@ -490,7 +509,7 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             send_line(&s, i, "VARA version 4.9.0 registered");
             send_line(&s, i, "VERSION VARA HF v4.9.0");
         }
-        ["BUFFER"] => send_line(&s, i, "BUFFER 0"),
+        ["BUFFER"] => send_line(&s, i, &format!("BUFFER {}", s.txq[i].len())),
         _ => send_line(&s, i, "WRONG"),
     }
 }
@@ -530,6 +549,11 @@ async fn data_conn(net: Arc<FakeNet>, i: usize, sock: TcpStream, mut rx: mpsc::U
             continue; // data port carries payload only while CONNECTED
         }
         let bytes = buf[..n].to_vec();
+        if s.drain[i].is_some() && !(s.hold || s.hold_from[i]) {
+            s.txq[i].extend_from_slice(&bytes);
+            send_line(&s, i, &format!("BUFFER {}", s.txq[i].len()));
+            continue;
+        }
         send_line(&s, i, &format!("BUFFER {n}"));
         if s.hold || s.hold_from[i] {
             s.held.push((i, bytes));
@@ -540,6 +564,32 @@ async fn data_conn(net: Arc<FakeNet>, i: usize, sock: TcpStream, mut rx: mpsc::U
     }
     writer.abort();
     net.shared.lock().unwrap().st[i].data_tx = None;
+}
+
+/// The drain model's clock: every 100 ms, `rate` x 0.1 s of station `i`'s
+/// queue goes to the far side and `BUFFER` reports the rest.
+async fn drain_queue(shared: Arc<Mutex<Shared>>, i: usize) {
+    let tick = Duration::from_millis(100);
+    let mut credit = 0.0f64;
+    loop {
+        tokio::time::sleep(tick).await;
+        let mut s = shared.lock().unwrap();
+        let Some(rate) = s.drain[i] else { return };
+        if s.session.is_none() || s.txq[i].is_empty() {
+            s.txq[i].clear();
+            credit = 0.0;
+            continue;
+        }
+        credit += rate * tick.as_secs_f64();
+        let n = (credit as usize).min(s.txq[i].len());
+        if n == 0 {
+            continue;
+        }
+        credit -= n as f64;
+        let bytes: Vec<u8> = s.txq[i].drain(..n).collect();
+        deliver(&mut s, i, bytes);
+        send_line(&s, i, &format!("BUFFER {}", s.txq[i].len()));
+    }
 }
 
 /// One CQ on the air: PENDING, PTT window, delivery to the other side.

@@ -65,7 +65,6 @@ pub struct StationConfig {
     pub offer_timeout: Duration,
     pub free_space: FreeSpace,
     pub hello_timeout: Duration,
-    pub modem_window: u64,
     pub timeouts: Timeouts,
     /// The MCH/1 minor and capabilities sessions announce (M3c B1).
     pub proto_minor: u8,
@@ -90,7 +89,6 @@ impl StationConfig {
             offer_timeout: Duration::from_secs(120),
             free_space: FreeSpace::system(),
             hello_timeout: Duration::from_secs(5),
-            modem_window: 2 * 1024 + 256,
             timeouts: Timeouts::default(),
             proto_minor: mch_protocol::MINOR,
             capabilities: crate::session::default_capabilities(),
@@ -617,7 +615,7 @@ impl Station {
             offer_timeout: self.cfg.offer_timeout,
             free_space: self.cfg.free_space.clone(),
             hello_timeout: self.cfg.hello_timeout,
-            modem_window: self.cfg.modem_window,
+            nominal_bps: crate::files::pace::nominal_rate(self.cfg.bandwidth),
             proto_minor: self.cfg.proto_minor,
             capabilities: self.cfg.capabilities.clone(),
         };

@@ -21,7 +21,6 @@ fn cfg(dir: &std::path::Path) -> StationConfig {
         offer_timeout: Duration::from_secs(120),
         free_space: mc_core::station::FreeSpace::system(),
         hello_timeout: Duration::from_secs(5),
-        modem_window: 2304,
         timeouts: Timeouts::default(),
         proto_minor: mch_protocol::MINOR,
         capabilities: mc_core::session::default_capabilities(),
