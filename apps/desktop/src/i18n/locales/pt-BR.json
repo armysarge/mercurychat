@@ -905,5 +905,23 @@
       "noSession": "não há sessão",
       "noEmail": "nenhum e-mail definido para esta estação"
     }
+  },
+  "qsy": {
+    "refused": {
+      "unsupported": "não suportado por esta estação",
+      "noSession": "não há nenhuma sessão",
+      "pending": "já há um QSY pendente",
+      "nothingToAnswer": "não há QSY para responder",
+      "noCandidate": "essa opção não existe",
+      "rig": "o rádio não pode mudar agora: {message}"
+    },
+    "notify": {
+      "declined": "{peer} recusou o QSY",
+      "declinedRig": "{peer} recusou o QSY: o rádio dele não pode mudar agora",
+      "ownRig": "QSY recusado: o rádio desta estação não pode mudar agora",
+      "noAnswer": "Sem resposta de {peer} ao QSY",
+      "timedOut": "A oferta de QSY de {peer} expirou",
+      "fellBack": "Sem contato com {peer} na nova frequência: de volta a {original}"
+    }
   }
 }

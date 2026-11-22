@@ -905,5 +905,23 @@
       "noSession": "no hay ninguna sesión",
       "noEmail": "esta estación no tiene correo electrónico"
     }
+  },
+  "qsy": {
+    "refused": {
+      "unsupported": "esta estación no lo admite",
+      "noSession": "no hay ninguna sesión",
+      "pending": "ya hay un QSY pendiente",
+      "nothingToAnswer": "no hay ningún QSY que responder",
+      "noCandidate": "no existe esa opción",
+      "rig": "el equipo no puede cambiar ahora: {message}"
+    },
+    "notify": {
+      "declined": "{peer} rechazó el QSY",
+      "declinedRig": "{peer} rechazó el QSY: su equipo no puede cambiar ahora",
+      "ownRig": "QSY rechazado: el equipo de esta estación no puede cambiar ahora",
+      "noAnswer": "{peer} no respondió al QSY",
+      "timedOut": "La oferta de QSY de {peer} caducó",
+      "fellBack": "Sin contacto con {peer} en la nueva frecuencia: de vuelta a {original}"
+    }
   }
 }

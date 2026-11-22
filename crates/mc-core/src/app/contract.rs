@@ -11,6 +11,7 @@ use super::frequencies::FrequencyEntry;
 use super::info::ShareConfig;
 use super::logbook::{Qso, QsoEdit};
 use super::notify::NotifyPrefs;
+use super::qsy::QsyView;
 use super::rig::{RigBanner, RigChange, RigTestStep, RigView, TuneView};
 use super::rigconfig::{BandLevels, HamlibModelView, RigConfig};
 use super::schedule::{Schedule, ScheduleNext};
@@ -69,6 +70,8 @@ pub struct AppSnapshot {
     pub tune: TuneView,
     /// The next scheduled QSY, while the schedule is on (M3b).
     pub schedule_next: Option<ScheduleNext>,
+    /// The QSY under way, if any (M3c B3).
+    pub qsy: Option<QsyView>,
 }
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize, TS)]
@@ -303,6 +306,18 @@ pub enum AppCommand {
     SetShareSettings {
         config: ShareConfig,
     },
+    /// Propose a QSY to the session's peer (M3c B3): 1 to 5 frequency-list
+    /// entries. Refused without `qsy/1`, or while a QSY is already pending.
+    ProposeQsy {
+        entry_ids: Vec<String>,
+        note: Option<String>,
+    },
+    /// Answer the peer's proposal: a candidate index, or `None` to decline.
+    AnswerQsy {
+        accept: Option<u8>,
+    },
+    /// The manual path's "Tuned": an acknowledgement only.
+    QsyTuned,
 }
 
 // Every float in a command is validated finite before use.

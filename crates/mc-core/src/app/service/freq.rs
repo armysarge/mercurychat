@@ -85,7 +85,7 @@ impl App {
             .unwrap_or(DEFAULT_REGION)
     }
 
-    fn entries(&self) -> Result<Vec<FrequencyEntry>, AppError> {
+    pub(super) fn entries(&self) -> Result<Vec<FrequencyEntry>, AppError> {
         Ok(self.store.frequencies().map_err(storage)?.into_iter().map(FrequencyEntry::from).collect())
     }
 
@@ -275,8 +275,8 @@ impl App {
                     self.emit(line);
                 }
                 Some(e) => {
-                    // Refused (busy, PTT, link down): try again next tick.
-                    if self.tune_entry(&e).is_ok() {
+                    // Refused (busy, PTT, link down, a QSY under way): try again next tick.
+                    if !self.qsy_pending() && self.tune_entry(&e).is_ok() {
                         self.freq.done = true;
                         let line = self.discovery.note("rig", format!("Scheduled QSY to {}", e.name));
                         self.emit(line);

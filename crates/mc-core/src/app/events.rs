@@ -9,6 +9,7 @@ use super::chat::ChatMessage;
 use super::discovery::{ActivityEntry, HeardStation};
 use super::info::{PeerSnr, PeerStation};
 use super::logbook::Qso;
+use super::qsy::QsyView;
 use super::rig::{RigView, TuneView};
 use super::schedule::ScheduleNext;
 use super::telemetry::TelemetryView;
@@ -133,6 +134,16 @@ pub enum AppEvent {
         snr: Option<PeerSnr>,
         station: Option<PeerStation>,
         reason: Option<String>,
+    },
+    /// The QSY card changed (M3c B3); `None` when no QSY is under way.
+    Qsy {
+        qsy: Option<QsyView>,
+    },
+    /// Something the operator is told about a QSY: `key` is the i18n key,
+    /// `text` the English line (also in the activity log).
+    QsyNotice {
+        key: String,
+        text: String,
     },
     /// The rig changed (M3b): a reading, its link, a fault or a banner. At
     /// most 2 a second; the snapshot always has the latest.

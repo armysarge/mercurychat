@@ -904,5 +904,23 @@
       "noSession": "there is no session",
       "noEmail": "no email is set for this station"
     }
+  },
+  "qsy": {
+    "refused": {
+      "unsupported": "not supported by this station",
+      "noSession": "there is no session",
+      "pending": "a QSY is already pending",
+      "nothingToAnswer": "there is no QSY to answer",
+      "noCandidate": "no such candidate",
+      "rig": "the rig can't change now: {message}"
+    },
+    "notify": {
+      "declined": "{peer} declined the QSY",
+      "declinedRig": "{peer} declined the QSY: their rig can't change now",
+      "ownRig": "QSY declined: this station's rig can't change now",
+      "noAnswer": "No answer from {peer} to the QSY",
+      "timedOut": "The QSY offer from {peer} ran out of time",
+      "fellBack": "No contact with {peer} on the new frequency: back to {original}"
+    }
   }
 }

@@ -31,6 +31,7 @@ use tokio::sync::{broadcast, mpsc, oneshot, watch};
 mod audio;
 mod freq;
 mod info;
+mod qsy;
 mod rig;
 use freq::FreqSide;
 use rig::RigSide;
@@ -76,6 +77,8 @@ pub struct AppOptions {
     /// `None` is the real clock and 15 s.
     pub schedule_clock: Option<fn() -> chrono::NaiveTime>,
     pub schedule_tick: Option<std::time::Duration>,
+    /// The QSY windows (tests); `None` is B3's 60 s, 120 s and 20 s.
+    pub qsy_windows: Option<super::qsy::QsyWindows>,
 }
 
 impl Default for AppOptions {
@@ -94,6 +97,7 @@ impl Default for AppOptions {
             managed_listen: None,
             schedule_clock: None,
             schedule_tick: None,
+            qsy_windows: None,
         }
     }
 }
@@ -204,6 +208,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         audio: crate::app::audio::AudioSide::default(),
         freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
         info: info::InfoSide::default(),
+        qsy: qsy::QsySide::new(opts.qsy_windows.unwrap_or_default()),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -223,6 +228,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             let due = app.broadcasts.deadline();
             let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
             let telemetry_wake = app.telemetry.wake();
+            let qsy_wake = app.qsy_wake();
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
@@ -281,11 +287,14 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                 }
                 // A throttled telemetry change is due: published just below.
                 _ = tokio::time::sleep_until(telemetry_wake.unwrap_or_else(tokio::time::Instant::now)), if telemetry_wake.is_some() => {}
+                // A QSY window ends or a re-call is due: handled just below.
+                _ = tokio::time::sleep_until(qsy_wake.unwrap_or_else(tokio::time::Instant::now)), if qsy_wake.is_some() => {}
             }
             app.sync_beacon();
             app.sync_telemetry();
             app.sync_rig();
             app.sync_audio();
+            app.sync_qsy();
         }
     });
     AppHandle { tx, events, spectrum }
@@ -336,6 +345,7 @@ struct App {
     audio: crate::app::audio::AudioSide,
     freq: FreqSide,
     info: info::InfoSide,
+    qsy: qsy::QsySide,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -754,6 +764,9 @@ impl App {
             AppCommand::SendEmail => self.send_email(),
             AppCommand::ShareSettings => self.share_settings(),
             AppCommand::SetShareSettings { config } => self.set_share_settings(config),
+            AppCommand::ProposeQsy { entry_ids, note } => self.propose_qsy(entry_ids, note),
+            AppCommand::AnswerQsy { accept } => self.answer_qsy(accept),
+            AppCommand::QsyTuned => self.qsy_tuned(),
         }
     }
 
@@ -1072,6 +1085,9 @@ impl App {
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {
         self.modem = state;
         self.modem_detail = detail.clone();
+        if matches!(state, ModemState::Negotiating | ModemState::Connected) {
+            self.qsy_peer_seen();
+        }
         // What Mercury does about calls is known only while idle; a call or a
         // session leaves it as it was.
         match state {
@@ -1159,14 +1175,19 @@ impl App {
                     self.emit_all(heard);
                     self.telemetry.session_started(now);
                     self.info_session_started();
-                    self.begin_qso(s, grid, &tuning);
+                    let qsy_from = self.qsy_session_started(&s.peer);
+                    self.begin_qso(s, grid, &tuning, qsy_from);
                 }
                 if session.is_none() {
                     self.telemetry.session_ended();
+                    self.qsy_session_ended();
                 }
                 self.set_session(session)
             }
-            ReportKind::CallFailed { peer, reason } => self.emit(AppEvent::CallFailed { peer, reason }),
+            ReportKind::CallFailed { peer, reason } => {
+                self.qsy_call_failed();
+                self.emit(AppEvent::CallFailed { peer, reason })
+            }
             ReportKind::Message(message) => {
                 self.telemetry.on_message(&message);
                 self.emit(AppEvent::MessageChanged { message })
@@ -1249,7 +1270,8 @@ impl App {
     }
 
     /// Draft the QSO record of a session that just started.
-    fn begin_qso(&mut self, s: &SessionInfo, grid: Option<String>, tuning: &Tuning) {
+    /// `qsy_from`: the first session's QSO, when this is a QSY's re-call.
+    fn begin_qso(&mut self, s: &SessionInfo, grid: Option<String>, tuning: &Tuning, qsy_from: Option<String>) {
         let Some(store) = self.chat.as_mut() else { return };
         let mut row = logbook::draft_row(&Start {
             session_id: &s.session_id,
@@ -1262,6 +1284,7 @@ impl App {
         let view = self.telemetry.view(tokio::time::Instant::now());
         row.tx_modes = view.tx_mode.as_deref().and_then(|m| logbook::with_mode(None, m));
         row.rx_modes = view.rx_mode.as_deref().and_then(|m| logbook::with_mode(None, m));
+        row.notes = qsy_from.as_deref().map(logbook::qsy_note);
         if let Err(e) = store.create_qso(&row) {
             tracing::warn!("could not draft the QSO record: {e}");
             return;
@@ -1367,6 +1390,7 @@ impl App {
             rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),
             tune: self.rig.tune.view(),
             schedule_next: self.schedule_next(),
+            qsy: self.qsy_view(tokio::time::Instant::now()),
         })
     }
 }

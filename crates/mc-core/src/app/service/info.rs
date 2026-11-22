@@ -85,8 +85,7 @@ impl App {
         match m {
             PeerMsg::InfoRequest(id, req) => self.answer_info(id, req.what),
             PeerMsg::InfoResponse(id, r) => self.on_info_response(id, *r),
-            // QSY (M3c Task 9).
-            other => tracing::debug!(?other, "a peer message with nothing to take it yet"),
+            m @ (PeerMsg::QsyPropose(..) | PeerMsg::QsyAnswer(..)) => self.on_peer_qsy(m),
         }
     }
 

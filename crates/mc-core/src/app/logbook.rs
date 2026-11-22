@@ -182,6 +182,11 @@ pub struct Start<'a> {
     pub tuning: &'a Tuning,
 }
 
+/// The notes of a QSY's re-call record: it links the first (M3c B3).
+pub fn qsy_note(first_qso: &str) -> String {
+    format!("QSY from {first_qso}")
+}
+
 pub fn draft_row(s: &Start<'_>) -> QsoRow {
     let freq = s.tuning.freq.as_ref();
     QsoRow {

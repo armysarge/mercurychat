@@ -4,6 +4,7 @@ import type { DiscoveryStats } from "./DiscoveryStats";
 import type { ModemState } from "./ModemState";
 import type { NotifyPrefs } from "./NotifyPrefs";
 import type { Qso } from "./Qso";
+import type { QsyView } from "./QsyView";
 import type { RigView } from "./RigView";
 import type { ScheduleNext } from "./ScheduleNext";
 import type { SessionInfo } from "./SessionInfo";
@@ -79,4 +80,8 @@ tune: TuneView,
 /**
  * The next scheduled QSY, while the schedule is on (M3b).
  */
-scheduleNext: ScheduleNext | null, };
+scheduleNext: ScheduleNext | null, 
+/**
+ * The QSY under way, if any (M3c B3).
+ */
+qsy: QsyView | null, };

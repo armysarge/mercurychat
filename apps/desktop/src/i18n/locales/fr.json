@@ -905,5 +905,23 @@
       "noSession": "aucune session en cours",
       "noEmail": "aucune adresse e-mail pour cette station"
     }
+  },
+  "qsy": {
+    "refused": {
+      "unsupported": "non pris en charge par cette station",
+      "noSession": "aucune session en cours",
+      "pending": "un QSY est déjà en attente",
+      "nothingToAnswer": "aucun QSY auquel répondre",
+      "noCandidate": "ce choix n'existe pas",
+      "rig": "le poste ne peut pas changer maintenant : {message}"
+    },
+    "notify": {
+      "declined": "{peer} a refusé le QSY",
+      "declinedRig": "{peer} a refusé le QSY : son poste ne peut pas changer maintenant",
+      "ownRig": "QSY refusé : le poste de cette station ne peut pas changer maintenant",
+      "noAnswer": "Pas de réponse de {peer} au QSY",
+      "timedOut": "L'offre de QSY de {peer} a expiré",
+      "fellBack": "Pas de contact avec {peer} sur la nouvelle fréquence : retour à {original}"
+    }
   }
 }

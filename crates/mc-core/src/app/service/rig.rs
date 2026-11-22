@@ -624,6 +624,11 @@ impl App {
     /// Several changes as one: every one is checked before any is sent, so
     /// there is one refusal for all. The first is the one a call waits for.
     pub(super) fn rig_set_all(&mut self, changes: &[RigChange]) -> Result<CommandOk, AppError> {
+        self.rig_set_all_ids(changes).map(|_| CommandOk::Done)
+    }
+
+    /// As `rig_set_all`, answering the ids of the requests sent.
+    pub(super) fn rig_set_all_ids(&mut self, changes: &[RigChange]) -> Result<Vec<u64>, AppError> {
         let activity = self.activity();
         for change in changes {
             validate(change)?;
@@ -638,12 +643,62 @@ impl App {
                 other => other,
             });
         }
+        let mut ids = Vec::with_capacity(changes.len());
         for (change, req) in changes.iter().zip(reqs) {
             let id = self.rig_request(req).ok_or_else(|| conflict("the rig link is not accepting commands".into()))?;
             // Tracked as soon as it is sent, so a later failure leaves none untracked.
             self.rig.in_flight.push((id, change.clone()));
+            ids.push(id);
         }
-        Ok(CommandOk::Done)
+        Ok(ids)
+    }
+
+    /// The QSY rig gate (M3c B3) for a candidate's displayed tuning. With
+    /// Frequency control None or the link down it is `NoRig` (the manual
+    /// path). Mercury keying during the session is expected; the retune
+    /// itself waits for its PTT to be off.
+    pub(super) fn rig_gate_for_qsy(&self, t: &crate::app::qsy::Tuning) -> crate::app::qsy::Gate {
+        use crate::app::qsy::Gate;
+        if self.rig.cfg.freq_control == FreqControl::None || !self.rig.policy.link_up() {
+            return Gate::NoRig;
+        }
+        let busy = match self.activity() {
+            _ if self.rig.tune.active => Some(RigRefusal::Tuning),
+            Activity::Idle | Activity::Connected => None,
+            Activity::Calling => Some(RigRefusal::Calling),
+            Activity::Draining => Some(RigRefusal::Draining),
+            Activity::Broadcasting => Some(RigRefusal::Broadcasting),
+            Activity::Tuning => Some(RigRefusal::Tuning),
+        };
+        if let Some(r) = busy {
+            return Gate::Fail(r.message());
+        }
+        let p = &self.rig.policy;
+        // Keyed with Mercury not keying it: the rig is stuck in transmit.
+        if p.rig_ptt() == crate::app::rig::RigPttView::On && p.mercury_ptt() != Some(true) {
+            return Gate::Fail(RigRefusal::PttOn.message());
+        }
+        if p.rig_ptt() == crate::app::rig::RigPttView::Unknown {
+            return Gate::Fail(RigRefusal::PttUnknown.message());
+        }
+        if !p.caps().is_some_and(|c| c.can_set_freq) {
+            return Gate::Fail(RigRefusal::Unsupported.message());
+        }
+        match to_dial(t.freq_hz, self.rig.cfg.offset_hz) {
+            Err(_) => Gate::Fail("With the frequency offset, that is below 0 Hz on the radio's dial"),
+            Ok(dial) if dial > MAX_FREQ_HZ || t.freq_hz > MAX_FREQ_HZ => {
+                Gate::Fail("With the frequency offset, that is above 60 MHz on the radio's dial")
+            }
+            Ok(_) => Gate::Pass,
+        }
+    }
+
+    /// The station is idle and neither Mercury nor the rig is keyed (RIG-03).
+    pub(super) fn retune_clear(&self) -> bool {
+        let p = &self.rig.policy;
+        self.activity() == Activity::Idle
+            && p.mercury_ptt() != Some(true)
+            && p.rig_ptt() != crate::app::rig::RigPttView::On
     }
 
     pub(super) fn dismiss_rig_banner(&mut self, banner: RigBanner) -> Result<CommandOk, AppError> {
@@ -742,6 +797,7 @@ impl App {
     }
 
     fn rig_done(&mut self, id: u64, result: Result<RigReply, String>, now: Instant) {
+        self.qsy_rig_done(id, result.is_ok());
         let Some(i) = self.rig.in_flight.iter().position(|(want, _)| *want == id) else { return };
         let (_, change) = self.rig.in_flight.remove(i);
         match result {

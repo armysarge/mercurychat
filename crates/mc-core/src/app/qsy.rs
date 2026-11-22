@@ -43,6 +43,21 @@ pub const NOTE_DECLINED_RIG: &str = "qsy.notify.declinedRig";
 pub const NOTE_NO_ANSWER: &str = "qsy.notify.noAnswer";
 pub const NOTE_TIMED_OUT: &str = "qsy.notify.timedOut";
 pub const NOTE_FELL_BACK: &str = "qsy.notify.fellBack";
+pub const NOTE_OWN_RIG: &str = "qsy.notify.ownRig";
+
+/// The windows (B3): constants in the app; tests shorten them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct QsyWindows {
+    pub answer: Duration,
+    pub recall: Duration,
+    pub grace: Duration,
+}
+
+impl Default for QsyWindows {
+    fn default() -> Self {
+        QsyWindows { answer: ANSWER_WINDOW, recall: RECALL_WINDOW, grace: LISTEN_GRACE }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Role {
@@ -211,6 +226,9 @@ enum Stage {
 pub struct Qsy {
     role: Role,
     stage: Stage,
+    windows: QsyWindows,
+    /// The tuning to come back to, from the last DISCONNECTED that moved us.
+    original: Option<Tuning>,
 }
 
 fn answer(id: ObjectId, a: QsyAnswer) -> QsyAction {
@@ -227,7 +245,39 @@ fn note(key: &str) -> QsyAction {
 
 impl Qsy {
     pub fn new(role: Role) -> Qsy {
-        Qsy { role, stage: Stage::Idle }
+        Qsy::with_windows(role, QsyWindows::default())
+    }
+
+    pub fn with_windows(role: Role, windows: QsyWindows) -> Qsy {
+        Qsy { role, stage: Stage::Idle, windows, original: None }
+    }
+
+    /// When the next `Tick` is due, if a window is running.
+    pub fn deadline(&self) -> Option<Instant> {
+        match &self.stage {
+            Stage::Proposed { deadline, .. }
+            | Stage::Offered { deadline, .. }
+            | Stage::Accepted { deadline, .. }
+            | Stage::Moving { deadline, .. } => Some(*deadline),
+            _ => None,
+        }
+    }
+
+    /// The tuning the station falls back to (once it has moved).
+    pub fn original(&self) -> Option<&Tuning> {
+        self.original.as_ref()
+    }
+
+    /// The candidates on the card (empty when idle).
+    pub fn candidates(&self) -> &[QsyCandidate] {
+        match &self.stage {
+            Stage::Proposed { candidates, .. }
+            | Stage::Offered { candidates, .. }
+            | Stage::Accepted { candidates, .. }
+            | Stage::Agreed { candidates, .. }
+            | Stage::Moving { candidates, .. } => candidates,
+            _ => &[],
+        }
     }
 
     pub fn role(&self) -> Role {
@@ -253,8 +303,8 @@ impl Qsy {
 
     fn window(&self) -> Duration {
         match self.role {
-            Role::Caller => RECALL_WINDOW,
-            Role::Answerer => RECALL_WINDOW + LISTEN_GRACE,
+            Role::Caller => self.windows.recall,
+            Role::Answerer => self.windows.recall + self.windows.grace,
         }
     }
 
@@ -276,14 +326,15 @@ impl Qsy {
                 if let Gate::Fail(reason) = gate {
                     return vec![QsyAction::Refuse(reason.into())];
                 }
-                self.stage = Stage::Proposed { id, candidates: candidates.clone(), deadline: now + ANSWER_WINDOW };
+                self.stage =
+                    Stage::Proposed { id, candidates: candidates.clone(), deadline: now + self.windows.answer };
                 vec![QsyAction::Send(PeerMsg::QsyPropose(id, QsyPropose { candidates, note }))]
             }
             QsyInput::ProposalReceived { id, propose } => {
                 if self.pending() {
                     return vec![decline(id, Some(REASON_PENDING))];
                 }
-                self.stage = Stage::Offered { id, candidates: propose.candidates, deadline: now + ANSWER_WINDOW };
+                self.stage = Stage::Offered { id, candidates: propose.candidates, deadline: now + self.windows.answer };
                 vec![]
             }
             QsyInput::AnswerAsked { accept, gate } => self.on_answer_asked(accept, gate, now),
@@ -321,7 +372,7 @@ impl Qsy {
             id,
             candidates,
             chosen: index,
-            deadline: now + ANSWER_WINDOW,
+            deadline: now + self.windows.answer,
             no_rig: gate == Gate::NoRig,
         };
         vec![answer(id, QsyAnswer::Accept { index })]
@@ -338,7 +389,8 @@ impl Qsy {
                 }
                 if let Gate::Fail(reason) = gate {
                     self.idle();
-                    return vec![decline(id, Some(REASON_RIG)), QsyAction::Notify(reason.into())];
+                    tracing::info!("our own rig refused the accepted QSY: {reason}");
+                    return vec![decline(id, Some(REASON_RIG)), note(NOTE_OWN_RIG)];
                 }
                 let mut actions = vec![answer(id, QsyAnswer::Accept { index })];
                 actions.extend(self.agree(id, candidates, index, gate == Gate::NoRig));
@@ -383,6 +435,7 @@ impl Qsy {
             }
             _ => return vec![],
         };
+        self.original = Some(original.clone());
         let target = Tuning::from(&candidates[usize::from(chosen)]);
         let deadline = now + self.window();
         let actions = if no_rig {
