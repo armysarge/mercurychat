@@ -145,6 +145,17 @@ Results: `report-m3b.txt` (one PASS or FAIL line per check), `activity-m3b.txt`,
 
 What each check proves, and the commands, are in [`docker/rig/M3b1-checks.md`](docker/rig/M3b1-checks.md). On Windows, `node lab/windows/m3b1-exit-check.mjs <mercurychat.exe> <fake-rigctld.exe> <empty dir>` checks that closing the real window stops the app's rigctld (with a fake rigctld; nothing must be listening on 4532).
 
+### M3c: QSY, information requests and MCB/1 kinds 2 and 3
+
+`run-rig-lab-checks.sh m3c` runs two MercuryChat instances (`rig_lab m3c-qsy`), each with its own dummy rigctld, against two real Mercury modems. Five checks:
+- QSY end to end, with each rig set to the candidate minus its own offset and the caller re-calling;
+- the fallback to the original frequency;
+- a rig gate that fails at the accept, which declines and keeps the session;
+- SNR and station info with no email in the answer;
+- MCB/1 kinds 2 and 3 across the broadcast plane.
+
+What each check proves, and the commands, are in [`docker/rig/M3c-checks.md`](docker/rig/M3c-checks.md). On Windows, `node lab/windows/m3c-ui-check.mjs <mercurychat.exe> <empty data dir>` checks the M3c window with the simulator: quick messages, the Share ticks, Settings → Beacon's byte count, the session menu (and a minor-0 peer's disabled items with `MC_SIM_PEER_MINOR0=1`), and a QSY through to the re-call.
+
 ## 3b. Mercury contracts — the fake and real Mercury, one suite
 
 `crates/mercury-contract` holds every Mercury behaviour MercuryChat relies on, written once. `scripts/check.sh` runs it against the fake on every check. `lab/docker/contract/check-mercury.sh` (Git Bash) runs the same suite against two real Mercury stations: it builds the pinned Mercury (`lab/mercury-pin.env`: the fork's commit plus the listed patches), builds the contract binary, and runs it in `mercurychat-lab:rig`. `--latest` tests the fork's `upstream/mercuryv2` instead, with no patches and no network fetch. Output goes to `E:/mc-lab-out/m3c/contracts-<sha7>[-latest]`, and `run/summary.txt` there has one line per contract. Details, and how a failure is triaged, are in [`docker/contract/README.md`](docker/contract/README.md).

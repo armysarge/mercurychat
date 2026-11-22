@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # Rig lab checks: the real MercuryChat service (rig_lab) against real Mercury
-# and Hamlib. Usage: run-rig-lab-checks.sh [m3b|m3b1] (default m3b).
+# and Hamlib. Usage: run-rig-lab-checks.sh [m3b|m3b1|m3c] (default m3b).
+#
+# m3c (M3c Task 14; M3c-checks.md): QSY, its fallback and gate, info
+# requests and MCB/1 kinds 2 and 3 between two MercuryChat instances.
 #
 # m3b1 (M3b.1 Task 9; what each check proves is in M3b1-checks.md): Mercury A
 # starts with -P none and no rigctld on 4532; MercuryChat starts its own
@@ -108,6 +111,42 @@ if [ "$MODE" = m3b1 ]; then
   pkill rigctld 2>/dev/null
   [ "$pass" = "$total" ] && [ "$total" -ge 7 ]
   exit $?
+fi
+
+if [ "$MODE" = m3c ]; then
+  # M3c (M3c-checks.md): two MercuryChat instances (rig_lab m3c-qsy), each
+  # with its own dummy rigctld that Mercury also keys through. No RF.
+  export RIG_LOG="$OUT/a/rigctld.log"
+  export RIG_START="rigctld -m 1 -P RIG -T 127.0.0.1 -t 4532 >> $RIG_LOG 2>&1 & echo \$! > $OUT/a/rigctld.pid; for i in \$(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/4532) 2>/dev/null && break; sleep 0.1; done; echo '--- rigctld A started with -P RIG' >> $OUT/a/events.log"
+  export RIG_START_NOP="rigctld -m 1 -T 127.0.0.1 -t 4532 >> $RIG_LOG 2>&1 & echo \$! > $OUT/a/rigctld.pid; for i in \$(seq 1 50); do (exec 3<>/dev/tcp/127.0.0.1/4532) 2>/dev/null && break; sleep 0.1; done; echo '--- rigctld A started without -P' >> $OUT/a/events.log"
+  export RIG_KILL="kill \$(cat $OUT/a/rigctld.pid); sleep 0.5; echo '--- rigctld A killed' >> $OUT/a/events.log"
+  bash -c "$RIG_START"
+  rigctld -m 1 -P RIG -T 127.0.0.1 -t 4632 >> "$OUT/b/rigctld.log" 2>&1 &
+  wait_port 4632
+  rigctl -m 2 -r 127.0.0.1:4532 F 7105000 M USB 2400
+  rigctl -m 2 -r 127.0.0.1:4632 F 7105000 M USB 2400
+  {
+    echo "lab_started_utc=$(date -u +%Y-%m-%dT%H:%M:%SZ) mode=m3c"
+    echo "mercury_sha256=$(sha256sum "$BIN" | cut -d' ' -f1)"
+    cat "$(dirname "$BIN")/MANIFEST.txt" 2>/dev/null | grep -E '^(mercury_commit|patches)=' || true
+    echo "rig_lab_sha256=$(sha256sum "$LAB" | cut -d' ' -f1)"
+    echo "rigctld=$(rigctld --version | head -1)"
+    echo "station A: Mercury -R 2 -A 127.0.0.1:4532, offset 0; station B: Mercury -R 2 -A 127.0.0.1:4632, offset +1500 (dummy rigs, model 1)"
+  } > "$OUT/lab-manifest.txt"
+  "$BIN" -C "$OUT/a/mercury.ini" -x pulse -o a_to_b -i b_to_a.monitor -p 8300 -b 8100 \
+    -G -U 10000 -W -R 2 -A 127.0.0.1:4532 -H 2 -L "$OUT/a/mercury.log" > "$OUT/a/stdout.log" 2>&1 &
+  "$BIN" -C "$OUT/b/mercury.ini" -x pulse -o b_to_a -i a_to_b.monitor -p 8400 -b 8200 \
+    -G -U 10100 -W -R 2 -A 127.0.0.1:4632 -H 2 -L "$OUT/b/mercury.log" > "$OUT/b/stdout.log" 2>&1 &
+  for port in 8300 8301 8100 8400 8401 8200 10000 10100; do wait_port $port; done
+  echo "M3C RIG LAB READY"
+  set +e
+  RUST_LOG=${RUST_LOG:-info} "$LAB" "$OUT" m3c-qsy 2> "$OUT/rig_lab-m3c.stderr.log" | tee "$OUT/rig_lab-m3c.stdout.log"
+  rc=${PIPESTATUS[0]}
+  cp "$OUT/report-m3c-qsy.txt" "$OUT/report.txt" 2>/dev/null
+  pkill -f "$BIN" 2>/dev/null
+  sleep 2
+  pkill rigctld 2>/dev/null
+  exit $rc
 fi
 
 # Station A's rigctld: rig_lab kills and restarts it through these.

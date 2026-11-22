@@ -19,15 +19,21 @@
 //! shows the offset, and sets Mercury's audio. `rig_lab <out> reuse` finds a
 //! rigctld already on 4532 and uses it. `WS_SNOOP` is a command that prints
 //! Mercury's own view (ws-snoop.py); `MERCURY_A_INI` is Mercury A's ini.
+//!
+//! M3c (lab/docker/rig/M3c-checks.md): `rig_lab <out> m3c-qsy` runs two app
+//! instances, A and B, each with its own external dummy rigctld (4532 and
+//! 4632, offsets 0 and +1500): QSY, its fallback and gate, info requests, and
+//! MCB/1 kinds 2 and 3. `RIG_KILL`, `RIG_START` and `RIG_START_NOP` act on A's.
 
 use mc_core::app::{
-    spawn_app, ActivityEntry, AppCommand, AppHandle, AppOptions, AppSnapshot, AudioSettingsView, BandLevels, CommandOk,
-    FreqControl, ModemState, OwnerCheck, PttMethod, RigBanner, RigChange, RigConfig, RigLinkView, RigPttView,
-    TxLevelResult,
+    spawn_app, ActivityEntry, AppCommand, AppEvent, AppHandle, AppOptions, AppSnapshot, AudioSettingsView, BandLevels,
+    CommandOk, EventEnvelope, FreqControl, FrequencyEntry, HeardStation, ModemState, OwnerCheck, PttMethod, Reading,
+    RigBanner, RigChange, RigConfig, RigLinkView, RigPttView, TxLevelResult,
 };
 use mc_core::profile::{ModemTarget, StationProfile};
 use mc_core::station::{Station, StationConfig};
 use mc_storage::Store;
+use mch_protocol::payload::InfoWhat;
 use mercury_adapter::{Callsign, Endpoint};
 use std::path::PathBuf;
 use std::time::Duration;
@@ -178,7 +184,8 @@ async fn main() {
             m3b1(start_lab(&out, &data).await).await
         }
         "reuse" => reuse(start_lab(&out, &data).await).await,
-        other => panic!("unknown mode {other}: m3b, m3b1 or reuse"),
+        "m3c-qsy" => m3c(&out, &data).await,
+        other => panic!("unknown mode {other}: m3b, m3b1, reuse or m3c-qsy"),
     };
     lab.finish(&mode).await
 }
@@ -537,4 +544,315 @@ async fn reuse(mut lab: Lab) -> Lab {
         format!("before {before:?}; daemon {:?}; link {:?}", s.rig.daemon, s.rig.link),
     );
     lab
+}
+
+// ---------------------------------------------------------------------------
+// M3c (lab/docker/rig/M3c-checks.md): `rig_lab <out> m3c-qsy` runs two app
+// instances, A (ZS6LAB: TNC 8300, telemetry 10000, broadcast 8100, rigctld
+// 4532, offset 0) and B (ZS6PEER: TNC 8400, telemetry 10100, broadcast 8200,
+// rigctld 4632, offset +1500), each with an external dummy rigctld. The
+// QSY windows are the real ones (60 s answer, 120 s re-call, +20 s grace).
+
+const B_OFFSET: i32 = 1500;
+
+struct Side {
+    lab: Lab,
+    rx: tokio::sync::broadcast::Receiver<EventEnvelope>,
+}
+
+impl Side {
+    /// The first event matching `pred` within `secs`.
+    async fn event(&mut self, secs: f64, pred: impl Fn(&AppEvent) -> bool) -> Option<AppEvent> {
+        let end = Instant::now() + Duration::from_secs_f64(secs);
+        loop {
+            match tokio::time::timeout_at(end, self.rx.recv()).await {
+                Ok(Ok(e)) if pred(&e.event) => return Some(e.event),
+                Ok(Ok(_)) | Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(e)) => panic!("{e}"),
+                Err(_) => return None,
+            }
+        }
+    }
+
+    /// Drop the events queued so far.
+    fn drain(&mut self) {
+        while self.rx.try_recv().is_ok() {}
+    }
+
+    async fn entry(&self, name: &str, hz: u64) -> String {
+        let entry = FrequencyEntry {
+            name: name.into(),
+            freq_hz: hz,
+            mode: "USB".into(),
+            passband_hz: Some(2400),
+            purpose: vec!["chat".into()],
+            ..FrequencyEntry::default()
+        };
+        match self.lab.h.call(AppCommand::SaveFrequency { entry }).await.unwrap() {
+            CommandOk::Frequencies { entries } => entries.into_iter().find(|e| e.name == name).unwrap().id,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    async fn heard(&self) -> Vec<HeardStation> {
+        match self.lab.h.call(AppCommand::Heard).await.unwrap() {
+            CommandOk::Heard { stations } => stations,
+            other => panic!("{other:?}"),
+        }
+    }
+
+    async fn session_id(&self) -> Option<String> {
+        self.lab.snap().await.session.map(|s| s.session_id)
+    }
+}
+
+/// The dummy rig's dial, read by a separate rigctl client.
+fn dial(port: u16) -> Option<u64> {
+    let out = std::process::Command::new("rigctl")
+        .args(["-m", "2", "-r", &format!("127.0.0.1:{port}"), "f"])
+        .output()
+        .ok()?;
+    // rigctl prints a Hamlib banner line before the value.
+    String::from_utf8_lossy(&out.stdout).lines().find_map(|l| l.trim().parse().ok())
+}
+
+async fn dial_is(port: u16, hz: u64, secs: f64) -> (bool, Option<u64>) {
+    let end = Instant::now() + Duration::from_secs_f64(secs);
+    loop {
+        let d = dial(port);
+        if d == Some(hz) {
+            return (true, d);
+        }
+        if Instant::now() >= end {
+            return (false, d);
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn start_side(
+    out: &std::path::Path,
+    data: &std::path::Path,
+    call: &str,
+    tnc: u16,
+    ws: u16,
+    bcast: u16,
+    rig_port: u16,
+    offset_hz: i32,
+    station: impl FnOnce(&mut StationProfile),
+) -> Side {
+    let opts = AppOptions { stations_root: Some(data.join(call).join("stations")), ..AppOptions::default() };
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts);
+    let rx = h.subscribe();
+    let lab = Lab { h: h.clone(), out: out.to_path_buf(), results: vec![] };
+    let mut p = profile(call, tnc, ws);
+    if let ModemTarget::Existing { broadcast_port, .. } = &mut p.modem {
+        *broadcast_port = Some(bcast);
+    }
+    station(&mut p);
+    let id = match h.call(AppCommand::SaveProfile { profile: p }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    assert!(lab.wait(30.0, |s| s.modem == ModemState::Listening).await.0, "{call} did not attach");
+    let config = RigConfig { offset_hz, ..rig(rig_port) };
+    h.call(AppCommand::SetRigConfig { config }).await.unwrap();
+    assert!(lab.rig_up().await, "{call}: the rig link did not come up");
+    Side { lab, rx }
+}
+
+fn qsy_stage(s: &AppSnapshot) -> Option<String> {
+    s.qsy.as_ref().map(|q| q.stage.clone())
+}
+
+fn is_notice(e: &AppEvent, key: &str) -> bool {
+    matches!(e, AppEvent::QsyNotice { key: k, .. } if k == key)
+}
+
+async fn m3c(out: &std::path::Path, data: &std::path::Path) -> Lab {
+    let mut a = start_side(out, data, "ZS6LAB", 8300, 10000, 8100, 4532, 0, |p| {
+        p.name = Some("Lab A".into());
+        p.qth = Some("Pretoria".into());
+        p.grid = Some("KG44dg".into());
+    })
+    .await;
+    let mut b = start_side(out, data, "ZS6PEER", 8400, 10100, 8200, 4632, B_OFFSET, |p| {
+        p.name = Some("Pat".into());
+        p.qth = Some("Cape Town".into());
+        p.grid = Some("JF96fc".into());
+        p.email = Some("zs6peer@example.com".into());
+    })
+    .await;
+    let (ha, hb) = (a.lab.h.clone(), b.lab.h.clone());
+
+    // ---- 5: kind 2 (B's extended beacon) and kind 3 (A's suggestion) cross the broadcast plane.
+    let fields = hb.call(AppCommand::SetBeaconFields { name: true, qth: true, status: Some("QRV 40m".into()) }).await;
+    let sent2 = hb.call(AppCommand::SendBeaconNow).await;
+    let end = Instant::now() + Duration::from_secs(60);
+    let mut seen = None;
+    while Instant::now() < end {
+        let h = a.heard().await.into_iter().find(|s| s.callsign == "ZS6PEER");
+        if h.as_ref().is_some_and(|s| s.status.is_some()) {
+            seen = h;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    let v = |r: &Option<Reading<String>>| r.as_ref().map(|r| r.value.clone());
+    let kind2 = seen.as_ref().is_some_and(|s| {
+        v(&s.name).as_deref() == Some("Pat")
+            && v(&s.qth).as_deref() == Some("Cape Town")
+            && v(&s.status).as_deref() == Some("QRV 40m")
+    });
+    let k2 = seen.map(|s| (v(&s.name), v(&s.qth), v(&s.status), s.grid));
+    b.lab.idle().await;
+    a.lab.idle().await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+    let sug = a.entry("40m suggest", 7_110_000).await;
+    b.drain();
+    let sent3 = ha.call(AppCommand::SuggestQsy { to: "ZS6PEER".into(), entry_ids: vec![sug] }).await;
+    let got = b.event(60.0, |e| matches!(e, AppEvent::QsySuggested { .. })).await;
+    let kind3 = matches!(&got, Some(AppEvent::QsySuggested { from, candidates })
+        if from == "ZS6LAB" && candidates.first().is_some_and(|c| c.freq_hz == 7_110_000 && c.mode == "USB"));
+    a.lab.record(
+        "5 kind 2 and kind 3",
+        fields.is_ok() && sent2.is_ok() && kind2 && sent3.is_ok() && kind3,
+        format!("fields {fields:?}, beacon {sent2:?}; A heard ZS6PEER (name, qth, status, grid) {k2:?}; suggestion {sent3:?} -> B {got:?}"),
+    );
+    a.lab.idle().await;
+    b.lab.idle().await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
+
+    // ---- 1: QSY end to end. Each rig goes to the candidate minus its own offset; A calls again.
+    ha.call(AppCommand::Call { peer: "ZS6PEER".into() }).await.unwrap();
+    let (up, _) = a.lab.wait(120.0, |s| s.modem == ModemState::Connected).await;
+    b.lab.wait(20.0, |s| s.session.is_some()).await;
+    let first = a.session_id().await;
+    let caps = a.lab.snap().await.session.map(|s| s.caps).unwrap_or_default();
+    let new_hz = 7_120_000;
+    let e1 = a.entry("40m qsy", new_hz).await;
+    let p1 = ha.call(AppCommand::ProposeQsy { entry_ids: vec![e1], note: Some("lab".into()) }).await;
+    let (offered, _) = b.lab.wait(60.0, |s| qsy_stage(s).as_deref() == Some("offered")).await;
+    let ans1 = hb.call(AppCommand::AnswerQsy { accept: Some(0) }).await;
+    let (a_moved, a_dial) = dial_is(4532, new_hz, 90.0).await;
+    let (b_moved, b_dial) = dial_is(4632, new_hz - B_OFFSET as u64, 90.0).await;
+    let (recalled, s) = a
+        .lab
+        .wait(150.0, |s| {
+            s.modem == ModemState::Connected
+                && s.session.as_ref().is_some_and(|x| Some(&x.session_id) != first.as_ref())
+        })
+        .await;
+    let notes = a.lab.wait(10.0, |s| s.current_qso.as_ref().is_some_and(|q| q.notes.is_some())).await.1.current_qso;
+    a.lab.wait(20.0, |s| s.qsy.is_none()).await;
+    b.lab.wait(30.0, |s| s.qsy.is_none()).await;
+    a.lab.record(
+        "1 QSY end to end",
+        up && caps.iter().any(|c| c == "qsy/1") && p1.is_ok() && offered && ans1.is_ok() && a_moved && b_moved && recalled,
+        format!(
+            "session {up} caps {caps:?}; propose {p1:?}; B offered {offered}; accept {ans1:?}; A dial {a_dial:?} (want {new_hz}), B dial {b_dial:?} (want {}); re-call CONNECTED {recalled} ({:?} -> {:?}); QSO notes {:?}",
+            new_hz - B_OFFSET as u64,
+            first,
+            s.session.as_ref().map(|x| &x.session_id),
+            notes.and_then(|q| q.notes)
+        ),
+    );
+
+    // ---- 4: SNR and station info arrive from B; its email is not in them.
+    a.drain();
+    let r_snr = ha.call(AppCommand::RequestInfo { what: InfoWhat::Snr }).await;
+    let snr = a
+        .event(60.0, |e| {
+            matches!(e, AppEvent::PeerInfo { snr: Some(_), .. } | AppEvent::PeerInfo { reason: Some(_), .. })
+        })
+        .await;
+    let r_st = ha.call(AppCommand::RequestInfo { what: InfoWhat::Station }).await;
+    let st = a
+        .event(60.0, |e| {
+            matches!(e, AppEvent::PeerInfo { station: Some(_), .. } | AppEvent::PeerInfo { reason: Some(_), .. })
+        })
+        .await;
+    let snr_ok = matches!(&snr, Some(AppEvent::PeerInfo { snr: Some(x), .. }) if x.db.is_finite());
+    let st_ok = matches!(&st, Some(AppEvent::PeerInfo { station: Some(x), .. })
+        if x.name.as_deref() == Some("Pat") && x.qth.as_deref() == Some("Cape Town") && x.email.is_none());
+    a.lab.record(
+        "4 info",
+        r_snr.is_ok() && snr_ok && r_st.is_ok() && st_ok,
+        format!("snr {r_snr:?} -> {snr:?}; station {r_st:?} -> {st:?}"),
+    );
+
+    // ---- 3: A's gate fails between the proposal and the accept: A declines `rig`, the session goes on.
+    // rigctld without -P keeps the link up with PTT unknown; a stopped rigctld would be the
+    // no-rig (manual) path, which accepts (design B3).
+    let session = a.session_id().await;
+    let e3 = a.entry("40m gate", 7_130_000).await;
+    a.drain();
+    b.drain();
+    let p3 = ha.call(AppCommand::ProposeQsy { entry_ids: vec![e3], note: None }).await;
+    let (offered3, _) = b.lab.wait(60.0, |s| qsy_stage(s).as_deref() == Some("offered")).await;
+    shell(&env("RIG_KILL"));
+    shell(&env("RIG_START_NOP"));
+    // A restarted dummy rig is back on Hamlib's default dial: put it where check 1 left it.
+    shell(&format!("rigctl -m 2 -r 127.0.0.1:4532 F {new_hz} M USB 2400"));
+    let (unknown, rs) = a.lab.wait(20.0, |s| s.rig.link == RigLinkView::Up && s.rig.ptt == RigPttView::Unknown).await;
+    let ans3 = hb.call(AppCommand::AnswerQsy { accept: Some(0) }).await;
+    let own = a.event(60.0, |e| is_notice(e, "qsy.notify.ownRig")).await.is_some();
+    let told = b.event(60.0, |e| is_notice(e, "qsy.notify.declinedRig")).await.is_some();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let (sa, sb) = (a.lab.snap().await, b.lab.snap().await);
+    let still = sa.session.as_ref().map(|s| &s.session_id) == session.as_ref() && sa.modem == ModemState::Connected;
+    let (da, db) = (dial(4532), dial(4632));
+    a.lab.record(
+        "3 gate",
+        p3.is_ok() && offered3 && unknown && ans3.is_ok() && own && told && still && sa.qsy.is_none() && sb.qsy.is_none()
+            && da == Some(new_hz) && db == Some(new_hz - B_OFFSET as u64),
+        format!(
+            "propose {p3:?}; B offered {offered3}; A link {:?} PTT {:?}; accept {ans3:?}; A noted own rig {own}; B told declined (rig) {told}; same session {still}; dials A {da:?} B {db:?}",
+            rs.rig.link, rs.rig.ptt
+        ),
+    );
+    shell(&env("RIG_KILL"));
+    shell(&env("RIG_START"));
+    shell(&format!("rigctl -m 2 -r 127.0.0.1:4532 F {new_hz} M USB 2400"));
+    a.lab.rig_up().await;
+
+    // ---- 2: fallback. B stops answering calls, so A's re-calls go unanswered; both rigs return.
+    let back_a = dial(4532).unwrap_or(new_hz);
+    let back_b = dial(4632).unwrap_or(new_hz - B_OFFSET as u64);
+    let ro = hb.call(AppCommand::SetReceiveOnly { on: true }).await;
+    let fb_hz = 7_140_000;
+    let e2 = a.entry("40m fallback", fb_hz).await;
+    a.drain();
+    b.drain();
+    let p2 = ha.call(AppCommand::ProposeQsy { entry_ids: vec![e2], note: None }).await;
+    let (offered2, _) = b.lab.wait(60.0, |s| qsy_stage(s).as_deref() == Some("offered")).await;
+    let ans2 = hb.call(AppCommand::AnswerQsy { accept: Some(0) }).await;
+    let (a_went, _) = dial_is(4532, fb_hz, 90.0).await;
+    let (b_went, _) = dial_is(4632, fb_hz - B_OFFSET as u64, 90.0).await;
+    let t0 = Instant::now();
+    let (a_back, a_d) = dial_is(4532, back_a, 200.0).await;
+    let a_took = t0.elapsed().as_secs_f32();
+    let (b_back, b_d) = dial_is(4632, back_b, 60.0).await;
+    let b_took = t0.elapsed().as_secs_f32();
+    let fell = a.event(5.0, |e| is_notice(e, "qsy.notify.fellBack")).await.is_some()
+        || a.lab.activity().await.iter().any(|e| e.text.to_lowercase().contains("original"));
+    let (a_over, sa) = a.lab.wait(30.0, |s| s.qsy.is_none()).await;
+    let (b_over, _) = b.lab.wait(30.0, |s| s.qsy.is_none()).await;
+    a.lab.record(
+        "2 fallback",
+        ro.is_ok() && p2.is_ok() && offered2 && ans2.is_ok() && a_went && b_went && a_back && b_back && a_over && b_over
+            && sa.session.is_none(),
+        format!(
+            "receive-only {ro:?}; propose {p2:?}; offered {offered2}; accept {ans2:?}; both moved A {a_went} B {b_went}; back A {a_back} {a_d:?} after {a_took:.0} s, B {b_back} {b_d:?} after {b_took:.0} s (want {back_a}/{back_b}); fell-back note {fell}; QSY over A {a_over} B {b_over}; A modem {:?}",
+            sa.modem
+        ),
+    );
+    let _ = hb.call(AppCommand::SetReceiveOnly { on: false }).await;
+    let _ = tokio::time::timeout(Duration::from_secs(10), hb.call(AppCommand::Shutdown)).await;
+    let log: Vec<String> =
+        b.lab.activity().await.iter().map(|e| format!("{} [{}] {}", e.at_utc, e.kind, e.text)).collect();
+    std::fs::write(out.join("activity-m3c-b.txt"), log.join("\n") + "\n").unwrap();
+    a.lab
 }

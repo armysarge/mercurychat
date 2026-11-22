@@ -1,5 +1,23 @@
 # Planning changes
 
+## 0.9 — 22 November 2026 (M3c operator extras)
+
+- Built M3c on branch `m3c`. **Mercury contract suite** (`crates/mercury-contract`): every Mercury behaviour MercuryChat relies on, written once. It runs against the fake in `check.sh`, and against real Mercury with `lab/docker/contract/check-mercury.sh`, both at the pin (f77adfb + 0001 + 0002) and at upstream `mercuryv2` (`--latest`).
+- **MCH/1 minor 1:** capabilities `qsy/1` and `info/1`, with frames 0x30/0x31 (QSY) and 0x40/0x41 (information) and golden vectors. A new frame is sent only when both sides negotiated it, so an M3b peer chats as before and sees the new controls as "not supported by this station".
+- **QSY during a session (D16):** propose 1–5 frequencies from the list. The peer accepts or declines. Each station checks its own rig before anything is committed. The caller disconnects, both rigs are set to the candidate minus their own offset once Mercury is idle and unkeyed, and the caller re-calls; the re-call's QSO record links to the first. If the re-call fails within 120 s, both go back to the original frequency. A station without a rig link can still accept and is shown "Tune to … now".
+- **Before a connection:** the QSY button on a heard station sends an addressed MCB/1 kind 3 through the CQ gate. Only the addressee is shown it, with "Tune and listen".
+- **Information requests (D17):** "Request SNR" and "Request station info" fill the QSO card, marked "peer report". The fields shared are chosen per profile (name, QTH and locator by default). The email never goes in an answer, only through "Send my email" after a confirmation.
+- **Extended beacon (D17):** name, QTH and a status line of up to 40 bytes, as MCB/1 kind 2. Settings → Beacon shows the bytes left at the listen mode, and refuses a beacon that would not fit. A receiver that doesn't know a kind counts it as unsupported, not malformed.
+- **Quick messages:** a macro marked "quick" is listed first in the composer's menu.
+- **Compatibility:** M3a and M3b receivers count MCB/1 kinds 2 and 3 as **malformed** broadcasts. They predate the "unknown kind is unsupported" rule. They show no station for them and no error, and their malformed counter rises.
+- **Rig lab** (`run-rig-lab-checks.sh m3c`, two MercuryChat instances and two patched Mercury modems with Hamlib dummy rigs, no RF): 5 of 5 checks pass:
+  - QSY end to end with per-station offsets;
+  - the fallback;
+  - a failed rig gate declining without a disconnect;
+  - SNR and station info with no email;
+  - kinds 2 and 3 over the broadcast plane.
+- Still open: a real transceiver, the Raspberry Pi smoke test, and on-air timing of the QSY windows. Details: docs/M3c-progress.md.
+
 ## 0.8 — 18 November 2026 (M3b rig control)
 
 - Built M3b on branch `m3b`. **Connect-only:** MercuryChat is a second client of the rigctld the operator runs; Mercury keys PTT through the same rigctld (Hamlib model 2). A link test in Settings checks each step (connect, capabilities, frequency, mode, PTT read-back, Mercury's PTT owner) using reads only, and explains rigctld's `RPRT -11` (start it with `-P`). A Mercury with its own CAT connection is refused as a second owner, with the reason.
