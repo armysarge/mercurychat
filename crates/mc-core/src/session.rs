@@ -5,8 +5,8 @@
 //! (protocol/receipts, then chat, then file chunks). File chunks are paced by
 //! the modem's reported BUFFER so chat is not stuck behind a large backlog.
 
-use crate::files::{sanitize_name, unique_target};
-use mc_storage::{OutState, Store, Stored};
+use crate::files::{sanitize_name, unique_target, unpack_zstd, Prepared, UnpackError};
+use mc_storage::{Direction, OutState, Store, Stored, TransferRow, TransferState};
 use mch_protocol::payload::*;
 use mch_protocol::{encode, Decoder, Frame, FrameType, ObjectId, ProtocolError};
 use sha2::{Digest, Sha256};
@@ -14,7 +14,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 
 pub const APP_NAME: &str = "MercuryChat";
 pub const APP_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -24,10 +24,17 @@ pub struct SessionConfig {
     pub local_call: String,
     pub peer_call: String,
     pub generation: u64,
+    /// The receive folder: published files land here (FIL-04).
     pub files_dir: PathBuf,
+    /// Where incoming wire bytes wait (the station's `tmp/`).
+    pub tmp_dir: PathBuf,
+    /// The largest incoming file, as it lands on disk.
     pub max_file: u64,
     pub chunk: u32,
     pub auto_accept_files: bool,
+    /// An unanswered offer is declined `timeout` after this (03: 2 min).
+    pub offer_timeout: Duration,
+    pub free_space: crate::station::FreeSpace,
     pub hello_timeout: Duration,
     /// Pace file chunks so at most this many bytes sit in the modem queue.
     pub modem_window: u64,
@@ -107,9 +114,14 @@ pub enum SessionCommand {
         id: ObjectId,
         text: String,
     },
+    /// Offer a prepared file (M4 C2); `id` is the transfer id on the wire.
     SendFile {
-        path: PathBuf,
-        opts: SendFileOpts,
+        id: ObjectId,
+        prepared: Prepared,
+    },
+    /// Give an incoming offer one more window (once).
+    ExtendFile {
+        id: ObjectId,
     },
     AcceptFile {
         id: ObjectId,
@@ -122,12 +134,6 @@ pub enum SessionCommand {
     },
     /// A minor-1 message; refused (`PeerSendRefused`) when not negotiated.
     Peer(PeerMsg),
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SendFileOpts {
-    /// Lab fault injection: declare a wrong SHA-256 in the offer.
-    pub corrupt_declared_hash: bool,
 }
 
 /// Inputs from the control plane.
@@ -165,6 +171,13 @@ pub enum SessionEvent {
         id: ObjectId,
         name: String,
         size: u64,
+        wire_size: u64,
+        encoding: Option<Encoding>,
+    },
+    /// Cancelled by the operator here (`by_peer` false) or by the peer.
+    FileCancelled {
+        id: ObjectId,
+        by_peer: bool,
     },
     FileSending {
         id: ObjectId,
@@ -218,7 +231,8 @@ pub enum SessionEnd {
 
 struct OutFile {
     id: ObjectId,
-    path: PathBuf,
+    prepared: Prepared,
+    /// Wire bytes.
     size: u64,
     chunk: usize,
     sent: u64,
@@ -236,14 +250,32 @@ enum OutFileState {
 struct InFile {
     id: ObjectId,
     name: String,
+    /// The file as it lands on disk.
     size: u64,
+    wire_size: u64,
+    encoding: Option<Encoding>,
     sha256: String,
+    /// Wire bytes so far.
     received: u64,
-    hasher: Sha256,
-    temp: PathBuf,
+    /// The wire bytes (`tmp_dir`), then the decoded file (`files_dir/.partial`).
+    wire: PathBuf,
+    out: PathBuf,
     file: Option<tokio::fs::File>,
     accepted: bool,
+    deadline: tokio::time::Instant,
+    extended: bool,
+    /// FILE_END is in; decoding and the hash check run on a blocking task.
+    verifying: bool,
+    /// The peer cancelled while verifying: discard what the check returns.
+    cancelled: bool,
 }
+
+/// Safety margin on top of the file and its wire bytes (M4 C3).
+const DISK_MARGIN: u64 = 1 << 20;
+/// The application's hard ceiling on a file (FIL-02).
+pub const MAX_FILE_CEILING: u64 = 1 << 20;
+
+type Verdict = Result<(), (String, String)>;
 
 pub struct Session<'a> {
     cfg: SessionConfig,
@@ -261,30 +293,16 @@ pub struct Session<'a> {
     q_chat: VecDeque<(ObjectId, Frame)>,
     pending_user: VecDeque<SessionCommand>,
     out_file: Option<OutFile>,
-    queued_files: VecDeque<(PathBuf, SendFileOpts)>,
+    queued_files: VecDeque<(ObjectId, Prepared)>,
     in_file: Option<InFile>,
+    peer_max_file: u64,
+    verify: Option<(ObjectId, oneshot::Receiver<Verdict>)>,
     modem_reported: u64,
     written_since_report: u64,
 }
 
 fn proto_err(e: impl std::fmt::Display) -> SessionEnd {
     SessionEnd::Protocol(e.to_string())
-}
-
-async fn sha256_file(path: &Path) -> std::io::Result<(u64, String)> {
-    let mut f = tokio::fs::File::open(path).await?;
-    let mut h = Sha256::new();
-    let mut buf = vec![0u8; 64 * 1024];
-    let mut n_total = 0u64;
-    loop {
-        let n = f.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        n_total += n as u64;
-        h.update(&buf[..n]);
-    }
-    Ok((n_total, hex::encode(h.finalize())))
 }
 
 impl<'a> Session<'a> {
@@ -306,6 +324,8 @@ impl<'a> Session<'a> {
             out_file: None,
             queued_files: VecDeque::new(),
             in_file: None,
+            peer_max_file: 0,
+            verify: None,
             modem_reported: 0,
             written_since_report: 0,
         }
@@ -355,28 +375,18 @@ impl<'a> Session<'a> {
         // Truthful states on any ending: nothing in flight is "delivered".
         let _ = self.store.mark_in_flight_uncertain();
         if let Some(of) = self.out_file.take() {
-            let _ = self.store.update_transfer(
-                &self.cfg.peer_call,
-                "out",
-                &of.id.0,
-                "interrupted",
-                Some(of.sent),
-                None,
-                None,
-            );
+            let _ = self.store.transfer_set_state(Direction::Out, &of.id.0, TransferState::Interrupted, of.sent, None);
+            let _ = tokio::fs::remove_file(&of.prepared.path).await;
+        }
+        for (_, p) in self.queued_files.drain(..) {
+            let _ = tokio::fs::remove_file(&p.path).await;
         }
         if let Some(inf) = self.in_file.take() {
             drop(inf.file);
-            let _ = tokio::fs::remove_file(&inf.temp).await;
-            let _ = self.store.update_transfer(
-                &self.cfg.peer_call,
-                "in",
-                &inf.id.0,
-                "interrupted",
-                Some(inf.received),
-                None,
-                None,
-            );
+            let _ = tokio::fs::remove_file(&inf.wire).await;
+            let _ = tokio::fs::remove_file(&inf.out).await;
+            let _ =
+                self.store.transfer_set_state(Direction::In, &inf.id.0, TransferState::Interrupted, inf.received, None);
         }
         let _ = self.store.log_event("session", &format!("gen {} ended: {end:?}", self.cfg.generation));
         end
@@ -418,6 +428,20 @@ impl<'a> Session<'a> {
 
             // 2. Wait for input.
             let ready = self.ready();
+            let offer_deadline = self.in_file.as_ref().filter(|i| !i.accepted).map(|i| i.deadline);
+            let offer_wait = async move {
+                match offer_deadline {
+                    Some(d) => tokio::time::sleep_until(d).await,
+                    None => std::future::pending::<()>().await,
+                }
+            };
+            let verify = &mut self.verify;
+            let verified = async move {
+                match verify.as_mut() {
+                    Some((_, rx)) => rx.await.unwrap_or(Err(("verify".into(), "the check stopped".into()))),
+                    None => std::future::pending().await,
+                }
+            };
             let hello_wait = async move {
                 if ready {
                     std::future::pending::<()>().await
@@ -454,6 +478,12 @@ impl<'a> Session<'a> {
                     None => { cmds_open = false; }
                 },
                 _ = hello_wait => return SessionEnd::HelloTimeout,
+                _ = offer_wait => self.offer_expired().await,
+                v = verified => {
+                    if let Some((id, _)) = self.verify.take() {
+                        self.on_verified(id, v).await;
+                    }
+                },
                 // Re-check pacing periodically when a file is waiting for room.
                 _ = tokio::time::sleep(Duration::from_millis(250)), if self.out_file.as_ref().is_some_and(|f| f.state == OutFileState::Sending) => {}
             }
@@ -504,18 +534,10 @@ impl<'a> Session<'a> {
             let id = of.id;
             if of.sent >= of.size {
                 of.state = OutFileState::AwaitingReceipt;
+                let sent = of.sent;
                 let f = Frame::empty(FrameType::FileEnd, id);
                 self.write_frame(data, &f).await?;
-                let peer = self.cfg.peer_call.clone();
-                let _ = self.store.update_transfer(
-                    &peer,
-                    "out",
-                    &id.0,
-                    "awaiting_receipt",
-                    Some(self.out_file.as_ref().unwrap().sent),
-                    None,
-                    None,
-                );
+                let _ = self.store.transfer_set_state(Direction::Out, &id.0, TransferState::Sending, sent, None);
                 break;
             }
             let want = (of.size - of.sent).min(of.chunk as u64) as usize;
@@ -540,10 +562,21 @@ impl<'a> Session<'a> {
         if let Ok(f) = Reason::new("sender_error", reason).to_frame(FrameType::FileCancel, id) {
             self.q_proto.push_back(f);
         }
-        let peer = self.cfg.peer_call.clone();
-        let _ = self.store.update_transfer(&peer, "out", &id.0, "failed", None, None, Some(reason));
-        self.out_file = None;
+        if let Some(of) = self.out_file.take() {
+            let _ = self.store.transfer_set_state(Direction::Out, &id.0, TransferState::Failed, of.sent, Some(reason));
+            let _ = std::fs::remove_file(&of.prepared.path);
+        }
         self.emit(SessionEvent::FileFailed { id, reason: reason.into() });
+    }
+
+    /// The outgoing transfer ended (receipt, reject, cancel): its prepared
+    /// file goes, and the next one is offered.
+    async fn end_out_file(&mut self, state: TransferState, reason: Option<&str>) {
+        if let Some(of) = self.out_file.take() {
+            let _ = self.store.transfer_set_state(Direction::Out, &of.id.0, state, of.sent, reason);
+            let _ = tokio::fs::remove_file(&of.prepared.path).await;
+        }
+        self.start_next_file().await;
     }
 
     async fn on_command(&mut self, c: SessionCommand) {
@@ -562,26 +595,51 @@ impl<'a> Session<'a> {
                     }
                 }
             }
-            SessionCommand::SendFile { path, opts } => {
-                if !self.negotiated(FrameType::FileOffer) {
-                    let reason = "not supported by this station".to_string();
-                    self.emit(SessionEvent::FileRejected { id: ObjectId::random(), reason });
+            SessionCommand::SendFile { id, prepared } => {
+                let refusal = if !self.negotiated(FrameType::FileOffer) {
+                    Some("not supported by this station")
+                } else if prepared.size > MAX_FILE_CEILING
+                    || (self.peer_max_file > 0 && prepared.size > self.peer_max_file)
+                {
+                    Some("too large")
+                } else {
+                    None
+                };
+                if let Some(reason) = refusal {
+                    let _ = tokio::fs::remove_file(&prepared.path).await;
+                    self.emit(SessionEvent::FileRejected { id, reason: reason.into() });
                     return;
                 }
-                self.queued_files.push_back((path, opts));
+                self.queued_files.push_back((id, prepared));
                 self.start_next_file().await;
             }
             SessionCommand::AcceptFile { id } => self.accept_in_file(id).await,
-            SessionCommand::RejectFile { id } => self.reject_in_file(id, "rejected by operator").await,
+            SessionCommand::RejectFile { id } => self.reject_in_file(id, "declined").await,
+            SessionCommand::ExtendFile { id } => {
+                let window = self.cfg.offer_timeout;
+                if let Some(inf) = self.in_file.as_mut().filter(|i| i.id == id && !i.accepted && !i.extended) {
+                    inf.extended = true;
+                    inf.deadline += window;
+                }
+            }
             SessionCommand::CancelFile { id } => {
+                let cancel = || Reason::new("user", "cancelled").to_frame(FrameType::FileCancel, id).ok();
                 if self.out_file.as_ref().is_some_and(|f| f.id == id) {
-                    if let Ok(f) = Reason::new("user", "cancelled").to_frame(FrameType::FileCancel, id) {
+                    if let Some(f) = cancel() {
                         self.q_proto.push_back(f);
                     }
-                    let peer = self.cfg.peer_call.clone();
-                    let _ = self.store.update_transfer(&peer, "out", &id.0, "cancelled", None, None, None);
-                    self.out_file = None;
-                    self.start_next_file().await;
+                    self.end_out_file(TransferState::Cancelled, Some("user")).await;
+                    self.emit(SessionEvent::FileCancelled { id, by_peer: false });
+                } else if let Some(i) = self.queued_files.iter().position(|(q, _)| *q == id) {
+                    if let Some((_, p)) = self.queued_files.remove(i) {
+                        let _ = tokio::fs::remove_file(&p.path).await;
+                    }
+                    self.emit(SessionEvent::FileCancelled { id, by_peer: false });
+                } else if self.in_file.as_ref().is_some_and(|i| i.id == id) {
+                    if let Some(f) = cancel() {
+                        self.q_proto.push_back(f);
+                    }
+                    self.cancel_in_file(id, false).await;
                 }
             }
             SessionCommand::Peer(m) => {
@@ -603,34 +661,48 @@ impl<'a> Session<'a> {
         if self.out_file.is_some() {
             return;
         }
-        let Some((path, opts)) = self.queued_files.pop_front() else { return };
-        let id = ObjectId::random();
-        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "file".into());
-        let (size, mut sha) = match sha256_file(&path).await {
-            Ok(v) => v,
+        let Some((id, p)) = self.queued_files.pop_front() else { return };
+        let offer = FileOffer {
+            name: p.name.clone(),
+            size: p.size,
+            sha256: p.sha256.clone(),
+            mime: p.mime.clone(),
+            encoding: p.encoding,
+            wire_size: p.wire_size,
+        };
+        let frame = match offer.to_frame(id) {
+            Ok(f) => f,
             Err(e) => {
-                self.emit(SessionEvent::FileFailed { id, reason: format!("cannot read {}: {e}", path.display()) });
+                let _ = tokio::fs::remove_file(&p.path).await;
+                self.emit(SessionEvent::FileFailed { id, reason: format!("the offer is invalid: {e}") });
                 return;
             }
         };
-        if size > self.cfg.max_file || size == 0 {
-            self.emit(SessionEvent::FileFailed {
-                id,
-                reason: format!("size {size} outside 1..={}", self.cfg.max_file),
-            });
-            return;
-        }
-        let real_sha = sha.clone();
-        if opts.corrupt_declared_hash {
-            sha = hex::encode(Sha256::digest(b"not the file"));
-        }
-        let offer = FileOffer { name: name.clone(), size, sha256: sha, mime: None, encoding: None, wire_size: size };
-        let Ok(frame) = offer.to_frame(id) else { return };
-        let peer = self.cfg.peer_call.clone();
-        let _ = self.store.upsert_transfer(&peer, "out", &id.0, &name, size, &real_sha, "offered");
+        let row = TransferRow {
+            id: id.0,
+            direction: Direction::Out,
+            peer: self.cfg.peer_call.clone(),
+            session_id: None,
+            original_name: p.name.clone(),
+            saved_name: None,
+            size: p.size,
+            wire_size: p.wire_size,
+            sha256: p.sha256.clone(),
+            encoding: p.encoding.map(|_| "zstd".to_string()),
+            state: TransferState::Offered,
+            bytes_done: 0,
+            reason: None,
+            created_utc: String::new(),
+            updated_utc: String::new(),
+            saved_path: None,
+        };
+        let _ = self.store.transfer_upsert(&row);
         self.q_proto.push_back(frame);
-        self.out_file = Some(OutFile { id, path, size, chunk: 0, sent: 0, file: None, state: OutFileState::Offered });
-        self.emit(SessionEvent::FileSending { id, sha256: real_sha });
+        let sha256 = p.sha256.clone();
+        let size = p.wire_size;
+        self.out_file =
+            Some(OutFile { id, prepared: p, size, chunk: 0, sent: 0, file: None, state: OutFileState::Offered });
+        self.emit(SessionEvent::FileSending { id, sha256 });
     }
 
     async fn on_frame(&mut self, f: Frame) -> Result<(), SessionEnd> {
@@ -650,6 +722,7 @@ impl<'a> Session<'a> {
                 }
                 self.peer_hello_seen = true;
                 self.peer_max_chunk = h.max_chunk;
+                self.peer_max_file = h.max_file;
                 let caps: Vec<String> =
                     self.cfg.capabilities.iter().filter(|c| h.capabilities.contains(c)).cloned().collect();
                 self.caps = caps.clone();
@@ -690,6 +763,18 @@ impl<'a> Session<'a> {
                     let _ = self.store.log_event("protocol", &format!("receipt for unknown message {}", f.id));
                 }
             }
+            // Files need file/2 (M4 C1); without it the frame ends the session.
+            FrameType::FileOffer
+            | FrameType::FileAccept
+            | FrameType::FileReject
+            | FrameType::FileChunk
+            | FrameType::FileEnd
+            | FrameType::FileReceipt
+            | FrameType::FileCancel
+                if !self.negotiated(f.ftype) =>
+            {
+                return Err(SessionEnd::Protocol(format!("{:?} frame without its negotiated capability", f.ftype)));
+            }
             FrameType::FileOffer => self.on_offer(&f).await?,
             FrameType::FileAccept => {
                 let a = FileAccept::from_frame(&f).map_err(proto_err)?;
@@ -698,11 +783,11 @@ impl<'a> Session<'a> {
                     return Err(SessionEnd::Protocol("FILE_ACCEPT for no pending offer".into()));
                 };
                 of.chunk = (a.chunk as usize).min(mch_protocol::MAX_CHUNK_DATA).min(self.cfg.chunk as usize);
-                match tokio::fs::File::open(&of.path).await {
+                match tokio::fs::File::open(&of.prepared.path).await {
                     Ok(file) => {
                         of.file = Some(file);
                         of.state = OutFileState::Sending;
-                        let _ = self.store.update_transfer(&peer, "out", &f.id.0, "sending", None, None, None);
+                        let _ = self.store.transfer_set_state(Direction::Out, &f.id.0, TransferState::Sending, 0, None);
                     }
                     Err(_) => self.fail_out_file(f.id, "local file vanished"),
                 }
@@ -710,18 +795,14 @@ impl<'a> Session<'a> {
             FrameType::FileReject => {
                 let r = Reason::from_frame(&f).map_err(proto_err)?;
                 if self.out_file.as_ref().is_some_and(|o| o.id == f.id) {
-                    self.out_file = None;
-                    let _ = self.store.update_transfer(&peer, "out", &f.id.0, "rejected", None, None, Some(&r.code));
-                    self.emit(SessionEvent::FileRejected { id: f.id, reason: format!("{}: {}", r.code, r.text) });
-                    self.start_next_file().await;
+                    self.end_out_file(TransferState::Rejected, Some(&r.code)).await;
+                    self.emit(SessionEvent::FileRejected { id: f.id, reason: r.code.clone() });
                 }
             }
             FrameType::FileReceipt => {
                 if self.out_file.as_ref().is_some_and(|o| o.id == f.id && o.state == OutFileState::AwaitingReceipt) {
-                    self.out_file = None;
-                    let _ = self.store.update_transfer(&peer, "out", &f.id.0, "delivered", None, None, None);
+                    self.end_out_file(TransferState::Complete, None).await;
                     self.emit(SessionEvent::FileDelivered { id: f.id });
-                    self.start_next_file().await;
                 } else {
                     let _ = self.store.log_event("protocol", &format!("unexpected FILE_RECEIPT {}", f.id));
                 }
@@ -731,27 +812,16 @@ impl<'a> Session<'a> {
             FrameType::FileCancel => {
                 let r = Reason::from_frame(&f).map_err(proto_err)?;
                 if self.in_file.as_ref().is_some_and(|i| i.id == f.id) {
-                    let inf = self.in_file.take().unwrap();
-                    drop(inf.file);
-                    let _ = tokio::fs::remove_file(&inf.temp).await;
-                    let _ = self.store.update_transfer(
-                        &peer,
-                        "in",
-                        &f.id.0,
-                        "cancelled",
-                        Some(inf.received),
-                        None,
-                        Some(&r.code),
-                    );
-                    self.emit(SessionEvent::FileFailed { id: f.id, reason: format!("sender cancelled: {}", r.code) });
+                    self.cancel_in_file(f.id, true).await;
                 } else if self.out_file.as_ref().is_some_and(|o| o.id == f.id) {
-                    self.out_file = None;
-                    let _ = self.store.update_transfer(&peer, "out", &f.id.0, "failed", None, None, Some(&r.code));
-                    self.emit(SessionEvent::FileFailed {
-                        id: f.id,
-                        reason: format!("receiver cancelled: {} {}", r.code, r.text),
-                    });
-                    self.start_next_file().await;
+                    if r.code == "user" {
+                        self.end_out_file(TransferState::Cancelled, Some("user")).await;
+                        self.emit(SessionEvent::FileCancelled { id: f.id, by_peer: true });
+                    } else {
+                        let reason = format!("receiver: {}: {}", r.code, r.text);
+                        self.end_out_file(TransferState::Failed, Some(&r.code)).await;
+                        self.emit(SessionEvent::FileFailed { id: f.id, reason });
+                    }
                 }
             }
             FrameType::Error => {
@@ -772,52 +842,87 @@ impl<'a> Session<'a> {
     }
 
     async fn on_offer(&mut self, f: &Frame) -> Result<(), SessionEnd> {
-        let peer = self.cfg.peer_call.clone();
         let o = FileOffer::from_frame(f).map_err(proto_err)?;
-        if self.in_file.is_some() {
-            let r = Reason::new("busy", "one transfer at a time")
-                .to_frame(FrameType::FileReject, f.id)
-                .map_err(proto_err)?;
-            self.q_proto.push_back(r);
+        let row = TransferRow {
+            id: f.id.0,
+            direction: Direction::In,
+            peer: self.cfg.peer_call.clone(),
+            session_id: None,
+            original_name: o.name.clone(),
+            saved_name: None,
+            size: o.size,
+            wire_size: o.wire_size,
+            sha256: o.sha256.clone(),
+            encoding: o.encoding.map(|_| "zstd".to_string()),
+            state: TransferState::Offered,
+            bytes_done: 0,
+            reason: None,
+            created_utc: String::new(),
+            updated_utc: String::new(),
+            saved_path: None,
+        };
+        let _ = self.store.transfer_upsert(&row);
+        // Refused before the operator sees it (M4 C3).
+        let free = self.cfg.free_space.of(&self.cfg.files_dir);
+        let refusal = if self.in_file.is_some() {
+            Some("busy")
+        } else if o.size == 0 || o.size > self.cfg.max_file.min(MAX_FILE_CEILING) {
+            Some("too large")
+        } else if !self.cfg.files_dir.is_dir() {
+            Some("no folder")
+        } else if free.map_or(true, |n| n < o.size + o.wire_size + DISK_MARGIN) {
+            Some("no space")
+        } else {
+            None
+        };
+        if let Some(code) = refusal {
+            self.send_reject(f.id, code);
+            let _ = self.store.transfer_set_state(Direction::In, &f.id.0, TransferState::Rejected, 0, Some(code));
             return Ok(());
         }
-        let _ = self.store.upsert_transfer(&peer, "in", &f.id.0, &o.name, o.size, &o.sha256, "offered");
-        if o.size == 0 || o.size > self.cfg.max_file {
-            let r = Reason::new("too_large", &format!("limit {}", self.cfg.max_file))
-                .to_frame(FrameType::FileReject, f.id)
-                .map_err(proto_err)?;
-            self.q_proto.push_back(r);
-            let _ = self.store.update_transfer(&peer, "in", &f.id.0, "rejected", None, None, Some("too_large"));
-            return Ok(());
-        }
-        let partial = self.cfg.files_dir.join(".partial");
-        let temp = partial.join(format!("{}.part", f.id));
         self.in_file = Some(InFile {
             id: f.id,
             name: o.name.clone(),
             size: o.size,
+            wire_size: o.wire_size,
+            encoding: o.encoding,
             sha256: o.sha256,
             received: 0,
-            hasher: Sha256::new(),
-            temp,
+            wire: self.cfg.tmp_dir.join(format!("{}.wire", f.id)),
+            out: self.cfg.files_dir.join(".partial").join(format!("{}.part", f.id)),
             file: None,
             accepted: false,
+            deadline: tokio::time::Instant::now() + self.cfg.offer_timeout,
+            extended: false,
+            verifying: false,
+            cancelled: false,
         });
-        self.emit(SessionEvent::FileOffered { id: f.id, name: o.name, size: o.size });
+        self.emit(SessionEvent::FileOffered {
+            id: f.id,
+            name: o.name,
+            size: o.size,
+            wire_size: o.wire_size,
+            encoding: o.encoding,
+        });
         if self.cfg.auto_accept_files {
             self.accept_in_file(f.id).await;
         }
         Ok(())
     }
 
+    fn send_reject(&mut self, id: ObjectId, code: &str) {
+        if let Ok(fr) = Reason::new(code, code).to_frame(FrameType::FileReject, id) {
+            self.q_proto.push_back(fr);
+        }
+    }
+
     async fn accept_in_file(&mut self, id: ObjectId) {
         let chunk = self.agreed_chunk();
-        let peer = self.cfg.peer_call.clone();
+        let tmp = self.cfg.tmp_dir.clone();
         let Some(inf) = self.in_file.as_mut().filter(|i| i.id == id && !i.accepted) else { return };
-        let dir = inf.temp.parent().unwrap().to_path_buf();
         let opened = async {
-            tokio::fs::create_dir_all(&dir).await?;
-            tokio::fs::OpenOptions::new().write(true).create_new(true).open(&inf.temp).await
+            tokio::fs::create_dir_all(&tmp).await?;
+            tokio::fs::OpenOptions::new().write(true).create_new(true).open(&inf.wire).await
         }
         .await;
         match opened {
@@ -827,34 +932,56 @@ impl<'a> Session<'a> {
                 if let Ok(fr) = (FileAccept { chunk }).to_frame(id) {
                     self.q_proto.push_back(fr);
                 }
-                let _ = self.store.update_transfer(&peer, "in", &id.0, "receiving", Some(0), None, None);
+                let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Receiving, 0, None);
             }
             Err(e) => {
-                let reason = format!("cannot create temp file: {e}");
-                self.reject_in_file(id, &reason).await;
+                tracing::warn!("cannot create the file's temp file: {e}");
+                self.reject_in_file(id, "write failed").await;
             }
         }
     }
 
-    async fn reject_in_file(&mut self, id: ObjectId, why: &str) {
-        if self.in_file.as_ref().is_some_and(|i| i.id == id) {
-            let inf = self.in_file.take().unwrap();
+    /// Our operator declined, the window ran out, or the file can't be stored.
+    async fn reject_in_file(&mut self, id: ObjectId, code: &str) {
+        if let Some(inf) = self.in_file.take_if(|i| i.id == id && !i.verifying) {
             drop(inf.file);
-            let _ = tokio::fs::remove_file(&inf.temp).await;
-            if let Ok(fr) = Reason::new("rejected", why).to_frame(FrameType::FileReject, id) {
-                self.q_proto.push_back(fr);
-            }
-            let peer = self.cfg.peer_call.clone();
-            let _ = self.store.update_transfer(&peer, "in", &id.0, "rejected", None, None, Some(why));
+            let _ = tokio::fs::remove_file(&inf.wire).await;
+            self.send_reject(id, code);
+            let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Rejected, 0, Some(code));
         }
+    }
+
+    async fn offer_expired(&mut self) {
+        let now = tokio::time::Instant::now();
+        if let Some(id) = self.in_file.as_ref().filter(|i| !i.accepted && now >= i.deadline).map(|i| i.id) {
+            self.reject_in_file(id, "timeout").await;
+        }
+    }
+
+    /// Cancelled here or by the peer. While the check runs, its result is
+    /// discarded when it returns: nothing is published, no receipt (M4).
+    async fn cancel_in_file(&mut self, id: ObjectId, by_peer: bool) {
+        let Some(inf) = self.in_file.as_mut().filter(|i| i.id == id) else { return };
+        let received = inf.received;
+        if inf.verifying {
+            inf.cancelled = true;
+        } else if let Some(inf) = self.in_file.take() {
+            drop(inf.file);
+            let _ = tokio::fs::remove_file(&inf.wire).await;
+            let _ = tokio::fs::remove_file(&inf.out).await;
+        }
+        let code = if by_peer { "peer" } else { "user" };
+        let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Cancelled, received, Some(code));
+        self.emit(SessionEvent::FileCancelled { id, by_peer });
     }
 
     async fn abort_in_file(&mut self, id: ObjectId, code: &str, why: &str) {
         if let Some(inf) = self.in_file.take() {
             drop(inf.file);
-            let _ = tokio::fs::remove_file(&inf.temp).await;
-            let peer = self.cfg.peer_call.clone();
-            let _ = self.store.update_transfer(&peer, "in", &id.0, "failed", Some(inf.received), None, Some(code));
+            let _ = tokio::fs::remove_file(&inf.wire).await;
+            let _ = tokio::fs::remove_file(&inf.out).await;
+            let _ =
+                self.store.transfer_set_state(Direction::In, &id.0, TransferState::Failed, inf.received, Some(code));
         }
         if let Ok(fr) = Reason::new(code, why).to_frame(FrameType::FileCancel, id) {
             self.q_proto.push_back(fr);
@@ -864,13 +991,14 @@ impl<'a> Session<'a> {
 
     async fn on_chunk(&mut self, f: &Frame) -> Result<(), SessionEnd> {
         let (off, bytes) = parse_chunk(f).map_err(proto_err)?;
-        let Some(inf) = self.in_file.as_mut().filter(|i| i.id == f.id && i.accepted) else {
+        let Some(inf) = self.in_file.as_mut().filter(|i| i.id == f.id && i.accepted && !i.verifying) else {
             // Chunks already queued in the modem after a cancel are discarded.
             let _ = self.store.log_event("file", &format!("discarded chunk for inactive transfer {}", f.id));
             return Ok(());
         };
-        if off != inf.received || inf.received + bytes.len() as u64 > inf.size {
-            let why = format!("offset {off} len {} at received {} size {}", bytes.len(), inf.received, inf.size);
+        if off != inf.received || inf.received + bytes.len() as u64 > inf.wire_size {
+            let why =
+                format!("offset {off} len {} at received {} wire size {}", bytes.len(), inf.received, inf.wire_size);
             self.abort_in_file(f.id, "bad_offset", &why).await;
             return Ok(());
         }
@@ -879,56 +1007,124 @@ impl<'a> Session<'a> {
             self.abort_in_file(f.id, "disk", "write failed").await;
             return Ok(());
         }
-        inf.hasher.update(bytes);
         inf.received += bytes.len() as u64;
-        let (received, size) = (inf.received, inf.size);
-        self.emit(SessionEvent::FileProgress { id: f.id, bytes: received, total: size });
+        let (received, total) = (inf.received, inf.wire_size);
+        self.emit(SessionEvent::FileProgress { id: f.id, bytes: received, total });
         Ok(())
     }
 
+    /// All wire bytes are in: decode and check them off the session task.
     async fn on_file_end(&mut self, id: ObjectId) -> Result<(), SessionEnd> {
-        let peer = self.cfg.peer_call.clone();
-        let Some(mut inf) = self.in_file.take().filter(|i| i.id == id && i.accepted) else {
+        let Some(inf) = self.in_file.as_mut().filter(|i| i.id == id && i.accepted && !i.verifying) else {
             return Ok(());
         };
-        let file = inf.file.take().unwrap();
-        let flushed = file.sync_all().await;
-        drop(file);
-        let got = hex::encode(std::mem::take(&mut inf.hasher).finalize());
-        let fail = if flushed.is_err() {
-            Some(("disk", "fsync failed".to_string()))
-        } else if inf.received != inf.size {
-            Some(("short", format!("received {} of {}", inf.received, inf.size)))
-        } else if got != inf.sha256 {
-            Some(("hash_mismatch", format!("declared {} got {got}", inf.sha256)))
-        } else {
-            None
+        let flushed = match inf.file.take() {
+            Some(file) => file.sync_all().await,
+            None => Ok(()),
         };
-        if let Some((code, why)) = fail {
-            let _ = tokio::fs::remove_file(&inf.temp).await;
-            let _ = self.store.update_transfer(&peer, "in", &id.0, "failed", Some(inf.received), None, Some(code));
-            if let Ok(fr) = Reason::new(code, &why).to_frame(FrameType::FileCancel, id) {
+        let (received, wire_size) = (inf.received, inf.wire_size);
+        if flushed.is_err() {
+            self.abort_in_file(id, "disk", "fsync failed").await;
+            return Ok(());
+        }
+        if received != wire_size {
+            self.abort_in_file(id, "short", &format!("received {received} of {wire_size}")).await;
+            return Ok(());
+        }
+        inf.verifying = true;
+        let (wire, out, encoding, size, sha) =
+            (inf.wire.clone(), inf.out.clone(), inf.encoding, inf.size, inf.sha256.clone());
+        let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Verifying, received, None);
+        let (tx, rx) = oneshot::channel();
+        tokio::task::spawn_blocking(move || {
+            let _ = tx.send(verify_file(&wire, &out, encoding, size, &sha));
+        });
+        self.verify = Some((id, rx));
+        Ok(())
+    }
+
+    /// The check is back: publish, store completion, and only then FILE_RECEIPT.
+    async fn on_verified(&mut self, id: ObjectId, verdict: Verdict) {
+        let Some(inf) = self.in_file.take_if(|i| i.id == id) else { return };
+        let _ = tokio::fs::remove_file(&inf.wire).await;
+        if inf.cancelled {
+            let _ = tokio::fs::remove_file(&inf.out).await;
+            return;
+        }
+        if let Err((code, why)) = verdict {
+            let _ = tokio::fs::remove_file(&inf.out).await;
+            let _ =
+                self.store.transfer_set_state(Direction::In, &id.0, TransferState::Failed, inf.received, Some(&code));
+            if let Ok(fr) = Reason::new(&code, &why).to_frame(FrameType::FileCancel, id) {
                 self.q_proto.push_back(fr);
             }
             self.emit(SessionEvent::FileFailed { id, reason: format!("{code}: {why}") });
-            return Ok(());
+            return;
         }
         let target = unique_target(&self.cfg.files_dir, &sanitize_name(&inf.name));
-        if let Err(e) = tokio::fs::rename(&inf.temp, &target).await {
-            let _ = tokio::fs::remove_file(&inf.temp).await;
-            let _ = self.store.update_transfer(&peer, "in", &id.0, "failed", Some(inf.received), None, Some("publish"));
+        if let Err(e) = tokio::fs::rename(&inf.out, &target).await {
+            let _ = tokio::fs::remove_file(&inf.out).await;
+            let _ = self.store.transfer_set_state(
+                Direction::In,
+                &id.0,
+                TransferState::Failed,
+                inf.received,
+                Some("publish"),
+            );
             self.emit(SessionEvent::FileFailed { id, reason: format!("publish failed: {e}") });
-            return Ok(());
+            return;
         }
+        let saved = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let path_s = target.to_string_lossy().into_owned();
-        // Completion is stored before FILE_RECEIPT is emitted.
-        self.store
-            .update_transfer(&peer, "in", &id.0, "complete", Some(inf.received), Some(&path_s), None)
-            .map_err(|e| SessionEnd::Protocol(format!("storage failed, no receipt: {e}")))?;
+        // Completion is stored before FILE_RECEIPT is sent (FIL-03).
+        if let Err(e) = self.store.transfer_complete(Direction::In, &id.0, Some((&saved, &path_s))) {
+            let _ = tokio::fs::remove_file(&target).await;
+            self.emit(SessionEvent::FileFailed { id, reason: format!("storage failed, no receipt: {e}") });
+            return;
+        }
         self.q_proto.push_back(Frame::empty(FrameType::FileReceipt, id));
-        self.emit(SessionEvent::FileReceived { id, path: target, sha256: got });
-        Ok(())
+        self.emit(SessionEvent::FileReceived { id, path: target, sha256: inf.sha256 });
     }
+}
+
+/// Decode (zstd) or copy the wire bytes to `out`, then check the length and
+/// SHA-256 the offer declared. Blocking.
+fn verify_file(wire: &Path, out: &Path, encoding: Option<Encoding>, size: u64, sha: &str) -> Verdict {
+    use std::io::Read;
+    let disk = |e: std::io::Error| ("disk".to_string(), e.to_string());
+    if let Some(dir) = out.parent() {
+        std::fs::create_dir_all(dir).map_err(disk)?;
+    }
+    match encoding {
+        Some(Encoding::Zstd) => unpack_zstd(wire, out, size).map_err(|e| match e {
+            UnpackError::TooLong => ("too_long".to_string(), e.to_string()),
+            UnpackError::Corrupt(_) => ("corrupt".to_string(), e.to_string()),
+            UnpackError::Io(_) => ("disk".to_string(), e.to_string()),
+        })?,
+        None => {
+            std::fs::copy(wire, out).map_err(disk)?;
+        }
+    }
+    let mut f = std::fs::File::open(out).map_err(disk)?;
+    let mut h = Sha256::new();
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut len = 0u64;
+    loop {
+        let n = f.read(&mut buf).map_err(disk)?;
+        if n == 0 {
+            break;
+        }
+        len += n as u64;
+        h.update(&buf[..n]);
+    }
+    if len != size {
+        return Err(("short".into(), format!("decoded {len} of {size}")));
+    }
+    let got = hex::encode(h.finalize());
+    if got != sha {
+        return Err(("hash_mismatch".into(), format!("declared {sha} got {got}")));
+    }
+    Ok(())
 }
 
 impl From<ProtocolError> for SessionEnd {

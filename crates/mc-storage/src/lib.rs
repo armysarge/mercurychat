@@ -475,66 +475,6 @@ impl Store {
         Ok(self.conn.execute("DELETE FROM messages WHERE peer = ?1", params![peer])?)
     }
 
-    // ---- transfers -------------------------------------------------------
-
-    pub fn upsert_transfer(
-        &mut self,
-        peer: &str,
-        dir: &str,
-        id: &[u8; 16],
-        name: &str,
-        size: u64,
-        sha256: &str,
-        state: &str,
-    ) -> Result<()> {
-        self.conn.execute(
-            "INSERT INTO transfers (wire_id, peer, direction, offered_name, size, sha256, state, updated_utc)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
-             ON CONFLICT (peer, direction, wire_id) DO UPDATE SET state = excluded.state, updated_utc = excluded.updated_utc",
-            params![&id[..], peer, dir, name, size as i64, sha256, state, now_utc()],
-        )?;
-        Ok(())
-    }
-
-    pub fn update_transfer(
-        &mut self,
-        peer: &str,
-        dir: &str,
-        id: &[u8; 16],
-        state: &str,
-        received: Option<u64>,
-        local_path: Option<&str>,
-        detail: Option<&str>,
-    ) -> Result<()> {
-        self.conn.execute(
-            "UPDATE transfers SET state = ?1, received = COALESCE(?2, received), local_path = COALESCE(?3, local_path),
-               detail = COALESCE(?4, detail), updated_utc = ?5
-             WHERE peer = ?6 AND direction = ?7 AND wire_id = ?8",
-            params![state, received.map(|v| v as i64), local_path, detail, now_utc(), peer, dir, &id[..]],
-        )?;
-        Ok(())
-    }
-
-    pub fn transfer_state(&self, peer: &str, dir: &str, id: &[u8; 16]) -> Result<Option<String>> {
-        Ok(self
-            .conn
-            .query_row(
-                "SELECT state FROM transfers WHERE peer = ?1 AND direction = ?2 AND wire_id = ?3",
-                params![peer, dir, &id[..]],
-                |r| r.get(0),
-            )
-            .optional()?)
-    }
-
-    /// On restart: transfers that were mid-flight are interrupted, not complete.
-    pub fn mark_transfers_interrupted(&mut self) -> Result<usize> {
-        Ok(self.conn.execute(
-            "UPDATE transfers SET state = 'interrupted', updated_utc = ?1
-             WHERE state IN ('offered','accepted','sending','receiving','verifying')",
-            params![now_utc()],
-        )?)
-    }
-
     pub fn log_event(&mut self, category: &str, detail: &str) -> Result<()> {
         self.conn.execute(
             "INSERT INTO events (utc, category, detail) VALUES (?1, ?2, ?3)",

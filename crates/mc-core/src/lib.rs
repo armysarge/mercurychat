@@ -15,5 +15,5 @@ pub mod session;
 pub mod sim;
 pub mod station;
 
-pub use session::{ModemSignal, SendFileOpts, SessionCommand, SessionEnd, SessionEvent};
+pub use session::{ModemSignal, SessionCommand, SessionEnd, SessionEvent};
 pub use station::{ConnectInfo, Observation, Station, StationConfig, StationError, StationRequest, TranscriptLine};

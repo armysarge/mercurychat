@@ -167,6 +167,18 @@ async fn send_chat_and_confirm(
     Ok((id, start.elapsed()))
 }
 
+/// Prepare a lab vector as the app would (no photo shrink); `corrupt` makes
+/// the declared SHA-256 wrong (the integrity fault).
+fn prep(path: &Path, corrupt: bool) -> Result<(ObjectId, mc_core::files::Prepared), String> {
+    let tmp = path.parent().unwrap_or(Path::new(".")).join("prep");
+    let mut p = mc_core::files::prepare(path, mc_core::files::PhotoSize::Original, &tmp, 1 << 20)
+        .map_err(|e| format!("prepare: {e:?}"))?;
+    if corrupt {
+        p.sha256 = "00".repeat(32);
+    }
+    Ok((ObjectId::random(), p))
+}
+
 async fn file_transfer(
     from: &mut Handle,
     to: &mut Handle,
@@ -177,7 +189,8 @@ async fn file_transfer(
     from.clear_backlog();
     to.clear_backlog();
     let start = Instant::now();
-    from.send(SessionCommand::SendFile { path: path.into(), opts: SendFileOpts::default() }).await;
+    let (id, prepared) = prep(path, false)?;
+    from.send(SessionCommand::SendFile { id, prepared }).await;
     let r = to
         .expect("FileReceived", t, |e| matches!(e, SessionEvent::FileReceived { .. } | SessionEvent::FileFailed { .. }))
         .await?;
@@ -280,7 +293,8 @@ pub async fn run(
         a.clear_backlog();
         b.clear_backlog();
         let fstart = Instant::now();
-        b.send(SessionCommand::SendFile { path: gpath.clone(), opts: SendFileOpts::default() }).await;
+        let (id, prepared) = prep(&gpath, false)?;
+        b.send(SessionCommand::SendFile { id, prepared }).await;
         b.expect("first FileProgress", bud.file, |e| matches!(e, SessionEvent::FileProgress { .. })).await?;
         let (_, chat_lat) = send_chat_and_confirm(a, b, "chat during transfer", bud.receipt).await?;
         let chat_done = fstart.elapsed();
@@ -310,8 +324,8 @@ pub async fn run(
         a.clear_backlog();
         b.clear_backlog();
         let before = std::fs::read_dir(b.files_dir()).map(|d| d.count()).unwrap_or(0);
-        a.send(SessionCommand::SendFile { path: hpath.clone(), opts: SendFileOpts { corrupt_declared_hash: true } })
-            .await;
+        let (id, prepared) = prep(&hpath, true)?;
+        a.send(SessionCommand::SendFile { id, prepared }).await;
         let r = b
             .expect("FileFailed", bud.file, |e| {
                 matches!(e, SessionEvent::FileFailed { .. } | SessionEvent::FileReceived { .. })

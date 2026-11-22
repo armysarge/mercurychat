@@ -14,6 +14,7 @@ sim = ["mercury-adapter/fake"]
 test-hooks = []
 
 [dependencies]
+fs4 = { version = "0.13", features = ["sync"] }
 serde = { version = "1", features = ["derive"] }
 uuid = { version = "1", features = ["v4"] }
 ts-rs = "12"

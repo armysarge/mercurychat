@@ -193,7 +193,9 @@ async fn minor1_peer_never_receives_file_frames() {
     let src = dir.path().join("note.txt");
     std::fs::write(&src, b"hello over the air").unwrap();
     net.set_hold_from(0, true);
-    a.cmds.send(SessionCommand::SendFile { path: src, opts: Default::default() }).await.unwrap();
+    let prepared =
+        mc_core::files::prepare(&src, mc_core::files::PhotoSize::Original, &dir.path().join("tmp"), 1 << 20).unwrap();
+    a.cmds.send(SessionCommand::SendFile { id: ObjectId::random(), prepared }).await.unwrap();
     let r = a
         .next("FileRejected", |e| matches!(e, SessionEvent::FileRejected { .. } | SessionEvent::FileFailed { .. }))
         .await;

@@ -53,9 +53,17 @@ pub struct StationConfig {
     pub endpoint: Endpoint,
     pub data_dir: PathBuf,
     pub bandwidth: Bandwidth,
+    /// The largest incoming file, as it lands on disk (M4: 1 KiB..=1 MiB).
     pub max_file: u64,
     pub chunk: u32,
     pub auto_accept_files: bool,
+    /// Where received files land; `None` is `data_dir/files`.
+    pub receive_dir: Option<PathBuf>,
+    /// Where prepared and incoming wire bytes wait; `None` is `data_dir/tmp`.
+    pub tmp_dir: Option<PathBuf>,
+    /// An unanswered incoming offer is declined after this (03: 2 min).
+    pub offer_timeout: Duration,
+    pub free_space: FreeSpace,
     pub hello_timeout: Duration,
     pub modem_window: u64,
     pub timeouts: Timeouts,
@@ -65,23 +73,55 @@ pub struct StationConfig {
 }
 
 impl StationConfig {
-    /// The app's station defaults (M2): BW2300, files up to 256 KiB in 1 KiB
-    /// chunks, never auto-accepted, a 5 s HELLO wait.
+    /// The app's station defaults: BW2300, incoming files up to 64 KiB (M4)
+    /// in 1 KiB chunks, never auto-accepted, a 2 min consent window, a 5 s
+    /// HELLO wait.
     pub fn defaults(callsign: Callsign, endpoint: Endpoint, data_dir: &std::path::Path) -> Self {
         StationConfig {
             callsign,
             endpoint,
             data_dir: data_dir.to_path_buf(),
             bandwidth: Bandwidth::Bw2300,
-            max_file: 256 * 1024,
+            max_file: 64 * 1024,
             chunk: 1024,
             auto_accept_files: false,
+            receive_dir: None,
+            tmp_dir: None,
+            offer_timeout: Duration::from_secs(120),
+            free_space: FreeSpace::system(),
             hello_timeout: Duration::from_secs(5),
             modem_window: 2 * 1024 + 256,
             timeouts: Timeouts::default(),
             proto_minor: mch_protocol::MINOR,
             capabilities: crate::session::default_capabilities(),
         }
+    }
+}
+
+/// How much room a folder's drive has left. The app asks the system; tests
+/// fix the answer.
+type FreeSpaceFn = dyn Fn(&std::path::Path) -> std::io::Result<u64> + Send + Sync;
+
+#[derive(Clone)]
+pub struct FreeSpace(std::sync::Arc<FreeSpaceFn>);
+
+impl FreeSpace {
+    pub fn system() -> Self {
+        FreeSpace(std::sync::Arc::new(|p| fs4::available_space(p)))
+    }
+
+    pub fn fixed(n: u64) -> Self {
+        FreeSpace(std::sync::Arc::new(move |_| Ok(n)))
+    }
+
+    pub fn of(&self, p: &std::path::Path) -> std::io::Result<u64> {
+        (self.0)(p)
+    }
+}
+
+impl std::fmt::Debug for FreeSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("FreeSpace(..)")
     }
 }
 
@@ -187,7 +227,7 @@ pub struct Station {
 
 impl Station {
     pub fn open(cfg: StationConfig) -> Result<Self, StationError> {
-        std::fs::create_dir_all(cfg.data_dir.join("files")).ok();
+        std::fs::create_dir_all(cfg.receive_dir.clone().unwrap_or_else(|| cfg.data_dir.join("files"))).ok();
         // MOD-02: the data root is ours alone before the store is opened.
         let lock = crate::lock::lock_data_root(&cfg.data_dir)?;
         let mut store = Store::open(&cfg.data_dir.join("station.db"))?;
@@ -198,7 +238,7 @@ impl Station {
         if n > 0 {
             store.log_event("recovery", &format!("start-up: {n} message(s) marked uncertain"))?;
         }
-        store.mark_transfers_interrupted()?;
+        store.transfers_interrupt_unfinished()?;
         Ok(Station {
             cfg,
             store,
@@ -216,7 +256,11 @@ impl Station {
     }
 
     pub fn files_dir(&self) -> PathBuf {
-        self.cfg.data_dir.join("files")
+        self.cfg.receive_dir.clone().unwrap_or_else(|| self.cfg.data_dir.join("files"))
+    }
+
+    pub fn tmp_dir(&self) -> PathBuf {
+        self.cfg.tmp_dir.clone().unwrap_or_else(|| self.cfg.data_dir.join("tmp"))
     }
 
     pub fn is_attached(&self) -> bool {
@@ -360,7 +404,7 @@ impl Station {
     pub async fn recover(&mut self, max_attempts: u32) -> Result<(), StationError> {
         self.att = None;
         let n = self.store.mark_in_flight_uncertain()?;
-        self.store.mark_transfers_interrupted()?;
+        self.store.transfers_interrupt_unfinished()?;
         self.store.log_event("recovery", &format!("{n} message(s) marked uncertain"))?;
         let mut delay = 1.0f64;
         let mut last = None;
@@ -566,9 +610,12 @@ impl Station {
             peer_call: info.peer.clone(),
             generation,
             files_dir: self.files_dir(),
+            tmp_dir: self.tmp_dir(),
             max_file: self.cfg.max_file,
             chunk: self.cfg.chunk,
             auto_accept_files: self.cfg.auto_accept_files,
+            offer_timeout: self.cfg.offer_timeout,
+            free_space: self.cfg.free_space.clone(),
             hello_timeout: self.cfg.hello_timeout,
             modem_window: self.cfg.modem_window,
             proto_minor: self.cfg.proto_minor,
@@ -625,7 +672,7 @@ impl Station {
         if end == SessionEnd::LocalDrop {
             // The session future is dropped here; record truthful states.
             let _ = self.store.mark_in_flight_uncertain();
-            let _ = self.store.mark_transfers_interrupted();
+            let _ = self.store.transfers_interrupt_unfinished();
             self.att = None;
         }
         end

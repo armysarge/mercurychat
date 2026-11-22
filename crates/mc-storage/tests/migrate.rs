@@ -248,8 +248,17 @@ fn migration_9_adds_transfers() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("station.db");
     {
-        let mut s = Store::open_with_migrations(&path, &MIGRATIONS[..8]).unwrap();
-        s.upsert_transfer("ZS6PEER", "out", &ID, "old.txt", 42, "ab", "delivered").unwrap();
+        let _s = Store::open_with_migrations(&path, &MIGRATIONS[..8]).unwrap();
+    }
+    {
+        // An M0-era row, as M0's engine wrote it.
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute(
+            "INSERT INTO transfers (wire_id, peer, direction, offered_name, size, sha256, state, updated_utc)
+             VALUES (?1, 'ZS6PEER', 'out', 'old.txt', 42, 'ab', 'delivered', '2026-01-01T00:00:00Z')",
+            rusqlite::params![&ID[..]],
+        )
+        .unwrap();
     }
     assert_eq!(version(&path), 8);
     let s = Store::open(&path).unwrap();
