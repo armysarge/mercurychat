@@ -192,14 +192,42 @@ fn sim_photo() -> Vec<u8> {
     out
 }
 
-/// Write `bytes` as `name` under SIM1's own folder and prepare it to send.
-fn sim_prepare(peer: &Station, name: &str, bytes: &[u8]) -> Option<crate::files::Prepared> {
-    let dir = peer.cfg.data_dir.join("sim-src");
-    std::fs::create_dir_all(&dir).ok()?;
-    let src = dir.join(name);
-    std::fs::write(&src, bytes).ok()?;
-    let p = crate::files::prepare(&src, crate::files::PhotoSize::Original, &peer.tmp_dir(), 1 << 20);
-    p.map_err(|e| tracing::warn!("SIM1 could not prepare {name}: {e:?}")).ok()
+/// SIM1's two offers, in order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SimOffer {
+    Notes,
+    Photo,
+}
+
+/// Make SIM1's file and prepare it to send, off the async threads
+/// (encoding and zstd at level 19 are slow in a debug build), then offer it.
+fn sim_offer(
+    what: SimOffer,
+    data_dir: std::path::PathBuf,
+    tmp_dir: std::path::PathBuf,
+    after: Duration,
+    tx: mpsc::Sender<SessionCommand>,
+    id: ObjectId,
+) {
+    tokio::spawn(async move {
+        tokio::time::sleep(after).await;
+        let made = tokio::task::spawn_blocking(move || {
+            let (name, bytes) = match what {
+                SimOffer::Notes => ("notes.txt", sim_notes()),
+                SimOffer::Photo => ("photo.jpg", sim_photo()),
+            };
+            let dir = data_dir.join("sim-src");
+            std::fs::create_dir_all(&dir).ok()?;
+            let src = dir.join(name);
+            std::fs::write(&src, bytes).ok()?;
+            let p = crate::files::prepare(&src, crate::files::PhotoSize::Original, &tmp_dir, 1 << 20);
+            p.map_err(|e| tracing::warn!("SIM1 could not prepare {name}: {e:?}")).ok()
+        })
+        .await;
+        if let Ok(Some(prepared)) = made {
+            let _ = tx.send(SessionCommand::SendFile { id, prepared }).await;
+        }
+    });
 }
 
 /// A chat a peer station stored: (sender, id, text).
@@ -240,24 +268,20 @@ pub async fn serve_peer_with(
         let (_req_tx, mut req_rx) = mpsc::channel(1);
         let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
         let from = info.peer.clone();
-        let notes = offers.then(|| sim_prepare(&peer, "notes.txt", &sim_notes())).flatten();
-        let photo = offers.then(|| sim_prepare(&peer, "photo.jpg", &sim_photo())).flatten();
+        let (data_dir, tmp_dir) = (peer.cfg.data_dir.clone(), peer.tmp_dir());
         let watch = async {
             // SIM1's own offers: the notes first, the photo once they end.
-            let mut notes = notes;
-            let mut photo = photo;
+            let mut next = offers.then_some(SimOffer::Notes);
             let mut offered: Option<ObjectId> = None;
             while let Some(ev) = ev_rx.recv().await {
                 match &ev {
                     SessionEvent::Negotiated { caps, .. } if caps.iter().any(|c| c == mch_protocol::CAP_FILE) => {
-                        if let Some(prepared) = notes.take() {
+                        if next == Some(SimOffer::Notes) {
+                            next = Some(SimOffer::Photo);
                             let id = ObjectId::random();
                             offered = Some(id);
-                            let tx = cmd_tx.clone();
-                            tokio::spawn(async move {
-                                tokio::time::sleep(PEER_OFFER_AFTER).await;
-                                let _ = tx.send(SessionCommand::SendFile { id, prepared }).await;
-                            });
+                            let (d, t) = (data_dir.clone(), tmp_dir.clone());
+                            sim_offer(SimOffer::Notes, d, t, PEER_OFFER_AFTER, cmd_tx.clone(), id);
                         }
                     }
                     SessionEvent::FileOffered { id, .. } => {
@@ -274,10 +298,11 @@ pub async fn serve_peer_with(
                         if offered == Some(*id) =>
                     {
                         offered = None;
-                        if let Some(prepared) = photo.take() {
+                        if next.take() == Some(SimOffer::Photo) {
                             let id = ObjectId::random();
                             offered = Some(id);
-                            let _ = cmd_tx.send(SessionCommand::SendFile { id, prepared }).await;
+                            let (d, t) = (data_dir.clone(), tmp_dir.clone());
+                            sim_offer(SimOffer::Photo, d, t, Duration::ZERO, cmd_tx.clone(), id);
                         }
                     }
                     _ => {}
