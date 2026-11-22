@@ -236,6 +236,9 @@ async fn decline_is_seen_by_both() {
     let id = t.a.send(&source(dir.path(), "x.bin", &noise(500))).await;
     t.b.transfer(10, "offer", |v| v.state == TransferState::Offered).await;
     t.b.call(AppCommand::DeclineFile { id: id.clone() }).await.unwrap();
+    // The decliner's own card changes too (an event, not only the stored row).
+    let b = t.b.transfer(10, "B rejected", |v| v.id == id && v.state == TransferState::Rejected).await;
+    assert_eq!(b.reason.as_deref(), Some("declined"));
     let a = t.a.transfer(10, "A rejected", |v| v.state == TransferState::Rejected).await;
     assert_eq!(a.reason.as_deref(), Some("declined"));
     assert_eq!(t.b.view(&id).await.state, TransferState::Rejected);
@@ -337,7 +340,9 @@ async fn missing_receive_folder_declines() {
     let id = t.a.send(&source(dir.path(), "x.bin", &noise(500))).await;
     let a = t.a.transfer(10, "A rejected", |v| v.state == TransferState::Rejected).await;
     assert_eq!(a.reason.as_deref(), Some("no folder"));
-    assert_eq!(t.b.view(&id).await.state, TransferState::Rejected);
+    // The receiving operator sees the declined offer, with its reason.
+    let b = t.b.transfer(10, "B rejected", |v| v.id == id && v.state == TransferState::Rejected).await;
+    assert_eq!(b.reason.as_deref(), Some("no folder"));
     assert!(!folder.exists(), "nothing created or landed elsewhere");
 }
 

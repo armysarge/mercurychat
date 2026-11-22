@@ -25,6 +25,8 @@ tracing = "0.1"
 thiserror = "2"
 mch-protocol = { path = "../crates/mch-protocol" }
 mercury-adapter = { path = "../crates/mercury-adapter", default-features = false }
+# The file picker for Send file (M4), pinned; only `open` is allowed (capabilities).
+tauri-plugin-dialog = "=2.8.4"
 
 [features]
 # The webview inspector. Never default and never in a release build: the shell

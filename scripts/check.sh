@@ -29,6 +29,7 @@ node --test apps/desktop/scripts/freqStep.test.mjs
 node --test apps/desktop/scripts/rigForm.test.mjs
 # Quick messages first in the composer's macro menu (quick.ts).
 node --test apps/desktop/scripts/quick.test.mjs
+node --test apps/desktop/scripts/transfers.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

@@ -29,19 +29,24 @@ const PEER_GAP: Duration = Duration::from_secs(2);
 
 /// What SIM1 is like. The app reads it from the environment
 /// (`SimPeer::from_env`); tests set it directly.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct SimPeer {
     /// `MC_SIM_PEER_MINOR0=1`: an older MercuryChat (MCH/1 minor 0, no `file/2`).
     pub minor0: bool,
     /// `MC_SIM_PEER_OFFERS=1`: SIM1 offers `notes.txt` 5 s after a session
     /// starts and, once that ends, a 640-px photo.
     pub offers: bool,
+    /// `MC_SIM_RATE=<bytes a second>`: the link moves this fast each way
+    /// (the fake modem's drain model), so a file takes time as on the air.
+    /// `None` is instant.
+    pub rate: Option<f64>,
 }
 
 impl SimPeer {
     pub fn from_env() -> SimPeer {
         let on = |k: &str| std::env::var_os(k).is_some_and(|v| v == "1");
-        SimPeer { minor0: on("MC_SIM_PEER_MINOR0"), offers: on("MC_SIM_PEER_OFFERS") }
+        let rate = std::env::var("MC_SIM_RATE").ok().and_then(|v| v.parse::<f64>().ok()).filter(|r| *r > 0.0);
+        SimPeer { minor0: on("MC_SIM_PEER_MINOR0"), offers: on("MC_SIM_PEER_OFFERS"), rate }
     }
 }
 
@@ -77,6 +82,10 @@ impl SimModem {
     ) -> Result<SimModem, StationError> {
         let ours = Callsign::parse(callsign).map_err(|e| StationError::Wrong(e.to_string()))?;
         let net = FakeNet::start().await;
+        if let Some(r) = sim_peer.rate {
+            net.set_drain_rate(0, r);
+            net.set_drain_rate(1, r);
+        }
         let peer_call = Callsign::parse(PEER_CALLSIGN).expect("valid simulator callsign");
         let mut cfg = StationConfig::defaults(peer_call, Endpoint::base("127.0.0.1", net.b_base), peer_dir);
         // An older MercuryChat: MCH/1 minor 0, chat and the never-wired `file`.

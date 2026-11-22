@@ -11,7 +11,7 @@ import QsoCard from "./QsoCard.vue";
 import QsyCard from "./QsyCard.vue";
 import SessionMenu from "./SessionMenu.vue";
 import TelemetryPanel from "./TelemetryPanel.vue";
-import { activeProfile, chat, modemLabel, queuedBytes, session, snapshot } from "../store";
+import { activeProfile, chat, files, modemLabel, pickFile, queuedBytes, sendFileBlock, session, snapshot } from "../store";
 
 const { t } = useI18n();
 const now = ref(Date.now());
@@ -43,6 +43,19 @@ function where() {
         <div class="stat"><span class="muted">{{ t("session.application") }}</span><span>{{ session.peerApp ?? t("session.unknownApp") }} · MCH/1</span></div>
         <div class="stat"><span class="muted">{{ t("session.since") }}</span><span class="mono">{{ since(session.sinceUtc) }}</span></div>
         <SessionMenu />
+        <div class="send-file-row">
+          <button
+            class="send-file-open"
+            :disabled="!!sendFileBlock"
+            :title="sendFileBlock ?? undefined"
+            :aria-describedby="sendFileBlock ? 'send-file-why' : undefined"
+            @click="pickFile"
+          >
+            {{ t("files.send.button") }}
+          </button>
+          <span v-if="sendFileBlock" id="send-file-why" class="muted small why">{{ sendFileBlock }}</span>
+        </div>
+        <p v-if="files.error" class="err small" role="alert">{{ files.error }}</p>
       </template>
       <p v-else class="muted small">{{ t("session.none") }}</p>
       <div v-if="chat.open" class="stat">
@@ -69,5 +82,6 @@ function where() {
 
 <style scoped>
 .panel { display: grid; gap: calc(var(--space) * 1.5); align-content: start; padding: calc(var(--space) * 2); overflow-y: auto; height: 100%; }
+.send-file-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
 .stat { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px; border-top: 1px solid var(--border); padding-top: 6px; font-size: calc(13px * var(--font-scale)); }
 </style>

@@ -270,6 +270,15 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "qsy.stage.": () => constOf("components/QsyCard.vue", "STAGES"),
     "qsy.notify.": () => constOf("components/QsyCard.vue", "noticeKeys"),
     "qso.field.": () => constOf("components/QsoCard.vue", "PEER_FIELDS"),
+    // M4: photo sizes and transfer states (the contract), the Files view's lists, and the reason codes transfers.ts maps.
+    "files.photo.": () => unionOf("PhotoSize.ts"),
+    "files.state.": () => unionOf("TransferState.ts"),
+    "files.view.": () => constOf("views/Files.vue", "SECTIONS"),
+    "files.reason.": () => {
+      const t = readFileSync(join(src, "transfers.ts"), "utf8");
+      const block = /const REASONS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";
+      return [...block.matchAll(/:\s*"(\w+)"/g)].map((m) => m[1]);
+    },
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
       const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";

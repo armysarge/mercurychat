@@ -145,6 +145,9 @@ pub struct TransferView {
     pub reason: Option<String>,
     /// An incoming offer's seconds left to answer.
     pub offer_expires_s: Option<u32>,
+    /// When the transfer was offered or queued (UTC): its place in the
+    /// conversation.
+    pub created_utc: String,
 }
 
 impl From<&TransferRow> for TransferView {
@@ -165,6 +168,7 @@ impl From<&TransferRow> for TransferView {
             eta_s: None,
             reason: r.reason.clone(),
             offer_expires_s: None,
+            created_utc: r.created_utc.clone(),
         }
     }
 }

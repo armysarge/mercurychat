@@ -13,7 +13,8 @@
     "conversations": "Chats",
     "settings": "Ajustes",
     "diagnostics": "Diagnóstico",
-    "logbook": "Libro de guardia"
+    "logbook": "Libro de guardia",
+    "files": "Archivos"
   },
   "modem": {
     "unavailable": "no disponible",
@@ -239,7 +240,8 @@
       "notifications": "Notificaciones",
       "appearance": "Apariencia",
       "about": "Acerca de",
-      "beacon": "Baliza"
+      "beacon": "Baliza",
+      "files": "Archivos"
     }
   },
   "appearance": {
@@ -953,7 +955,8 @@
       "nothingToAnswer": "no hay ningún QSY que responder",
       "noCandidate": "no existe esa opción",
       "rig": "el equipo no puede cambiar ahora: {message}",
-      "tuneDuringQsy": "no mientras hay un QSY en curso"
+      "tuneDuringQsy": "no mientras hay un QSY en curso",
+      "transfer": "hay una transferencia de archivo en curso"
     },
     "notify": {
       "declined": "{peer} rechazó el QSY",
@@ -1012,5 +1015,106 @@
     "save": "Guardar contenido de la baliza",
     "saved": "Contenido de la baliza guardado.",
     "tooBig": "No cabe: {n} bytes de más."
+  },
+  "files": {
+    "title": "Archivos",
+    "send": {
+      "button": "Enviar archivo…",
+      "noSession": "Enviar un archivo requiere una sesión",
+      "unsupported": "esta estación no lo admite"
+    },
+    "dialog": {
+      "title": "Enviar un archivo",
+      "preparing": "Preparando…",
+      "size": "Tamaño",
+      "onAir": "En el aire",
+      "airtime": "Tiempo en el aire",
+      "estimate": "estimado",
+      "compressed": "comprimido",
+      "shrunk": "foto reducida",
+      "photoSize": "Tamaño de la foto",
+      "metadata": "Es la foto original: su ubicación y los datos de la cámara se envían con ella.",
+      "send": "Enviar",
+      "cancel": "Cancelar"
+    },
+    "photo": {
+      "small": "Pequeña (320 px)",
+      "medium": "Mediana (640 px)",
+      "large": "Grande (1024 px)",
+      "original": "Original"
+    },
+    "airtime": {
+      "seconds": "unos {n} s",
+      "minutes": "unos {n} min",
+      "hours": "unas {n} h"
+    },
+    "card": {
+      "from": "De {peer}",
+      "to": "Para {peer}",
+      "sizes": "{size}, {wire} en el aire",
+      "airtime": "Tiempo en el aire {time}",
+      "answerWithin": "Responda en {n} s",
+      "accept": "Aceptar",
+      "decline": "Rechazar",
+      "extend": "Más tiempo",
+      "progress": "Progreso de la transferencia",
+      "done": "{done} de {wire}",
+      "left": "quedan {time}",
+      "cancel": "Cancelar",
+      "verified": "SHA-256 comprobado",
+      "savedAs": "Guardado como {name}",
+      "showInFolder": "Mostrar en la carpeta"
+    },
+    "state": {
+      "offered": "Ofrecido",
+      "waiting": "En espera",
+      "sending": "Enviando",
+      "receiving": "Recibiendo",
+      "verifying": "Comprobando",
+      "complete": "Completo",
+      "rejected": "Rechazado",
+      "cancelled": "Cancelado",
+      "failed": "Falló",
+      "interrupted": "Interrumpido"
+    },
+    "reason": {
+      "declined": "rechazado por el operador",
+      "timeout": "sin respuesta a tiempo",
+      "tooLarge": "demasiado grande",
+      "noFolder": "falta la carpeta de recepción",
+      "noSpace": "no hay espacio en disco",
+      "busy": "ya hay otro archivo en curso",
+      "writeFailed": "no se pudo escribir",
+      "user": "por el operador",
+      "peer": "por la otra estación",
+      "link": "el enlace terminó",
+      "restart": "la aplicación se reinició",
+      "unsupported": "esta estación no lo admite"
+    },
+    "view": {
+      "incoming": "Entrantes",
+      "outgoing": "Salientes",
+      "ended": "Interrumpidos o fallidos",
+      "empty": "Nada todavía"
+    },
+    "settings": {
+      "title": "Archivos",
+      "maxIncoming": "Archivo entrante más grande (KiB)",
+      "maxNote": "De 1 a 1024 KiB; las ofertas mayores se rechazan antes de que las vea.",
+      "receiveDir": "Carpeta de recepción",
+      "receiveDefault": "La carpeta propia de la estación",
+      "choose": "Elegir…",
+      "useDefault": "Usar la carpeta de la estación",
+      "photoDefault": "Tamaño de foto inicial",
+      "save": "Guardar",
+      "saved": "Guardado",
+      "note": "Un cambio se aplica desde la próxima sesión. MercuryChat nunca abre los archivos recibidos."
+    },
+    "refused": {
+      "noSession": "no hay sesión",
+      "unsupported": "esta estación no lo admite",
+      "overPeerLimit": "supera el límite de la otra estación",
+      "tooLarge": "el archivo es demasiado grande"
+    }
   }
 }

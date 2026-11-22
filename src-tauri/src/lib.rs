@@ -366,6 +366,8 @@ pub fn run() {
         // Desktop notifications (M3a Task 12b): the window may only send one,
         // ask whether it may, and ask the operator once (capabilities/default.json).
         .plugin(tauri_plugin_notification::init())
+        // The file picker for Send file (M4): `open` only (capabilities/default.json).
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // A development build loads its pages from devUrl: if nothing is
             // serving them, say so and start nothing else (devserver.rs).

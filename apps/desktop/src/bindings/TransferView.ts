@@ -22,4 +22,9 @@ etaS: number | null, reason: string | null,
 /**
  * An incoming offer's seconds left to answer.
  */
-offerExpiresS: number | null, };
+offerExpiresS: number | null, 
+/**
+ * When the transfer was offered or queued (UTC): its place in the
+ * conversation.
+ */
+createdUtc: string, };

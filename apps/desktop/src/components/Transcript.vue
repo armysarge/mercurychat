@@ -9,7 +9,9 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { ChatMessage } from "../bindings/ChatMessage";
 import type { Qso } from "../bindings/Qso";
-import { chat, loadOlder, logbook, retry, snapshot, transmitted } from "../store";
+import type { TransferView } from "../bindings/TransferView";
+import TransferCard from "./TransferCard.vue";
+import { chat, files, loadOlder, logbook, retry, snapshot, transmitted } from "../store";
 
 const props = defineProps<{ filter?: string }>();
 const { t } = useI18n();
@@ -76,11 +78,28 @@ const sysRows = computed<Sys[]>(() => {
   return shownRows.sort((a, b) => a.utc.localeCompare(b.utc));
 });
 
-type Item = { sys: Sys; m?: undefined; day?: string } | { m: ChatMessage; sys?: undefined; day?: string };
+type Item =
+  | { sys: Sys; m?: undefined; tr?: undefined; day?: string }
+  | { m: ChatMessage; sys?: undefined; tr?: undefined; day?: string }
+  | { tr: TransferView; m?: undefined; sys?: undefined; day?: string };
+
+/** The open peer's file transfers (M4), oldest first; none while filtering. */
+const transferRows = computed<TransferView[]>(() => {
+  if (!chat.open || props.filter?.trim()) return [];
+  const first = chat.messages[0];
+  return files.t.order
+    .map((id) => files.t.byId[id])
+    .filter((v) => v.peer === chat.open && (!chat.hasOlder || !first || v.createdUtc >= at(first)))
+    .sort((a, b) => a.createdUtc.localeCompare(b.createdUtc));
+});
 /** Messages in their order with the system rows placed by time; `day` marks a new date. */
 const items = computed<Item[]>(() => {
   const out: Item[] = [];
-  const rows = [...sysRows.value];
+  // System rows and transfer cards, merged by time, then placed among the messages.
+  const rows: { item: Item; utc: string }[] = [
+    ...sysRows.value.map((sys) => ({ item: { sys } as Item, utc: sys.utc })),
+    ...transferRows.value.map((tr) => ({ item: { tr } as Item, utc: tr.createdUtc })),
+  ].sort((a, b) => a.utc.localeCompare(b.utc));
   let last = "";
   const push = (item: Item, utc: string) => {
     const d = utc.slice(0, 10);
@@ -88,10 +107,13 @@ const items = computed<Item[]>(() => {
     last = d;
   };
   for (const m of shown.value) {
-    while (rows.length && rows[0].utc < at(m)) push({ sys: rows[0] }, rows.shift()!.utc);
+    while (rows.length && rows[0].utc < at(m)) {
+      const r = rows.shift()!;
+      push(r.item, r.utc);
+    }
     push({ m }, at(m));
   }
-  for (const r of rows) push({ sys: r }, r.utc);
+  for (const r of rows) push(r.item, r.utc);
   return out;
 });
 
@@ -129,10 +151,14 @@ watch(
       <button class="quiet" @click="loadOlder">{{ t("transcript.loadOlder") }}</button>
     </div>
     <p v-if="!chat.open" class="empty muted">{{ t("transcript.noneOpen") }}</p>
-    <p v-else-if="!shown.length" class="empty muted">{{ filter ? t("transcript.nothingMatches") : t("transcript.noMessages", { peer: chat.open }) }}</p>
+    <p v-else-if="!shown.length && !transferRows.length" class="empty muted">{{ filter ? t("transcript.nothingMatches") : t("transcript.noMessages", { peer: chat.open }) }}</p>
     <ol class="transcript" :aria-label="t('transcript.messagesAria')" aria-live="polite" aria-relevant="additions">
-      <template v-for="it in items" :key="it.sys ? it.sys.key : it.m.direction + it.m.id">
-        <li v-if="it.sys" class="sys small muted" :data-kind="it.sys.kind">
+      <template v-for="it in items" :key="it.sys ? it.sys.key : it.tr ? `t${it.tr.id}` : it.m.direction + it.m.id">
+        <li v-if="it.tr" class="file-row">
+          <div v-if="it.day" class="day label">{{ it.day }}</div>
+          <TransferCard :v="it.tr" />
+        </li>
+        <li v-else-if="it.sys" class="sys small muted" :data-kind="it.sys.kind">
           <div v-if="it.day" class="day label">{{ it.day }}</div>
           <span class="sys-line">{{ it.sys.text }}</span>
         </li>

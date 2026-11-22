@@ -15,6 +15,7 @@ import type { ChatMessage } from "./bindings/ChatMessage";
 import type { CommandOk } from "./bindings/CommandOk";
 import type { EventEnvelope } from "./bindings/EventEnvelope";
 import type { Since } from "./bindings/Since";
+import type { TransferView } from "./bindings/TransferView";
 import { t, te } from "./i18n";
 
 export const EVENT_CHANNEL = "mc://event";
@@ -74,6 +75,8 @@ export interface MirrorHooks {
   broadcast?: (kind: BroadcastKind, outcome: BroadcastOutcome) => void;
   /** A QSO record was created, edited or finalised. */
   qso?: (qso: Qso) => void;
+  /** A file transfer changed state or made progress (M4). */
+  transfer?: (t: TransferView) => void;
   /** Every event, after it is applied (desktop notifications). */
   event?: (event: AppEvent) => void;
   /** The local copy was rebuilt from a snapshot: message events may be missing. */
@@ -220,6 +223,9 @@ export class Mirror {
         break;
       case "broadcast":
         this.hooks.broadcast?.(ev.kind, ev.outcome);
+        break;
+      case "transfer":
+        this.hooks.transfer?.(ev.transfer);
         break;
       case "profilesChanged": {
         const fresh = await snapshot();

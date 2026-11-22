@@ -405,3 +405,25 @@ async fn old_sim_peer_has_no_files() {
         .await;
     assert_eq!(r, SessionEvent::FileRejected { id, reason: "not supported by this station".into() });
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sim_rate_slows_the_link() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, _) = SimSession::start(dir.path(), SimPeer { rate: Some(2000.0), ..SimPeer::default() }).await;
+    // 8 KB that zstd can't shrink: about 4 s at 2000 B/s, once SIM1 accepts.
+    let mut bytes = Vec::new();
+    let mut h = <sha2::Sha256 as sha2::Digest>::digest(b"rate");
+    while bytes.len() < 8192 {
+        bytes.extend_from_slice(&h);
+        h = <sha2::Sha256 as sha2::Digest>::digest(h);
+    }
+    let t = tokio::time::Instant::now();
+    let id = s.send_file("noise.bin", &bytes).await;
+    let done = s
+        .next(30, "FileDelivered", |e| {
+            matches!(e, SessionEvent::FileDelivered { .. } | SessionEvent::FileFailed { .. })
+        })
+        .await;
+    assert_eq!(done, SessionEvent::FileDelivered { id });
+    assert!(t.elapsed() >= Duration::from_secs(5), "2 s to accept, then about 4 s on the link: {:?}", t.elapsed());
+}

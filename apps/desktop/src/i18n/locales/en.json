@@ -12,7 +12,8 @@
     "conversations": "Conversations",
     "settings": "Settings",
     "diagnostics": "Diagnostics",
-    "logbook": "Logbook"
+    "logbook": "Logbook",
+    "files": "Files"
   },
   "modem": {
     "unavailable": "unavailable",
@@ -238,7 +239,8 @@
       "notifications": "Notifications",
       "appearance": "Appearance",
       "about": "About",
-      "beacon": "Beacon"
+      "beacon": "Beacon",
+      "files": "Files"
     }
   },
   "appearance": {
@@ -952,7 +954,8 @@
       "nothingToAnswer": "there is no QSY to answer",
       "noCandidate": "no such candidate",
       "rig": "the rig can't change now: {message}",
-      "tuneDuringQsy": "not while a QSY is under way"
+      "tuneDuringQsy": "not while a QSY is under way",
+      "transfer": "a file transfer is in progress"
     },
     "notify": {
       "declined": "{peer} declined the QSY",
@@ -1011,5 +1014,106 @@
     "save": "Save beacon content",
     "saved": "Beacon content saved.",
     "tooBig": "Does not fit: {n} bytes too many."
+  },
+  "files": {
+    "title": "Files",
+    "send": {
+      "button": "Send file…",
+      "noSession": "Send file needs a session",
+      "unsupported": "not supported by this station"
+    },
+    "dialog": {
+      "title": "Send a file",
+      "preparing": "Preparing…",
+      "size": "Size",
+      "onAir": "On the air",
+      "airtime": "Airtime",
+      "estimate": "estimate",
+      "compressed": "compressed",
+      "shrunk": "photo made smaller",
+      "photoSize": "Photo size",
+      "metadata": "This is the original photo: its location and camera details go with it.",
+      "send": "Send",
+      "cancel": "Cancel"
+    },
+    "photo": {
+      "small": "Small (320 px)",
+      "medium": "Medium (640 px)",
+      "large": "Large (1024 px)",
+      "original": "Original"
+    },
+    "airtime": {
+      "seconds": "about {n} s",
+      "minutes": "about {n} min",
+      "hours": "about {n} h"
+    },
+    "card": {
+      "from": "From {peer}",
+      "to": "To {peer}",
+      "sizes": "{size}, {wire} on the air",
+      "airtime": "Airtime {time}",
+      "answerWithin": "Answer within {n} s",
+      "accept": "Accept",
+      "decline": "Decline",
+      "extend": "More time",
+      "progress": "Transfer progress",
+      "done": "{done} of {wire}",
+      "left": "{time} left",
+      "cancel": "Cancel",
+      "verified": "SHA-256 checked",
+      "savedAs": "Saved as {name}",
+      "showInFolder": "Show in folder"
+    },
+    "state": {
+      "offered": "Offered",
+      "waiting": "Waiting",
+      "sending": "Sending",
+      "receiving": "Receiving",
+      "verifying": "Checking",
+      "complete": "Complete",
+      "rejected": "Declined",
+      "cancelled": "Cancelled",
+      "failed": "Failed",
+      "interrupted": "Interrupted"
+    },
+    "reason": {
+      "declined": "declined by the operator",
+      "timeout": "not answered in time",
+      "tooLarge": "too large",
+      "noFolder": "the receive folder is missing",
+      "noSpace": "not enough disk space",
+      "busy": "another file is under way",
+      "writeFailed": "it could not be written",
+      "user": "by the operator",
+      "peer": "by the other station",
+      "link": "the link ended",
+      "restart": "the app was restarted",
+      "unsupported": "not supported by this station"
+    },
+    "view": {
+      "incoming": "Incoming",
+      "outgoing": "Outgoing",
+      "ended": "Interrupted or failed",
+      "empty": "Nothing yet"
+    },
+    "settings": {
+      "title": "Files",
+      "maxIncoming": "Largest incoming file (KiB)",
+      "maxNote": "From 1 to 1024 KiB; larger offers are declined before you see them.",
+      "receiveDir": "Receive folder",
+      "receiveDefault": "The station's own folder",
+      "choose": "Choose…",
+      "useDefault": "Use the station's folder",
+      "photoDefault": "Photo size to start with",
+      "save": "Save",
+      "saved": "Saved",
+      "note": "A change applies from the next session. Received files are never opened by MercuryChat."
+    },
+    "refused": {
+      "noSession": "there is no session",
+      "unsupported": "not supported by this station",
+      "overPeerLimit": "over the other station's limit",
+      "tooLarge": "the file is too large"
+    }
   }
 }

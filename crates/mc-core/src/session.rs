@@ -907,6 +907,8 @@ impl<'a> Session<'a> {
         if let Some(code) = refusal {
             self.send_reject(f.id, code);
             let _ = self.store.transfer_set_state(Direction::In, &f.id.0, TransferState::Rejected, 0, Some(code));
+            // The operator here sees what was declined for them, and why.
+            self.emit(SessionEvent::FileRejected { id: f.id, reason: code.into() });
             return Ok(());
         }
         self.in_file = Some(InFile {
@@ -977,6 +979,7 @@ impl<'a> Session<'a> {
             let _ = tokio::fs::remove_file(&inf.wire).await;
             self.send_reject(id, code);
             let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Rejected, 0, Some(code));
+            self.emit(SessionEvent::FileRejected { id, reason: code.into() });
         }
     }
 

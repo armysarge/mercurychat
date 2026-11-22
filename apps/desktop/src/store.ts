@@ -14,12 +14,16 @@ import type { MacroDef } from "./bindings/MacroDef";
 import type { NotifyPrefs } from "./bindings/NotifyPrefs";
 import type { Qso } from "./bindings/Qso";
 import type { QsoEdit } from "./bindings/QsoEdit";
+import type { AppCommand } from "./bindings/AppCommand";
+import type { FileSettings } from "./bindings/FileSettings";
+import type { TransferView } from "./bindings/TransferView";
+import { applyTransfer, emptyTransfers, loadTransfers } from "./transfers";
 import { applyLanguage, rememberLanguage, t } from "./i18n";
 
 export const MAX_BYTES = 4096; // CHT-01
 export const PAGE = 50; // messages per history page
 
-export type ViewName = "operate" | "conversations" | "logbook" | "settings" | "diagnostics";
+export type ViewName = "operate" | "conversations" | "files" | "logbook" | "settings" | "diagnostics";
 export type Drawer = "peers" | "session" | null;
 
 export const app = reactive({
@@ -124,13 +128,88 @@ export const mirror = new Mirror((v) => (app.view = v), {
   },
   broadcast: (kind, outcome) => (discovery.outcome[kind] = outcome),
   qso: upsertQso,
+  transfer: (v: TransferView) => applyTransfer(files.t, v),
   event: (e) => eventListeners.forEach((fn) => fn(e)),
   resynced: () => {
     void reloadChat();
     void reloadDiscovery();
     void reloadLogbook();
+    void reloadTransfers();
   },
 });
+
+// ---- files (M4): the transfers, the send dialog, the settings
+
+export const files = reactive({
+  t: emptyTransfers(),
+  /** The send dialog is open on this picked file. */
+  sending: null as string | null,
+  error: "",
+});
+
+/** Why Send file is not available now, in words; null when it is. */
+export const sendFileBlock = computed(() => {
+  const s = session.value;
+  if (!s || modemState.value !== "connected") return t("files.send.noSession");
+  if (!s.files) return t("files.send.unsupported");
+  return null;
+});
+
+/** Re-read the transfers (start-up, resync, a new station). */
+export async function reloadTransfers() {
+  if (!activeProfile.value) {
+    files.t = emptyTransfers();
+    return;
+  }
+  try {
+    const r = await call({ type: "transfers" });
+    if (r.type === "transfers") loadTransfers(files.t, r.transfers);
+  } catch {
+    // Shown as empty; the next event or resync fills it.
+  }
+}
+
+/** A file command; its refusal is shown in `files.error`. */
+export async function fileAct(cmd: AppCommand): Promise<boolean> {
+  files.error = "";
+  try {
+    await call(cmd);
+    return true;
+  } catch (e) {
+    files.error = describeError(e);
+    return false;
+  }
+}
+
+/** Open the send dialog on `path` (the picker, or a file dropped on the window). */
+export function offerFile(path: string) {
+  if (sendFileBlock.value) {
+    files.error = sendFileBlock.value;
+    return;
+  }
+  files.error = "";
+  files.sending = path;
+}
+
+/** The system file picker (one file); the dialog opens on what was chosen. */
+export async function pickFile() {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({ multiple: false, directory: false });
+  if (typeof picked === "string") offerFile(picked);
+}
+
+export async function loadFileSettings(): Promise<FileSettings | null> {
+  try {
+    const r = await call({ type: "fileSettings" });
+    if (r.type === "fileSettings") {
+      const { type: _type, ...s } = r;
+      return s;
+    }
+  } catch {
+    // No station selected: the defaults apply.
+  }
+  return null;
+}
 
 // ---- discovery: the heard list, the activity log, CQ and beacon outcomes (M3a Task 10)
 

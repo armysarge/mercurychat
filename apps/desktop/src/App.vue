@@ -9,17 +9,19 @@ import { info, measureIpc } from "./diag";
 import { onEvent as notifyOn, startNotifier, stopNotifier } from "./notifier";
 import { t } from "./i18n";
 import {
-  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, onAppEvent, openPeer, reloadChat, reloadDiscovery, session, snapshot,
-  stopTimers, type ViewName,
+  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, offerFile, onAppEvent, openPeer, reloadChat, reloadDiscovery,
+  reloadTransfers, session, snapshot, stopTimers, type ViewName,
 } from "./store";
 import Conversations from "./views/Conversations.vue";
 import Diagnostics from "./views/Diagnostics.vue";
+import Files from "./views/Files.vue";
 import Logbook from "./views/Logbook.vue";
 import Operate from "./views/Operate.vue";
 import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
 import AppLogo from "./components/AppLogo.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import SendFileDialog from "./components/SendFileDialog.vue";
 import Sidebar from "./components/Sidebar.vue";
 import StationStrip from "./components/StationStrip.vue";
 import WindowControls from "./components/WindowControls.vue";
@@ -33,6 +35,7 @@ let clock: ReturnType<typeof setInterval> | undefined;
 const RAIL: { page: ViewName; label: string; icon: string }[] = [
   { page: "operate", label: "nav.operate", icon: "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4" },
   { page: "conversations", label: "nav.conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
+  { page: "files", label: "nav.files", icon: "M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h5" },
   { page: "logbook", label: "nav.logbook", icon: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6" },
   { page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
   { page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
@@ -123,9 +126,22 @@ watch(
     if (id !== old) {
       void reloadChat();
       void reloadDiscovery();
+      void reloadTransfers();
     }
   },
 );
+
+// A file dropped on the window while a conversation is shown opens the send
+// dialog on it (M4); elsewhere, or with no session, nothing is sent.
+let unlistenDrop: (() => void) | undefined;
+async function listenForDrops() {
+  const { getCurrentWebview } = await import("@tauri-apps/api/webview");
+  unlistenDrop = await getCurrentWebview().onDragDropEvent((e) => {
+    if (e.payload.type !== "drop" || !e.payload.paths.length) return;
+    if (app.page !== "operate" && app.page !== "conversations") return;
+    offerFile(e.payload.paths[0]);
+  });
+}
 
 onMounted(async () => {
   clock = setInterval(() => (now.value = new Date()), 1000);
@@ -140,6 +156,8 @@ onMounted(async () => {
     onAppEvent(notifyOn);
     startNotifier();
     await mirror.start();
+    void reloadTransfers();
+    void listenForDrops().catch((e) => console.warn("drag and drop unavailable:", e));
     const selfMeasure = await invoke<boolean>("ui_ready");
     if (selfMeasure) await measureIpc(200);
   } catch (e) {
@@ -149,6 +167,7 @@ onMounted(async () => {
   }
 });
 onUnmounted(() => {
+  unlistenDrop?.();
   mirror.stop();
   stopTimers();
   stopNotifier();
@@ -242,6 +261,7 @@ onUnmounted(() => {
         <Welcome v-else-if="firstUse" />
         <Operate v-else-if="app.page === 'operate'" />
         <Conversations v-else-if="app.page === 'conversations'" />
+        <Files v-else-if="app.page === 'files'" />
         <Logbook v-else-if="app.page === 'logbook'" />
         <Settings v-else-if="app.page === 'settings'" />
         <Diagnostics v-else />
@@ -249,6 +269,7 @@ onUnmounted(() => {
     </div>
   </div>
   <ContextMenu />
+  <SendFileDialog />
 </template>
 
 <style scoped>
@@ -299,7 +320,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
 }
 .rail button.selected { background: var(--raised); color: var(--accent); }
-.rail button:nth-child(3) { margin-top: auto; }
+.rail button:nth-child(4) { margin-top: auto; }
 .view { min-height: 0; min-width: 0; overflow: hidden; }
 .loading { padding: calc(var(--space) * 3); }
 @media (max-width: 1099px) {
