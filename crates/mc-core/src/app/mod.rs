@@ -13,6 +13,7 @@ pub mod info;
 mod logbook;
 mod modem;
 mod notify;
+pub mod qsy;
 mod rig;
 mod rigconfig;
 pub mod schedule;
