@@ -1,6 +1,12 @@
 //! Incoming-file safety (FIL-03/FIL-04): sanitised names, temp files,
 //! verification and atomic, non-overwriting publication.
 
+pub mod prepare;
+pub mod unpack;
+
+pub use prepare::{prepare, PhotoSize, PrepareError, Prepared};
+pub use unpack::{unpack_zstd, UnpackError};
+
 use std::path::{Path, PathBuf};
 
 const RESERVED: [&str; 22] = [

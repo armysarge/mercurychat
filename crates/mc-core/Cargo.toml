@@ -30,6 +30,8 @@ thiserror = "2"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.9"
+zstd = "0.13"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
 [dev-dependencies]
 mc-core = { path = ".", features = ["test-hooks"] }
