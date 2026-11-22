@@ -14,6 +14,8 @@ const CHUNK_AIRTIME: f64 = 4.0;
 const MIN_CHUNK: usize = 256;
 /// Weight of a new drain measurement.
 const SMOOTHING: f64 = 0.3;
+/// A drain measurement spans at least this much busy time, in seconds.
+const SAMPLE_TIME: f64 = 1.0;
 
 /// The bandwidth's conservative throughput before anything is measured,
 /// in bytes per second (M0: BW500 about 155 bit/s).
@@ -30,30 +32,38 @@ pub struct Pacer {
     max_chunk: usize,
     measured: Option<f64>,
     last: Option<(u64, Instant)>,
+    /// Bytes seen to leave, and the time the queue held data, since the
+    /// last sample.
+    drained: u64,
+    busy: f64,
 }
 
 impl Pacer {
     pub fn new(nominal_bps: f64, max_chunk: usize) -> Pacer {
-        Pacer { nominal: nominal_bps, max_chunk, measured: None, last: None }
+        Pacer { nominal: nominal_bps, max_chunk, measured: None, last: None, drained: 0, busy: 0.0 }
     }
 
-    /// A `BUFFER` reading. Only decreases count: they are the modem sending.
+    /// A `BUFFER` reading. Decreases are the modem sending; a rise is our
+    /// own write. The rate is the bytes that left over the time the queue
+    /// held data, taken over at least `SAMPLE_TIME`: a modem drains in steps
+    /// (a frame at a time), so one step over a short gap says nothing.
     pub fn observe_buffer(&mut self, queued: u64, now: Instant) {
         if let Some((prev, at)) = self.last {
-            let dt = now.saturating_duration_since(at).as_secs_f64();
-            if queued < prev && dt > 0.0 {
-                let sample = (prev - queued) as f64 / dt;
+            if prev > 0 {
+                self.busy += now.saturating_duration_since(at).as_secs_f64();
+                self.drained += prev.saturating_sub(queued);
+            }
+            if self.busy >= SAMPLE_TIME && self.drained > 0 {
+                let sample = self.drained as f64 / self.busy;
                 self.measured = Some(match self.measured {
                     Some(r) => r + SMOOTHING * (sample - r),
                     None => sample,
                 });
+                self.drained = 0;
+                self.busy = 0.0;
             }
         }
-        // The clock runs from the last change: a repeated value (a poll
-        // answer) is not a new starting point.
-        if self.last.is_none_or(|(prev, _)| prev != queued) {
-            self.last = Some((queued, now));
-        }
+        self.last = Some((queued, now));
     }
 
     /// Bytes per second, and whether it was measured.
@@ -131,11 +141,29 @@ mod tests {
         let mut p = Pacer::new(19.0, 1024);
         let t = Instant::now();
         p.observe_buffer(100, t);
-        p.observe_buffer(98, t + Duration::from_millis(100));
-        p.observe_buffer(98, t + Duration::from_millis(190));
-        p.observe_buffer(96, t + Duration::from_millis(200));
-        let (r, _) = p.rate();
-        assert!(r < 25.0, "2 bytes per 100 ms is 20 B/s, not {r}");
+        for k in 1..=20u64 {
+            p.observe_buffer(100 - 2 * (k - 1), t + Duration::from_millis(100 * k - 10));
+            p.observe_buffer(100 - 2 * k, t + Duration::from_millis(100 * k));
+        }
+        let (r, measured) = p.rate();
+        assert!(measured);
+        assert!((15.0..25.0).contains(&r), "2 bytes per 100 ms is 20 B/s, not {r}");
+    }
+
+    #[test]
+    fn quantized_drain_after_a_write_is_not_fast() {
+        // A modem sending 1000 B/s in 100-byte steps every 100 ms; our write
+        // lands 10 ms before a step. The rate is the bytes over the time.
+        let mut p = Pacer::new(115.0, 1024);
+        let t = Instant::now();
+        p.observe_buffer(0, t);
+        p.observe_buffer(1100, t + Duration::from_millis(90));
+        for k in 1..=11u64 {
+            p.observe_buffer(1100 - 100 * k, t + Duration::from_millis(90 + 10 + 100 * (k - 1)));
+        }
+        let (r, measured) = p.rate();
+        assert!(measured);
+        assert!((800.0..=1200.0).contains(&r), "1000 B/s, not {r}");
     }
 
     #[test]

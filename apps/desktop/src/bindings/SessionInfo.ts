@@ -17,4 +17,12 @@ bandwidth: string,
  * The MCH/1 capabilities both stations listed (M3c B1): a control for
  * one the peer lacks shows "not supported by this station".
  */
-caps: Array<string>, };
+caps: Array<string>, 
+/**
+ * `file/2` was negotiated (M4): files may be sent and received.
+ */
+files: boolean, 
+/**
+ * The largest file the peer takes (its HELLO `max_file`).
+ */
+peerMaxFile: number, };

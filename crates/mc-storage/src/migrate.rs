@@ -228,7 +228,7 @@ const MIGRATION_9: &str = r#"
 ALTER TABLE transfers ADD COLUMN wire_size INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE transfers ADD COLUMN encoding TEXT;
 ALTER TABLE transfers ADD COLUMN saved_name TEXT;
-ALTER TABLE transfers ADD COLUMN session_id INTEGER;
+ALTER TABLE transfers ADD COLUMN session_id TEXT;
 ALTER TABLE transfers ADD COLUMN created_utc TEXT NOT NULL DEFAULT '';
 UPDATE transfers SET wire_size = size, created_utc = updated_utc;
 UPDATE transfers SET state = 'complete' WHERE state = 'delivered';

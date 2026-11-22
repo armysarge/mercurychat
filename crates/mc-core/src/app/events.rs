@@ -58,6 +58,11 @@ pub struct SessionInfo {
     /// The MCH/1 capabilities both stations listed (M3c B1): a control for
     /// one the peer lacks shows "not supported by this station".
     pub caps: Vec<String>,
+    /// `file/2` was negotiated (M4): files may be sent and received.
+    pub files: bool,
+    /// The largest file the peer takes (its HELLO `max_file`).
+    #[ts(type = "number")]
+    pub peer_max_file: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
@@ -168,6 +173,11 @@ pub enum AppEvent {
     /// The next scheduled QSY changed (or the schedule was turned off).
     ScheduleNext {
         next: Option<ScheduleNext>,
+    },
+    /// A file transfer changed state or made progress (M4); progress at most
+    /// twice a second per transfer.
+    Transfer {
+        transfer: super::files::TransferView,
     },
 }
 

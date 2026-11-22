@@ -7,6 +7,7 @@ use super::beacon::{BeaconContentView, BeaconStatus};
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
+use super::files::{FileSettings, PreparedView, TransferView};
 use super::frequencies::FrequencyEntry;
 use super::info::ShareConfig;
 use super::logbook::{Qso, QsoEdit};
@@ -346,6 +347,47 @@ pub enum AppCommand {
     TuneSuggested {
         index: u8,
     },
+    /// Make a file ready to send (M4): shrink a photo to `photo`, compress,
+    /// and say what it costs. Answered once done; nothing is sent.
+    PrepareFile {
+        path: String,
+        photo: crate::files::PhotoSize,
+    },
+    /// The operator closed the send dialog: the prepared file goes.
+    DiscardPrepared {
+        prep_id: String,
+    },
+    /// Offer a prepared file to the session's peer. Refused without a
+    /// session, without `file/2`, or over the peer's limit (shown).
+    SendFile {
+        prep_id: String,
+    },
+    AcceptFile {
+        id: String,
+    },
+    DeclineFile {
+        id: String,
+    },
+    /// One more answer window for an incoming offer (once).
+    ExtendFile {
+        id: String,
+    },
+    /// Stop a transfer either way, or one still waiting to go.
+    CancelFile {
+        id: String,
+    },
+    /// The transfers, newest first (at most 200).
+    Transfers,
+    /// Open the file manager at a received file; the file itself is never
+    /// opened (FIL-04).
+    ShowInFolder {
+        id: String,
+    },
+    /// The active profile's file settings.
+    FileSettings,
+    SetFileSettings {
+        settings: FileSettings,
+    },
 }
 
 // Every float in a command is validated finite before use.
@@ -377,6 +419,9 @@ pub enum CommandOk {
     Expanded { text: String, missing: Vec<String> },
     Share(ShareConfig),
     BeaconContent(BeaconContentView),
+    Prepared(PreparedView),
+    Transfers { transfers: Vec<TransferView> },
+    FileSettings(FileSettings),
     Done,
 }
 

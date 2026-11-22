@@ -70,7 +70,7 @@ pub struct TransferRow {
     pub id: [u8; 16],
     pub direction: Direction,
     pub peer: String,
-    pub session_id: Option<i64>,
+    pub session_id: Option<String>,
     pub original_name: String,
     pub saved_name: Option<String>,
     /// The file as it lands on disk.
@@ -122,7 +122,7 @@ impl Store {
             "INSERT INTO transfers (wire_id, direction, peer, session_id, offered_name, saved_name, size, wire_size,
                sha256, encoding, state, received, detail, created_utc, updated_utc, local_path)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15)
-             ON CONFLICT (peer, direction, wire_id) DO UPDATE SET session_id = excluded.session_id,
+             ON CONFLICT (peer, direction, wire_id) DO UPDATE SET session_id = COALESCE(excluded.session_id, transfers.session_id),
                offered_name = excluded.offered_name, saved_name = excluded.saved_name, size = excluded.size,
                wire_size = excluded.wire_size, sha256 = excluded.sha256, encoding = excluded.encoding,
                state = excluded.state, received = excluded.received, detail = excluded.detail,
@@ -166,6 +166,16 @@ impl Store {
 
     /// Complete, durably, before FILE_RECEIPT goes out (FIL-03): an incoming
     /// file with the name and path it was saved under.
+    /// Tie a row to the application session it belongs to (the engine
+    /// writes rows before it knows the session's id). An id already set stays.
+    pub fn transfer_set_session(&mut self, dir: Direction, id: &[u8; 16], session_id: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE transfers SET session_id = ?1 WHERE direction = ?2 AND wire_id = ?3 AND session_id IS NULL",
+            params![session_id, dir.as_str(), &id[..]],
+        )?;
+        Ok(())
+    }
+
     pub fn transfer_complete(&mut self, dir: Direction, id: &[u8; 16], saved: Option<(&str, &str)>) -> Result<()> {
         let (name, path) = saved.unzip();
         self.conn.execute(

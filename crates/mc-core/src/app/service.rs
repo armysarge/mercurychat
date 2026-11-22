@@ -32,6 +32,7 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 
 mod audio;
+mod files;
 mod freq;
 mod info;
 mod qsy;
@@ -195,6 +196,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             spectrum: Default::default(),
             sim_peer_broadcasts: opts.sim_peer_broadcasts,
             sim_rig: opts.sim_rig,
+            files: Default::default(),
         },
         reports,
         task: None,
@@ -214,6 +216,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         freq: FreqSide::new(opts.schedule_clock, opts.schedule_tick),
         info: info::InfoSide::default(),
         qsy: qsy::QsySide::new(opts.qsy_windows.unwrap_or_default()),
+        files: files::FilesSide::default(),
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
@@ -251,6 +254,11 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                                 }
                                 AppCommand::Shutdown => {
                                     app.shutdown(reply);
+                                    continue;
+                                }
+                                // Shrinking and compressing run off the actor.
+                                AppCommand::PrepareFile { path, photo } => {
+                                    app.prepare_file(path, photo, reply);
                                     continue;
                                 }
                                 other => other,
@@ -351,6 +359,7 @@ struct App {
     freq: FreqSide,
     info: info::InfoSide,
     qsy: qsy::QsySide,
+    files: files::FilesSide,
 }
 
 fn parse_peer(peer: &str) -> Result<String, AppError> {
@@ -800,6 +809,17 @@ impl App {
             AppCommand::ShareSettings => self.share_settings(),
             AppCommand::SetShareSettings { config } => self.set_share_settings(config),
             AppCommand::ProposeQsy { entry_ids, note } => self.propose_qsy(entry_ids, note),
+            AppCommand::PrepareFile { .. } => Err(AppError::Internal { message: "prepared off the actor".into() }),
+            AppCommand::DiscardPrepared { prep_id } => self.discard_prepared(&prep_id),
+            AppCommand::SendFile { prep_id } => self.send_file(&prep_id),
+            AppCommand::AcceptFile { id } => self.accept_file(&id),
+            AppCommand::DeclineFile { id } => self.decline_file(&id),
+            AppCommand::ExtendFile { id } => self.extend_file(&id),
+            AppCommand::CancelFile { id } => self.cancel_file(&id),
+            AppCommand::Transfers => self.transfers(),
+            AppCommand::ShowInFolder { id } => self.show_in_folder(&id),
+            AppCommand::FileSettings => self.file_settings(),
+            AppCommand::SetFileSettings { settings } => self.set_file_settings(settings),
             AppCommand::AnswerQsy { accept } => self.answer_qsy(accept),
             AppCommand::QsyTuned => self.qsy_tuned(),
             AppCommand::SuggestQsy { to, entry_ids } => self.suggest_qsy(to, entry_ids),
@@ -1123,6 +1143,7 @@ impl App {
                 let purged = self.discovery.purge(&mut s);
                 self.emit_all(purged);
                 self.chat = Some(s);
+                self.files_reset(&dir);
             }
             Err(e) => tracing::warn!("station store unavailable: {e}"),
         }
@@ -1205,6 +1226,7 @@ impl App {
         self.start_rig(target.as_ref().map(|p| p.id.as_str()));
         self.freq_profile_changed(target.as_ref().map(|p| p.id.as_str()));
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
+        self.files_for_modem(&p.id);
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
             if !cfg!(feature = "sim") {
@@ -1246,6 +1268,7 @@ impl App {
                 if session.is_none() {
                     self.telemetry.session_ended();
                     self.qsy_session_ended();
+                    self.files_session_ended();
                 }
                 self.set_session(session)
             }
@@ -1281,6 +1304,7 @@ impl App {
             ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
             ReportKind::Tune(result) => self.tune_report(result),
             ReportKind::Peer(m) => self.on_peer(m),
+            ReportKind::File(ev) => self.on_file(ev),
             ReportKind::SimRig(addr) => self.rig_sim(addr),
             ReportKind::Telemetry(msg) => {
                 self.rig_telemetry_msg(&msg);

@@ -156,6 +156,8 @@ pub enum SessionEvent {
         minor: u8,
         chunk: u32,
         caps: Vec<String>,
+        /// The peer's HELLO `max_file`: the largest file it takes.
+        max_file: u64,
     },
     ChatSubmitted {
         id: ObjectId,
@@ -273,6 +275,8 @@ struct InFile {
     cancelled: bool,
 }
 
+/// How long after a write a BUFFER report is trusted to include it.
+const REPORT_SETTLE: Duration = Duration::from_millis(250);
 /// Safety margin on top of the file and its wire bytes (M4 C3).
 const DISK_MARGIN: u64 = 1 << 20;
 /// The application's hard ceiling on a file (FIL-02).
@@ -303,6 +307,9 @@ pub struct Session<'a> {
     pacer: Pacer,
     modem_reported: u64,
     written_since_report: u64,
+    /// When we last wrote to the data stream: a BUFFER report soon after may
+    /// not include it yet (the modem has not read it).
+    last_write: Option<std::time::Instant>,
 }
 
 fn proto_err(e: impl std::fmt::Display) -> SessionEnd {
@@ -334,6 +341,7 @@ impl<'a> Session<'a> {
             pacer,
             modem_reported: 0,
             written_since_report: 0,
+            last_write: None,
         }
     }
 
@@ -354,7 +362,8 @@ impl<'a> Session<'a> {
             if let Some((app, ver, minor)) = self.peer_info.take() {
                 let chunk = self.agreed_chunk();
                 let caps = self.caps.clone();
-                self.emit(SessionEvent::Negotiated { peer_app: app, peer_version: ver, minor, chunk, caps });
+                let max_file = self.peer_max_file;
+                self.emit(SessionEvent::Negotiated { peer_app: app, peer_version: ver, minor, chunk, caps, max_file });
             }
         }
     }
@@ -459,8 +468,17 @@ impl<'a> Session<'a> {
                 biased;
                 sig = modem.recv() => match sig {
                     Some(ModemSignal::Buffer(n)) => {
+                        // A rise is our bytes reaching the modem's queue: they
+                        // are no longer in flight. A report may lag our writes
+                        // (sent before the modem read them), so only one well
+                        // after the last write clears what is in flight.
+                        if n > self.modem_reported {
+                            self.written_since_report = self.written_since_report.saturating_sub(n - self.modem_reported);
+                        }
                         self.modem_reported = n;
-                        self.written_since_report = 0;
+                        if self.last_write.is_none_or(|t| t.elapsed() >= REPORT_SETTLE) {
+                            self.written_since_report = 0;
+                        }
                         self.pacer.observe_buffer(n, std::time::Instant::now());
                     }
                     Some(ModemSignal::Disconnected) => return SessionEnd::Disconnected,
@@ -510,6 +528,7 @@ impl<'a> Session<'a> {
         let bytes = encode(f).map_err(proto_err)?;
         data.write_all(&bytes).await.map_err(|_| SessionEnd::DataLost)?;
         self.written_since_report += bytes.len() as u64;
+        self.last_write = Some(std::time::Instant::now());
         Ok(())
     }
 

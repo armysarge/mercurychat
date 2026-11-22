@@ -8,6 +8,7 @@ mod chat;
 mod contract;
 mod discovery;
 mod events;
+pub mod files;
 mod frequencies;
 pub mod info;
 mod logbook;

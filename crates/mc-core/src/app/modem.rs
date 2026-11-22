@@ -50,6 +50,25 @@ pub struct ModemOptions {
     /// The simulator runs a fake rigctld its PTT keys (M3b; the desktop app
     /// turns this on, default off).
     pub sim_rig: bool,
+    /// The active profile's file settings, for the station (M4).
+    pub files: FileOptions,
+}
+
+/// What the station takes from the profile's file settings (M4).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct FileOptions {
+    /// `None` keeps the station's default.
+    pub max_file: Option<u64>,
+    pub receive_dir: Option<PathBuf>,
+}
+
+impl FileOptions {
+    fn apply(&self, cfg: &mut StationConfig) {
+        if let Some(n) = self.max_file {
+            cfg.max_file = n;
+        }
+        cfg.receive_dir = self.receive_dir.clone();
+    }
 }
 
 /// The latest valid spectrum from Mercury's telemetry, shared by every modem
@@ -94,6 +113,11 @@ pub enum ModemCmd {
     /// A minor-1 message for the running session (M3c B1); dropped, with a
     /// log line, when there is none.
     Peer(PeerMsg),
+    /// A file command for the running session (M4); dropped, with a log
+    /// line, when there is none.
+    File(SessionCommand),
+    /// New file settings: the station takes them now, a session from its next.
+    FileSettings(FileOptions),
     Shutdown,
 }
 
@@ -158,6 +182,8 @@ pub enum ReportKind {
     Tune(TuneResult),
     /// A minor-1 message from the session's peer (M3c B1).
     Peer(PeerMsg),
+    /// A file transfer event from the session (M4).
+    File(SessionEvent),
     /// The simulator's fake rigctld listens here (M3b).
     SimRig(std::net::SocketAddr),
     /// Where to send commands for this modem's telemetry client (M3b: the
@@ -518,6 +544,7 @@ async fn run(
             let endpoint = Endpoint { host: host.clone(), control_port, data_port };
             let mut cfg = StationConfig::defaults(call, endpoint, &station_dir);
             cfg.hello_timeout = opts.radio_hello_timeout.unwrap_or(crate::station::RADIO_HELLO_TIMEOUT);
+            opts.files.apply(&mut cfg);
             let mut station = match open_station(cfg).await {
                 Ok(s) => s,
                 Err(e) => return r.fault(format!("station data: {e}")).await,
@@ -900,6 +927,10 @@ async fn serve(
                 }
                 continue;
             }
+            Idle::Cmd(Some(ModemCmd::FileSettings(f))) => {
+                f.apply(&mut st.cfg);
+                continue;
+            }
             Idle::Cmd(Some(other)) => {
                 tracing::debug!(?other, "no call or session for this command");
                 continue;
@@ -1027,7 +1058,7 @@ impl Link {
 
     async fn on_event(&mut self, r: &Reporter, ev: SessionEvent) {
         match ev {
-            SessionEvent::Negotiated { peer_app, caps, .. } if !self.negotiated => {
+            SessionEvent::Negotiated { peer_app, caps, max_file, .. } if !self.negotiated => {
                 self.negotiated = true;
                 let since = mc_storage::now_utc();
                 if let Some(rec) = self.records.as_mut() {
@@ -1057,6 +1088,8 @@ impl Link {
                     peer_app: Some(peer_app),
                     session_id: self.session_id.clone(),
                     bandwidth: self.info.bandwidth.clone(),
+                    files: caps.iter().any(|c| c == mch_protocol::CAP_FILE),
+                    peer_max_file: max_file,
                     caps,
                 }))
                 .await;
@@ -1078,6 +1111,14 @@ impl Link {
             }
             SessionEvent::ChatReceived { id, duplicate: false, .. } => self.report(r, &id.0).await,
             SessionEvent::Peer(m) => r.send(ReportKind::Peer(m)).await,
+            ev @ (SessionEvent::FileOffered { .. }
+            | SessionEvent::FileSending { .. }
+            | SessionEvent::FileProgress { .. }
+            | SessionEvent::FileReceived { .. }
+            | SessionEvent::FileDelivered { .. }
+            | SessionEvent::FileRejected { .. }
+            | SessionEvent::FileFailed { .. }
+            | SessionEvent::FileCancelled { .. }) => r.send(ReportKind::File(ev)).await,
             SessionEvent::PeerSendRefused { what, reason } => {
                 tracing::warn!("{what} not sent: {reason}");
             }
@@ -1120,6 +1161,8 @@ async fn link(
     };
     let mut aborted = false;
     let mut stop = false;
+    // File settings that came during the session: the station takes them after.
+    let mut file_settings: Option<FileOptions> = None;
 
     // Disconnect was asked for (no new submissions from then on).
     let mut ending = false;
@@ -1195,6 +1238,12 @@ async fn link(
                             link.submit(r, id.0).await;
                         }
                     }
+                    Some(ModemCmd::File(c)) => {
+                        if ending || aborted || link.chats.try_send(c).is_err() {
+                            tracing::warn!("a file command was dropped: the session is ending or not taking it");
+                        }
+                    }
+                    Some(ModemCmd::FileSettings(f)) => file_settings = Some(f),
                     Some(ModemCmd::Shutdown) | None => {
                         // Leaving: the modem ends the link when our sockets close.
                         stop = true;
@@ -1218,6 +1267,9 @@ async fn link(
     };
     while let Ok(ev) = ev_rx.try_recv() {
         link.on_event(r, ev).await;
+    }
+    if let Some(f) = file_settings {
+        f.apply(&mut st.cfg);
     }
     if stop {
         return After::Stop;

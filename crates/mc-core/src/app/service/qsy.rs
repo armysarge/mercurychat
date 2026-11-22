@@ -175,6 +175,7 @@ impl App {
 
     pub(super) fn propose_qsy(&mut self, entry_ids: Vec<String>, note: Option<String>) -> Result<CommandOk, AppError> {
         self.qsy_session()?;
+        self.qsy_no_transfer()?;
         if entry_ids.is_empty() || entry_ids.len() > MAX_CANDIDATES {
             return Err(AppError::Validation {
                 errors: crate::app::chat::field("entryIds", format!("Choose 1 to {MAX_CANDIDATES} frequencies")),
@@ -196,7 +197,19 @@ impl App {
         self.qsy_input(input)
     }
 
+    /// A QSY ends the session, so never while a file is under way (M4,
+    /// Review Focus 1): propose and accept are refused; declining is not.
+    fn qsy_no_transfer(&self) -> Result<(), AppError> {
+        if self.files_active() {
+            return Err(refused("qsy.refused.transfer", crate::app::qsy::REASON_TRANSFER));
+        }
+        Ok(())
+    }
+
     pub(super) fn answer_qsy(&mut self, accept: Option<u8>) -> Result<CommandOk, AppError> {
+        if accept.is_some() {
+            self.qsy_no_transfer()?;
+        }
         let gate = match (accept, self.qsy.machine.as_ref()) {
             (Some(i), Some(m)) => match m.candidates().get(usize::from(i)) {
                 Some(c) => self.rig_gate_for_qsy(&Tuning::from(c)),
