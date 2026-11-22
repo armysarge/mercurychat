@@ -582,7 +582,11 @@
     "name": "Name",
     "body": "Text",
     "save": "Save macro",
-    "add": "Add a macro"
+    "add": "Add a macro",
+    "quickTitle": "Quick messages",
+    "quick": "Quick message",
+    "quickBadge": "quick",
+    "quickHint": "Listed first in the composer's Macros menu. A click puts it in the draft; Enter sends it."
   },
   "stationInfo": {
     "title": "Station information for {callsign}",

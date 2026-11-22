@@ -6,6 +6,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { describeError } from "../api";
+import { quickFirst } from "../quick";
 import { activeProfile, chat, expandMacro, loadMacros, macros } from "../store";
 
 const { t } = useI18n();
@@ -14,6 +15,8 @@ const open = ref(false);
 const error = ref("");
 const root = ref<HTMLElement | null>(null);
 const email = computed(() => activeProfile.value?.email?.trim() ?? "");
+// Quick messages on top (M3c B8); a click inserts, Enter in the composer sends.
+const sections = computed(() => quickFirst(macros.list));
 
 async function toggle() {
   open.value = !open.value;
@@ -52,7 +55,12 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
       {{ t("macros.button") }}
     </button>
     <div v-if="open" class="macro-menu" role="menu" :aria-label="t('macros.menuAria')">
-      <button v-for="m in macros.list" :key="m.id" type="button" role="menuitem" @click="pick(m.id)">{{ m.name }}</button>
+      <template v-if="sections.quick.length">
+        <p class="muted small macro-heading" role="presentation">{{ t("macros.quickTitle") }}</p>
+        <button v-for="m in sections.quick" :key="m.id" type="button" role="menuitem" class="macro-quick" :title="m.body" @click="pick(m.id)">{{ m.name }}</button>
+        <hr v-if="sections.others.length" />
+      </template>
+      <button v-for="m in sections.others" :key="m.id" type="button" role="menuitem" @click="pick(m.id)">{{ m.name }}</button>
       <p v-if="!macros.list.length" class="muted small">{{ t("macros.none") }}</p>
       <hr />
       <button type="button" role="menuitem" class="macro-email" :disabled="!email" :title="email ? email : t('macros.noEmail')" @click="insertEmail">{{ t("macros.insertEmail") }}</button>
@@ -71,4 +79,5 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
 .macro-menu button:hover:not(:disabled), .macro-menu button:focus-visible { background: var(--surface); }
 .macro-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 .macro-menu p { margin: 4px 10px; }
+.macro-menu .macro-heading { margin: 4px 10px 2px; font-weight: 600; }
 </style>

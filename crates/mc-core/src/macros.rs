@@ -21,6 +21,9 @@ pub struct MacroDef {
     pub id: String,
     pub name: String,
     pub body: String,
+    /// Listed under "Quick messages" at the top of the composer's menu (M3c B8).
+    #[serde(default)]
+    pub quick: bool,
 }
 
 /// Everything a tag can expand to. A `None` (or empty) value is missing.
@@ -141,7 +144,7 @@ pub fn validate(def: &MacroDef) -> Result<MacroDef, Vec<FieldError>> {
         errors.extend(bad("body", "No control characters other than line breaks"));
     }
     if errors.is_empty() {
-        Ok(MacroDef { id: def.id.clone(), name: name.to_string(), body: def.body.clone() })
+        Ok(MacroDef { id: def.id.clone(), name: name.to_string(), body: def.body.clone(), quick: def.quick })
     } else {
         Err(errors)
     }

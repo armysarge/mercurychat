@@ -159,7 +159,12 @@ async fn defaults_seeded_once() {
     // Add, edit, reorder-stable listing.
     let saved = match h
         .call(AppCommand::SaveMacro {
-            macro_: Box::new(MacroDef { id: String::new(), name: " QRZ? ".into(), body: "QRZ <CALL>".into() }),
+            macro_: Box::new(MacroDef {
+                id: String::new(),
+                name: " QRZ? ".into(),
+                body: "QRZ <CALL>".into(),
+                quick: false,
+            }),
         })
         .await
         .unwrap()
@@ -189,7 +194,7 @@ async fn macro_validation_is_operator_readable() {
     ] {
         let r = h
             .call(AppCommand::SaveMacro {
-                macro_: Box::new(MacroDef { id: String::new(), name: name.into(), body: body.into() }),
+                macro_: Box::new(MacroDef { id: String::new(), name: name.into(), body: body.into(), quick: false }),
             })
             .await;
         match r {
@@ -199,7 +204,7 @@ async fn macro_validation_is_operator_readable() {
     }
     // Newlines in a body are fine.
     h.call(AppCommand::SaveMacro {
-        macro_: Box::new(MacroDef { id: String::new(), name: "ok".into(), body: "a\nb".into() }),
+        macro_: Box::new(MacroDef { id: String::new(), name: "ok".into(), body: "a\nb".into(), quick: false }),
     })
     .await
     .unwrap();
@@ -326,4 +331,22 @@ async fn profile_station_info_validation() {
             assert_eq!((errs[0].field.as_str(), errs[0].message.as_str()), (name, "No control characters"), "{bad:?}");
         }
     }
+}
+
+/// M3c B8: the quick flag is kept with the macro, and off unless set.
+#[tokio::test(flavor = "multi_thread")]
+async fn quick_flag_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let (h, _) = start(dir.path(), |_| {}).await;
+    let new = MacroDef { id: String::new(), name: "TU".into(), body: "TU 73".into(), quick: true };
+    let saved = match h.call(AppCommand::SaveMacro { macro_: Box::new(new) }).await.unwrap() {
+        CommandOk::Macro(m) => m,
+        other => panic!("{other:?}"),
+    };
+    assert!(saved.quick);
+    let listed = macros(&h).await.into_iter().find(|m| m.id == saved.id).unwrap();
+    assert!(listed.quick, "listed with its flag");
+    h.call(AppCommand::SaveMacro { macro_: Box::new(MacroDef { quick: false, ..listed }) }).await.unwrap();
+    assert!(!macros(&h).await.into_iter().find(|m| m.id == saved.id).unwrap().quick);
+    assert!(macros(&h).await.iter().filter(|m| m.id != saved.id).all(|m| !m.quick), "the seeded ones are not quick");
 }

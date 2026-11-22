@@ -178,6 +178,7 @@ fn deleting_a_profile_deletes_its_macros() {
             name: id.into(),
             body: "b".into(),
             sort: 0,
+            quick: false,
         })
         .unwrap();
     }
@@ -217,4 +218,25 @@ fn migration_7_adds_source_columns() {
     let q = &s.qsos(10).unwrap()[0];
     assert_eq!((q.rst_rcvd.as_deref(), q.name.as_deref()), (Some("59"), Some("Pat")));
     assert_eq!((&q.rst_rcvd_source, &q.name_source, &q.qth_source), (&None, &None, &None));
+}
+
+#[test]
+fn migration_8_defaults_quick_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("station.db");
+    {
+        let s = Store::open_with_migrations(&path, &MIGRATIONS[..7]).unwrap();
+        drop(s);
+        Connection::open(&path)
+            .unwrap()
+            .execute("INSERT INTO macros (id, profile_id, name, body, sort) VALUES ('m1', 'p1', 'TU', 'TU 73', 0)", [])
+            .unwrap();
+    }
+    assert_eq!(version(&path), 7);
+    let mut s = Store::open(&path).unwrap();
+    assert!(version(&path) >= 8);
+    let m = s.macros("p1").unwrap().remove(0);
+    assert_eq!((m.name.as_str(), m.quick), ("TU", false), "a macro from before is not quick");
+    s.save_macro(&mc_storage::MacroRow { quick: true, ..m }).unwrap();
+    assert!(s.macros("p1").unwrap()[0].quick);
 }

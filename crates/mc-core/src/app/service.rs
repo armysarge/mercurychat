@@ -691,9 +691,10 @@ impl App {
                     name: def.name.clone(),
                     body: def.body.clone(),
                     sort,
+                    quick: def.quick,
                 };
                 self.store.save_macro(&row).map_err(storage)?;
-                Ok(CommandOk::Macro(MacroDef { id, name: def.name, body: def.body }))
+                Ok(CommandOk::Macro(MacroDef { id, name: def.name, body: def.body, quick: def.quick }))
             }
             AppCommand::DeleteMacro { id } => {
                 let profile = self.macro_profile()?;
@@ -1056,6 +1057,7 @@ impl App {
                         name: (*name).into(),
                         body: (*body).into(),
                         sort: i as i64,
+                        quick: false,
                     };
                     self.store.save_macro(&row).map_err(storage)?;
                 }
@@ -1063,7 +1065,7 @@ impl App {
             }
             self.mark_macros_seeded(&profile)?;
         }
-        Ok(rows.into_iter().map(|m| MacroDef { id: m.id, name: m.name, body: m.body }).collect())
+        Ok(rows.into_iter().map(|m| MacroDef { id: m.id, name: m.name, body: m.body, quick: m.quick }).collect())
     }
 
     fn chat_store(&mut self) -> Result<&mut Store, AppError> {

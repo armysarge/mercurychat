@@ -6,21 +6,28 @@ use rusqlite::params;
 impl Store {
     /// A profile's macros in display order.
     pub fn macros(&self, profile_id: &str) -> Result<Vec<MacroRow>> {
-        let mut st = self
-            .conn
-            .prepare("SELECT id, profile_id, name, body, sort FROM macros WHERE profile_id = ?1 ORDER BY sort, id")?;
+        let mut st = self.conn.prepare(
+            "SELECT id, profile_id, name, body, sort, quick FROM macros WHERE profile_id = ?1 ORDER BY sort, id",
+        )?;
         let rows = st.query_map(params![profile_id], |r| {
-            Ok(MacroRow { id: r.get(0)?, profile_id: r.get(1)?, name: r.get(2)?, body: r.get(3)?, sort: r.get(4)? })
+            Ok(MacroRow {
+                id: r.get(0)?,
+                profile_id: r.get(1)?,
+                name: r.get(2)?,
+                body: r.get(3)?,
+                sort: r.get(4)?,
+                quick: r.get::<_, i64>(5)? != 0,
+            })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)
     }
 
     pub fn save_macro(&mut self, m: &MacroRow) -> Result<()> {
         self.conn.execute(
-            "INSERT INTO macros (id, profile_id, name, body, sort) VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO macros (id, profile_id, name, body, sort, quick) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT (id) DO UPDATE SET profile_id = excluded.profile_id, name = excluded.name,
-               body = excluded.body, sort = excluded.sort",
-            params![m.id, m.profile_id, m.name, m.body, m.sort],
+               body = excluded.body, sort = excluded.sort, quick = excluded.quick",
+            params![m.id, m.profile_id, m.name, m.body, m.sort, m.quick],
         )?;
         Ok(())
     }

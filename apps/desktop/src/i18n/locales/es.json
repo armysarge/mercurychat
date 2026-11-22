@@ -583,7 +583,11 @@
     "name": "Nombre",
     "body": "Texto",
     "save": "Guardar macro",
-    "add": "Añadir una macro"
+    "add": "Añadir una macro",
+    "quickTitle": "Mensajes rápidos",
+    "quick": "Mensaje rápido",
+    "quickBadge": "rápido",
+    "quickHint": "Aparece primero en el menú Macros del editor. Un clic lo pone en el borrador; Intro lo envía."
   },
   "stationInfo": {
     "title": "Información de la estación {callsign}",

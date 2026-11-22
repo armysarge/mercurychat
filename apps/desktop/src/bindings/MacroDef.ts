@@ -3,4 +3,8 @@
 /**
  * A macro as the UI sees it. An empty `id` on save means a new macro.
  */
-export type MacroDef = { id: string, name: string, body: string, };
+export type MacroDef = { id: string, name: string, body: string, 
+/**
+ * Listed under "Quick messages" at the top of the composer's menu (M3c B8).
+ */
+quick: boolean, };

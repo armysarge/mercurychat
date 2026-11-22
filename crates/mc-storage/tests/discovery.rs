@@ -190,8 +190,14 @@ fn search_matches_callsign_case_insensitively() {
 #[test]
 fn macros_round_trip_in_order() {
     let mut s = Store::open_in_memory().unwrap();
-    let m =
-        |id: &str, sort| MacroRow { id: id.into(), profile_id: "p1".into(), name: id.into(), body: "73".into(), sort };
+    let m = |id: &str, sort| MacroRow {
+        id: id.into(),
+        profile_id: "p1".into(),
+        name: id.into(),
+        body: "73".into(),
+        sort,
+        quick: false,
+    };
     s.save_macro(&m("b", 2)).unwrap();
     s.save_macro(&m("a", 1)).unwrap();
     s.save_macro(&MacroRow { profile_id: "p2".into(), ..m("c", 1) }).unwrap();

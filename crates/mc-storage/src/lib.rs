@@ -224,6 +224,8 @@ pub struct MacroRow {
     pub name: String,
     pub body: String,
     pub sort: i64,
+    /// Listed under "Quick messages" (M3c B8).
+    pub quick: bool,
 }
 
 const MESSAGE_COLUMNS: &str =

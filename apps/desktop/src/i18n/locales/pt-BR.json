@@ -583,7 +583,11 @@
     "name": "Nome",
     "body": "Texto",
     "save": "Salvar macro",
-    "add": "Adicionar uma macro"
+    "add": "Adicionar uma macro",
+    "quickTitle": "Mensagens rápidas",
+    "quick": "Mensagem rápida",
+    "quickBadge": "rápida",
+    "quickHint": "Aparece primeiro no menu Macros do editor. Um clique a coloca no rascunho; Enter a envia."
   },
   "stationInfo": {
     "title": "Informações da estação {callsign}",

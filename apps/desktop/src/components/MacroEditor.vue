@@ -16,15 +16,16 @@ onMounted(() => void loadMacros());
 const TAGS = "<CALL> <MYCALL> <NAME> <QTH> <LOC> <RIG> <PWR> <ANT> <ABOUT> <UTC>";
 /** The macro being edited (id "" for a new one), or null. */
 const editing = ref<MacroDef | null>(null);
-const draft = reactive({ name: "", body: "" });
+const draft = reactive({ name: "", body: "", quick: false });
 const errors = ref<Record<string, string>>({});
 const error = ref("");
 const confirming = ref<string | null>(null);
 
 function edit(m: MacroDef | null) {
-  editing.value = m ?? { id: "", name: "", body: "" };
+  editing.value = m ?? { id: "", name: "", body: "", quick: false };
   draft.name = editing.value.name;
   draft.body = editing.value.body;
+  draft.quick = editing.value.quick;
   errors.value = {};
   error.value = "";
 }
@@ -33,7 +34,7 @@ async function save() {
   errors.value = {};
   error.value = "";
   try {
-    await saveMacro({ id: editing.value.id, name: draft.name, body: draft.body });
+    await saveMacro({ id: editing.value.id, name: draft.name, body: draft.body, quick: draft.quick });
     editing.value = null;
   } catch (e) {
     const err = e as AppError;
@@ -58,7 +59,7 @@ async function remove(id: string) {
     <ul class="list">
       <li v-for="m in macros.list" :key="m.id" class="macro">
         <div class="text">
-          <b class="name">{{ m.name }}</b>
+          <b class="name">{{ m.name }} <span v-if="m.quick" class="muted small">· {{ t("macros.quickBadge") }}</span></b>
           <span class="muted small body">{{ m.body }}</span>
         </div>
         <template v-if="confirming === m.id">
@@ -77,6 +78,8 @@ async function remove(id: string) {
       <span v-if="errors.name" class="field-error">{{ errors.name }}</span>
       <label>{{ t("macros.body") }} <textarea v-model="draft.body" name="body" rows="3"></textarea></label>
       <span v-if="errors.body" class="field-error">{{ errors.body }}</span>
+      <label class="check"><input v-model="draft.quick" type="checkbox" name="quick" /> {{ t("macros.quick") }}</label>
+      <span class="muted small">{{ t("macros.quickHint") }}</span>
       <div class="row">
         <button type="submit" class="primary">{{ t("macros.save") }}</button>
         <button type="button" @click="editing = null">{{ t("settings.cancel") }}</button>
