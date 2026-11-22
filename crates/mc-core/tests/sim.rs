@@ -70,7 +70,8 @@ async fn deselect_goes_unavailable() {
     let (h, id) = sim_app(dir.path()).await;
     let mut rx = h.subscribe();
     h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
-    while !matches!(next(&mut rx).await.event, AppEvent::ModemState { state: ModemState::Ready, .. }) {}
+    // Listening follows Ready at once (D18): wait for it, or it races the deselect's events.
+    while !matches!(next(&mut rx).await.event, AppEvent::ModemState { state: ModemState::Listening, .. }) {}
 
     h.call(AppCommand::SelectProfile { id: None }).await.unwrap();
     assert_eq!(next(&mut rx).await.event, AppEvent::ActiveProfileChanged { id: None });
