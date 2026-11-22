@@ -18,14 +18,14 @@ pub const CMD_DATA_STD: u8 = 0x00;
 pub const CMD_MODEM_FRAME: u8 = 0x03;
 
 /// Largest unescaped frame (command + payload) the decoder keeps. Mercury's
-/// largest listen-mode frame is QAM16C2's 1213 bytes at the pinned build.
+/// largest listen-mode frame is DATAC17's 1184 bytes at the pinned build.
 pub const MAX_FRAME: usize = 2048;
 
 /// Bytes Mercury adds to a wrapped (0x00/0x01/unformatted 0x02) message.
 pub const WRAP_OVERHEAD: usize = 3;
 
 /// Payload bytes per modem frame for the runtime-selectable listen modes, as
-/// printed by `mercury -l` for the pinned build (Mercury 1.9.24, 274bd5c9).
+/// printed by `mercury -l` for the pinned build (Mercury 1.9.25, 33efac4).
 /// Mode index -> (name, frame bytes). Unknown index: broadcast TX disabled.
 pub fn listen_mode_frame(index: u8) -> Option<(&'static str, usize)> {
     Some(match index {
@@ -33,8 +33,8 @@ pub fn listen_mode_frame(index: u8) -> Option<(&'static str, usize)> {
         1 => ("DATAC3", 126),
         3 => ("DATAC4", 54),
         7 => ("DATAC15", 30),
-        9 => ("DATAC17", 1180),
-        10 => ("QAM16C2", 1213),
+        9 => ("DATAC17", 1184),
+        10 => ("QAM16C2", 1183),
         11 => ("MFSK", 98),
         12 => ("MFSK500", 98),
         _ => return None,
@@ -141,6 +141,20 @@ impl Decoder {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The table matches `mercury -l` at the pin, for every mode it lists
+    /// (`tests/fixtures/mercury-listen-modes.txt`, saved from the pinned build).
+    #[test]
+    fn listen_mode_sizes_match_the_pinned_build() {
+        let fixture = include_str!("../../../tests/fixtures/mercury-listen-modes.txt");
+        for line in fixture.lines().filter(|l| !l.starts_with('#') && !l.trim().is_empty()) {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            let (index, name, bytes): (u8, &str, usize) = (f[0].parse().unwrap(), f[1], f[2].parse().unwrap());
+            if let Some((n, b)) = listen_mode_frame(index) {
+                assert_eq!((n, b), (name, bytes), "mode {index}");
+            }
+        }
+    }
 
     #[test]
     fn round_trip_with_escapes_and_split_reads() {

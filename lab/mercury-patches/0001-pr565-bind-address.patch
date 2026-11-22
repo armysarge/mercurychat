@@ -1,5 +1,8 @@
+# Mercury PR #565 (Tom-Neverwinter, harden/tnc-bind-address) as proposed: a bind_address setting.
+# Upstream merged #565 in reduced form (bind-error logging and a README firewall note,
+# fa892f9c); the setting itself is not upstream. Rebased onto 33efac4 (1.9.25), 22 Nov 2026.
 diff --git a/common/cfg_utils.c b/common/cfg_utils.c
-index ce9aa963..33990c58 100644
+index da59bb45..b86a08ae 100644
 --- a/common/cfg_utils.c
 +++ b/common/cfg_utils.c
 @@ -36,6 +36,7 @@ void cfg_set_defaults(mercury_config *cfg)
@@ -10,7 +13,7 @@ index ce9aa963..33990c58 100644
      cfg->tls_enabled        = false;                 /* ws     */
      snprintf(cfg->tls_cert, sizeof(cfg->tls_cert), "%s", CFG_SSL_CERT);
      snprintf(cfg->tls_key,  sizeof(cfg->tls_key),  "%s", CFG_SSL_KEY);
-@@ -248,6 +249,10 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
+@@ -250,6 +251,10 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
      i = iniparser_getint(ini, CFG_KEY_UI_PORT, cfg->ui_port);
      cfg->ui_port = (uint16_t) i;
  
@@ -21,7 +24,7 @@ index ce9aa963..33990c58 100644
      s = iniparser_getstring(ini, CFG_KEY_UI_PROTOCOL, cfg->tls_enabled ? "wss" : "ws");
      cfg->tls_enabled = (s && !strcmp(s, "wss"));
  
-@@ -560,6 +565,8 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
+@@ -568,6 +573,8 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
      fprintf(f, "[main]\n");
      fprintf(f, "ui_enabled = %s\n",      cfg->ui_enabled ? "true" : "false");
      fprintf(f, "ui_port = %d\n",          cfg->ui_port);
@@ -31,7 +34,7 @@ index ce9aa963..33990c58 100644
      fprintf(f, "ui_tls_cert = %s\n",      cfg->tls_cert);
      fprintf(f, "ui_tls_key = %s\n",       cfg->tls_key);
 diff --git a/common/cfg_utils.h b/common/cfg_utils.h
-index a02b85d3..ac351db7 100644
+index 4c2f5777..9e51d98a 100644
 --- a/common/cfg_utils.h
 +++ b/common/cfg_utils.h
 @@ -28,6 +28,7 @@
@@ -42,7 +45,7 @@ index a02b85d3..ac351db7 100644
  #define CFG_KEY_UI_PROTOCOL         "main:ui_protocol"
  #define CFG_KEY_UI_TLS_CERT         "main:ui_tls_cert"
  #define CFG_KEY_UI_TLS_KEY          "main:ui_tls_key"
-@@ -99,6 +100,8 @@
+@@ -101,6 +102,8 @@
  typedef struct {
      bool     ui_enabled;
      uint16_t ui_port;
@@ -52,10 +55,10 @@ index a02b85d3..ac351db7 100644
      char     tls_cert[512];         /* PEM certificate chain, wss only */
      char     tls_key[512];          /* PEM private key, wss only */
 diff --git a/common/mercury_engine.c b/common/mercury_engine.c
-index 09a1f829..9218cd23 100644
+index a44ca103..0fcd8375 100644
 --- a/common/mercury_engine.c
 +++ b/common/mercury_engine.c
-@@ -352,8 +352,15 @@ int mercury_engine_init(const mercury_config *cfg,
+@@ -355,8 +355,15 @@ int mercury_engine_init(const mercury_config *cfg,
      broadcast_run(&g_modem);
  
      /* ---- TCP interfaces ---- */
@@ -74,10 +77,10 @@ index 09a1f829..9218cd23 100644
      {
          fprintf(stderr, "mercury_engine: TCP init failed\n");
 diff --git a/data_interfaces/tcp_interfaces.c b/data_interfaces/tcp_interfaces.c
-index adb0ca99..852d9558 100644
+index 8ba63945..04b2e903 100644
 --- a/data_interfaces/tcp_interfaces.c
 +++ b/data_interfaces/tcp_interfaces.c
-@@ -259,6 +259,24 @@ static int set_nonblocking(int fd)
+@@ -352,6 +352,24 @@ static int set_nonblocking(int fd)
      return sock_set_nonblocking(fd);
  }
  
@@ -102,7 +105,7 @@ index adb0ca99..852d9558 100644
  static int open_listener_socket(int port, int port_type, const char *tag)
  {
      int fd;
-@@ -277,11 +295,14 @@ static int open_listener_socket(int port, int port_type, const char *tag)
+@@ -370,7 +388,7 @@ static int open_listener_socket(int port, int port_type, const char *tag)
  
      memset(&local_addr, 0, sizeof(local_addr));
      local_addr.sin_family = AF_INET;
@@ -111,14 +114,7 @@ index adb0ca99..852d9558 100644
      local_addr.sin_port = htons(port);
  
      if (bind(fd, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0)
-     {
-+        char ip[INET_ADDRSTRLEN] = "?";
-+        inet_ntop(AF_INET, &local_addr.sin_addr, ip, sizeof(ip));
-+        HLOGE(tag, "bind %s:%d failed: %s", ip, port, strerror(errno));
-         SOCK_CLOSE(fd);
-         return -1;
-     }
-@@ -2005,7 +2026,7 @@ void *tcp_server_thread(void *port_ptr)
+@@ -2359,7 +2377,7 @@ void *tcp_server_thread(void *port_ptr)
  
      memset(&local_addr, 0, sizeof(local_addr));
      local_addr.sin_family = AF_INET;
@@ -128,7 +124,7 @@ index adb0ca99..852d9558 100644
  
      if (bind(tcp_socket, (struct sockaddr *)&local_addr, sizeof(local_addr)) < 0)
 diff --git a/data_interfaces/tcp_interfaces.h b/data_interfaces/tcp_interfaces.h
-index 45bab859..d923447c 100644
+index 1ebad289..689ff6c0 100644
 --- a/data_interfaces/tcp_interfaces.h
 +++ b/data_interfaces/tcp_interfaces.h
 @@ -32,6 +32,11 @@
@@ -144,10 +140,10 @@ index 45bab859..d923447c 100644
   * client (the server serves one at a time) picks the new size up on its next
   * frame; its buffers are sized for the largest selectable frame, so no
 diff --git a/gui_interface/ui_communication.c b/gui_interface/ui_communication.c
-index bdd48942..0b0ed35e 100644
+index ca5b4d07..87ea73ea 100644
 --- a/gui_interface/ui_communication.c
 +++ b/gui_interface/ui_communication.c
-@@ -1095,6 +1095,7 @@ int ui_comm_init(ui_ctx_t *ctx, uint16_t ws_port, bool tls_enabled,
+@@ -1101,6 +1101,7 @@ int ui_comm_init(ui_ctx_t *ctx, uint16_t ws_port, bool tls_enabled,
      // connect callback is registered before the server thread starts to avoid
      // a race on aarch64 where the callback ptr and data could be seen
      // out-of-order by the server thread.
@@ -222,7 +218,7 @@ index e444e1dd..b78da88c 100644
                        const char *tls_cert_path, const char *tls_key_path,
                        ui_transport_command_fn on_command,
 diff --git a/mercury.1 b/mercury.1
-index e0ca521e..e73050b6 100644
+index 5bc82924..fd6c1397 100644
 --- a/mercury.1
 +++ b/mercury.1
 @@ -367,6 +367,7 @@ Key	Default	Description
@@ -234,11 +230,11 @@ index e0ca521e..e73050b6 100644
  ui_tls_cert	/etc/ssl/...	PEM certificate for wss
  ui_tls_key	/etc/ssl/...	PEM private key for wss
 diff --git a/mercury.ini.example b/mercury.ini.example
-index e1383da6..6a0dfba1 100644
+index 64435827..a8d6c283 100644
 --- a/mercury.ini.example
 +++ b/mercury.ini.example
-@@ -17,6 +17,15 @@ ui_enabled = false
- ; UI WebSocket port (default: 10000)
+@@ -20,6 +20,15 @@ ui_enabled = false
+ ; "Restricting network access" in the README for an nftables example.
  ui_port = 10000
  
 +; IPv4 address the UI, ARQ TNC (arq_tcp_base_port and +1) and broadcast TCP
@@ -254,10 +250,10 @@ index e1383da6..6a0dfba1 100644
  ; wss needs a build with OpenSSL, which is used wherever the system provides
  ; it.  Builds without it refuse wss at startup and say so.
 diff --git a/tests/common/test_cfg_utils.c b/tests/common/test_cfg_utils.c
-index be810135..7f3240fd 100644
+index c42fb1a1..59762001 100644
 --- a/tests/common/test_cfg_utils.c
 +++ b/tests/common/test_cfg_utils.c
-@@ -97,6 +97,23 @@ void test_arq_tunables_roundtrip(void)
+@@ -100,6 +100,23 @@ void test_arq_tunables_roundtrip(void)
      TEST_ASSERT_EQUAL_STRING("Speakers \"A\" (3- USB Audio CODEC )", r.output_device_name);
  }
  
@@ -281,7 +277,7 @@ index be810135..7f3240fd 100644
  /* A config from before the names reads as before: no names, ids unchanged. */
  void test_config_without_device_names_reads_as_before(void)
  {
-@@ -573,5 +590,6 @@ int main(void)
+@@ -576,5 +593,6 @@ int main(void)
      RUN_TEST(test_invalid_line_and_invert_are_rejected);
      RUN_TEST(test_cm108_report_encoding);
      RUN_TEST(test_cm108_linux_device_path_validation);
@@ -289,10 +285,10 @@ index be810135..7f3240fd 100644
      return UNITY_END();
  }
 diff --git a/tests/data_interfaces/test_tcp_interfaces.c b/tests/data_interfaces/test_tcp_interfaces.c
-index c03551de..472918c0 100644
+index dba3998a..1d579f44 100644
 --- a/tests/data_interfaces/test_tcp_interfaces.c
 +++ b/tests/data_interfaces/test_tcp_interfaces.c
-@@ -2287,6 +2287,25 @@ void test_host_tnc_command_runs_a_control_line(void)
+@@ -2449,6 +2449,25 @@ void test_host_tnc_command_runs_a_control_line(void)
      TEST_ASSERT_EQUAL_INT(1, captured_cmd_count);
  }
  
@@ -318,10 +314,10 @@ index c03551de..472918c0 100644
  void test_host_tnc_release_is_a_client_leaving_once(void)
  {
      mock_net_status[CTL_TCP_PORT] = NET_LISTENING;
-@@ -2421,5 +2440,6 @@ int main(void)
-     RUN_TEST(test_host_tnc_command_busy_while_a_tcp_client_is_attached);
-     RUN_TEST(test_host_tnc_command_runs_a_control_line);
-     RUN_TEST(test_host_tnc_release_is_a_client_leaving_once);
+@@ -2593,5 +2612,6 @@ int main(void)
+     RUN_TEST(test_tnc_absorb_disconnect_due);
+     RUN_TEST(test_cmd_disconnect_not_absorbed_right_after_connected);
+     RUN_TEST(test_cmd_disconnect_not_absorbed_without_session);
 +    RUN_TEST(test_bind_address_accepts_ipv4_and_refuses_the_rest);
      return UNITY_END();
  }

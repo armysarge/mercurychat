@@ -12,7 +12,7 @@ From the repository root, in Git Bash on the Windows PC:
 ```bash
 lab/docker/contract/check-mercury.sh             # the pin: lab/mercury-pin.env, with its patches
 lab/docker/contract/check-mercury.sh --latest    # the fork's upstream/mercuryv2, no patches
-lab/docker/contract/check-mercury.sh --commit <sha> --out E:/mc-lab-out/m3c/try-1
+lab/docker/contract/check-mercury.sh --commit <sha> --out E:/mc-lab-out/m4/try-1
 ```
 
 The fork at `E:/Programming/mercury-fork` is only mounted read-only; nothing is fetched. The steps:
@@ -34,7 +34,7 @@ A rigctld with the Hamlib dummy rig listens on 4532 for the one contract that sw
 
 ## Output
 
-In `E:/mc-lab-out/m3c/contracts-<sha7>[-latest]/`:
+In `E:/mc-lab-out/m4/contracts-<sha7>[-latest]/`:
 
 - `run/summary.txt`: the commit and patches, then `PASS|SKIP|DIVERGENCE|FAIL <contract>`, one line each;
 - `run/contracts.log`: the test binary's full output;

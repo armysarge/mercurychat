@@ -116,7 +116,7 @@ pub fn parse_event(line: &str) -> ControlEvent {
         ("BUSY", ["OFF"]) => ControlEvent::Busy(false),
         ("CQFRAME", [s, bw]) => ControlEvent::CqFrame { source: (*s).to_string(), bandwidth: (*bw).to_string() },
         ("MONITOR", _) => ControlEvent::Monitor(rest.join(" ")),
-        ("VARA", _) => ControlEvent::Version(line.into()),
+        ("VARA", _) | ("VERSION", ["VARA", ..]) => ControlEvent::Version(line.into()),
         _ => ControlEvent::Unknown(line.into()),
     }
 }
@@ -153,6 +153,8 @@ mod tests {
         assert_eq!(parse_event("BUFFER x"), ControlEvent::Unknown("BUFFER x".into()));
         assert_eq!(parse_event("BITRATE (3) 1200 BPS"), ControlEvent::Bitrate("(3) 1200 BPS".into()));
         assert!(matches!(parse_event("VARA version 4.9.0 registered"), ControlEvent::Version(_)));
+        // 1.9.25 answers VERSION with a second line, for Pat (#638).
+        assert!(matches!(parse_event("VERSION VARA HF v4.9.0"), ControlEvent::Version(_)));
         assert_eq!(parse_event("SOMETHING NEW"), ControlEvent::Unknown("SOMETHING NEW".into()));
     }
 

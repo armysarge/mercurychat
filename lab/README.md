@@ -51,7 +51,7 @@ Output: `lab/bin/{linux-amd64,linux-arm64,windows-x64}/` with `MANIFEST.txt` (co
 
 ### Mercury patches
 
-`lab/mercury-patches/*.patch` are applied in order to the pinned commit by `build-mercury.sh` when mounted at `/patches`; each build's `MANIFEST.txt` lists them. Currently: upstream PR #565 (`bind_address`), PR #566 (WebSocket Origin/Host checks, `ui_allowed_origins`; `0002` is #566 merged onto #565) and the Hamlib reopen fix from the fork's `radio-hamlib-reopen` branch (`0003`, upstream PR #571). Patched builds go to `lab/bin-patched/`:
+`lab/mercury-patches/*.patch` are applied in order to the pinned commit by `build-mercury.sh` when mounted at `/patches`; each build's `MANIFEST.txt` lists them. Currently, at the M4 pin (1.9.25, 33efac4): `0001`, the `bind_address` setting as proposed in upstream PR #565, and `0002`, PR #566's WebSocket Origin/Host checks (`ui_allowed_origins`) on top of it. Upstream declined both as policy (Mercury listens on every interface by design, restricted with a host firewall; see `upstream/M4-pin.md`), so MercuryChat carries them. The Hamlib reopen fix (`0003`, PR #571) has been upstream since f77adfb and is gone. Patched builds go to `lab/bin-patched/`:
 
 ```bash
 MSYS_NO_PATHCONV=1 docker run --rm -v "E:/Programming/mercury-fork:/src:ro" -v "$PWD/lab/bin-patched:/out" -v "$PWD/lab/docker:/scripts:ro" -v "$PWD/lab/mercury-patches:/patches:ro" mercurychat-lab:m0 bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh'
@@ -109,7 +109,7 @@ Results: `lab/run/rig-N/report.md` (checks and findings), `report.json` (PTT tim
 
 ### M3b rig control: the app against a shared rigctld (dummy rig)
 
-`crates/mc-core/examples/rig_lab.rs` runs the real service actor headless (no window) as station A, against two patched Mercury modems (0001–0003, in `lab/bin-patched`) that key the Hamlib dummy rig through rigctld. Station B is answered by the program's own headless peer. A third Mercury, set to a serial Hamlib model on a pseudo-terminal pair (`pty-pair.py`, a TS-2000 emulated by `rigctlcom`), is used for the two-owner check. No real serial device or radio is used.
+`crates/mc-core/examples/rig_lab.rs` runs the real service actor headless (no window) as station A, against two patched Mercury modems (the pin's 0001 and 0002, in `lab/bin-patched`) that key the Hamlib dummy rig through rigctld. Station B is answered by the program's own headless peer. A third Mercury, set to a serial Hamlib model on a pseudo-terminal pair (`pty-pair.py`, a TS-2000 emulated by `rigctlcom`), is used for the two-owner check. No real serial device or radio is used.
 
 Build the program for Linux (the `mercurychat-app-build:amd64` image from section 4), then run the lab:
 
@@ -158,7 +158,7 @@ What each check proves, and the commands, are in [`docker/rig/M3c-checks.md`](do
 
 ## 3b. Mercury contracts — the fake and real Mercury, one suite
 
-`crates/mercury-contract` holds every Mercury behaviour MercuryChat relies on, written once. `scripts/check.sh` runs it against the fake on every check. `lab/docker/contract/check-mercury.sh` (Git Bash) runs the same suite against two real Mercury stations: it builds the pinned Mercury (`lab/mercury-pin.env`: the fork's commit plus the listed patches), builds the contract binary, and runs it in `mercurychat-lab:rig`. `--latest` tests the fork's `upstream/mercuryv2` instead, with no patches and no network fetch. Output goes to `E:/mc-lab-out/m3c/contracts-<sha7>[-latest]`, and `run/summary.txt` there has one line per contract. Details, and how a failure is triaged, are in [`docker/contract/README.md`](docker/contract/README.md).
+`crates/mercury-contract` holds every Mercury behaviour MercuryChat relies on, written once. `scripts/check.sh` runs it against the fake on every check. `lab/docker/contract/check-mercury.sh` (Git Bash) runs the same suite against two real Mercury stations: it builds the pinned Mercury (`lab/mercury-pin.env`: the fork's commit plus the listed patches), builds the contract binary, and runs it in `mercurychat-lab:rig`. `--latest` tests the fork's `upstream/mercuryv2` instead, with no patches and no network fetch. Output goes to `E:/mc-lab-out/m4/contracts-<sha7>[-latest]`, and `run/summary.txt` there has one line per contract, and `listen-modes.txt` the build's `mercury -l` sizes, which must match `tests/fixtures/mercury-listen-modes.txt` at the pin. Details, and how a failure is triaged, are in [`docker/contract/README.md`](docker/contract/README.md).
 
 ## 4. Desktop shell
 

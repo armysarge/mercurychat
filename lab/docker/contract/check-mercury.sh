@@ -11,7 +11,7 @@
 #   (default)        the pin in lab/mercury-pin.env, with its patches
 #   --latest         the fork's upstream/mercuryv2, no patches (no network fetch)
 #   --commit <sha>   that commit, no patches
-#   --out <dir>      default E:/mc-lab-out/m3c/contracts-<sha7>[-latest]
+#   --out <dir>      default E:/mc-lab-out/m4/contracts-<sha7>[-latest]
 #
 # The summary is <out>/run/summary.txt; the exit code is non-zero on any FAIL.
 set -euo pipefail
@@ -36,7 +36,7 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
-out=${out:-E:/mc-lab-out/m3c/contracts-${commit:0:7}$suffix}
+out=${out:-E:/mc-lab-out/m4/contracts-${commit:0:7}$suffix}
 case "$(win "$out")" in [Ff]:*) echo "refusing to write to F: ($out)" >&2; exit 2 ;; esac
 mkdir -p "$out/bin" "$out/contracts" "$out/run" "$out/patches"
 rm -f "$out/patches"/*.patch
@@ -51,6 +51,14 @@ docker run --rm -e MERCURY_COMMIT="$commit" -v "$FORK:/src:ro" -v "$O/bin:/out" 
   -v "$R/lab/docker:/scripts:ro" -v "$O/patches:/patches:ro" mercurychat-lab:m0 \
   bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh linux-amd64' \
   > "$out/build-mercury.log" 2>&1 || { tail -20 "$out/build-mercury.log"; exit 1; }
+
+echo "=== 1b. listen-mode frame sizes against tests/fixtures/mercury-listen-modes.txt"
+docker run --rm -v "$O/bin:/mercury:ro" mercurychat-lab:rig bash -c '/mercury/linux-amd64/mercury -l 2>&1' \
+  | awk '/^Mode index/{i=$3} /^Opening mode/{n=$3} /payload_bytes_per_modem_frame/{print i, n, $2}' > "$out/listen-modes.txt"
+if ! diff <(grep -v '^#' "$repo/tests/fixtures/mercury-listen-modes.txt") "$out/listen-modes.txt"; then
+  echo "listen-mode frame sizes differ from the fixture: update kiss.rs and beacon.rs (and the fixture) for this build" >&2
+  [ -z "$patches" ] || exit 1   # the pin must match; --latest / --commit only report it
+fi
 
 echo "=== 2. the contract binary"
 docker run --rm -v "$R:/src:ro" -v mc-app-build-amd64:/build -v "$O/contracts:/out" \

@@ -238,8 +238,8 @@ pub fn listen_capacity(listen_mode: u8) -> Option<usize> {
         1 => 126,
         3 => 54,
         7 => 30,
-        9 => 1180,
-        10 => 1213,
+        9 => 1184,
+        10 => 1183,
         11 | 12 => 98,
         _ => return None,
     };

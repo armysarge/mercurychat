@@ -792,6 +792,14 @@ async fn m3c(out: &std::path::Path, data: &std::path::Path) -> Lab {
     b.drain();
     let p3 = ha.call(AppCommand::ProposeQsy { entry_ids: vec![e3], note: None }).await;
     let (offered3, _) = b.lab.wait(60.0, |s| qsy_stage(s).as_deref() == Some("offered")).await;
+    // Restart A's rigctld only between transmissions (M4): killing it mid-frame cuts A's
+    // frame off on the air, and 1.9.25's ARQ then stalled ~40 s, past the answer window.
+    let quiet_by = std::time::Instant::now() + Duration::from_secs(30);
+    let mut off_for = 0u32;
+    while off_for < 6 && std::time::Instant::now() < quiet_by {
+        off_for = if a.lab.snap().await.rig.ptt == RigPttView::Off { off_for + 1 } else { 0 };
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
     shell(&env("RIG_KILL"));
     shell(&env("RIG_START_NOP"));
     // A restarted dummy rig is back on Hamlib's default dial: put it where check 1 left it.

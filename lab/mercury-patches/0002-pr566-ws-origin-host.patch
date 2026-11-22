@@ -1,5 +1,7 @@
+# Mercury PR #566 (WebSocket Origin/Host checks, ui_allowed_origins), not upstream.
+# Applies on top of 0001. Rebased onto 33efac4 (1.9.25), 22 Nov 2026.
 diff --git a/common/cfg_utils.c b/common/cfg_utils.c
-index 33990c58..443421a4 100644
+index b86a08ae..25159ba1 100644
 --- a/common/cfg_utils.c
 +++ b/common/cfg_utils.c
 @@ -38,6 +38,8 @@ void cfg_set_defaults(mercury_config *cfg)
@@ -11,7 +13,7 @@ index 33990c58..443421a4 100644
      snprintf(cfg->tls_cert, sizeof(cfg->tls_cert), "%s", CFG_SSL_CERT);
      snprintf(cfg->tls_key,  sizeof(cfg->tls_key),  "%s", CFG_SSL_KEY);
      cfg->waterfall_enabled  = true;
-@@ -252,6 +254,9 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
+@@ -254,6 +256,9 @@ bool cfg_read(mercury_config *cfg, const char *ini_path)
      s = iniparser_getstring(ini, CFG_KEY_BIND_ADDRESS, NULL);
      if (s)
          snprintf(cfg->bind_address, sizeof(cfg->bind_address), "%s", s);
@@ -21,7 +23,7 @@ index 33990c58..443421a4 100644
  
      s = iniparser_getstring(ini, CFG_KEY_UI_PROTOCOL, cfg->tls_enabled ? "wss" : "ws");
      cfg->tls_enabled = (s && !strcmp(s, "wss"));
-@@ -568,6 +573,11 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
+@@ -576,6 +581,11 @@ bool cfg_write(const mercury_config *cfg, const char *ini_path)
      if (cfg->bind_address[0])       /* unset reads back as all interfaces */
          fprintf(f, "bind_address = %s\n", cfg->bind_address);
      fprintf(f, "ui_protocol = %s\n",      cfg->tls_enabled ? "wss" : "ws");
@@ -34,7 +36,7 @@ index 33990c58..443421a4 100644
      fprintf(f, "ui_tls_key = %s\n",       cfg->tls_key);
      fprintf(f, "waterfall_enabled = %s\n", cfg->waterfall_enabled ? "true" : "false");
 diff --git a/common/cfg_utils.h b/common/cfg_utils.h
-index ac351db7..f32c1b69 100644
+index 9e51d98a..6d6046ac 100644
 --- a/common/cfg_utils.h
 +++ b/common/cfg_utils.h
 @@ -32,6 +32,9 @@
@@ -47,7 +49,7 @@ index ac351db7..f32c1b69 100644
  
  /* Defaults for wss://.  Overridable because these are only reachable by root
   * on Linux and do not exist at all on Windows or macOS, which made wss://
-@@ -105,6 +108,8 @@ typedef struct {
+@@ -107,6 +110,8 @@ typedef struct {
      bool     tls_enabled;           /* false = ws, true = wss */
      char     tls_cert[512];         /* PEM certificate chain, wss only */
      char     tls_key[512];          /* PEM private key, wss only */
@@ -57,10 +59,10 @@ index ac351db7..f32c1b69 100644
      ptt_config_t ptt;               /* selected PTT method and backend config */
      char     input_device[512];
 diff --git a/gui_interface/ui_communication.c b/gui_interface/ui_communication.c
-index 0b0ed35e..15134647 100644
+index 87ea73ea..a1cef664 100644
 --- a/gui_interface/ui_communication.c
 +++ b/gui_interface/ui_communication.c
-@@ -1096,6 +1096,7 @@ int ui_comm_init(ui_ctx_t *ctx, uint16_t ws_port, bool tls_enabled,
+@@ -1102,6 +1102,7 @@ int ui_comm_init(ui_ctx_t *ctx, uint16_t ws_port, bool tls_enabled,
      // a race on aarch64 where the callback ptr and data could be seen
      // out-of-order by the server thread.
      ui_transport_set_bind_address(initial_cfg ? initial_cfg->bind_address : NULL);
@@ -271,7 +273,7 @@ index aae09f78..f9abf6b6 100644
 +
  #endif /* WS_FRAME_H_ */
 diff --git a/gui_interface/websocket/ws_server.c b/gui_interface/websocket/ws_server.c
-index e56224e2..5cffd079 100644
+index 1a5946b7..0068a5ed 100644
 --- a/gui_interface/websocket/ws_server.c
 +++ b/gui_interface/websocket/ws_server.c
 @@ -667,6 +667,26 @@ static int conn_handle_request(ws_conn_t *c, const char *req, size_t req_len)
@@ -328,7 +330,7 @@ index b78da88c..7150db9e 100644
  int ui_transport_init(uint16_t port, bool tls_enabled,
                        const char *tls_cert_path, const char *tls_key_path,
 diff --git a/mercury.1 b/mercury.1
-index e73050b6..cbf3527f 100644
+index fd6c1397..c4f7e0d3 100644
 --- a/mercury.1
 +++ b/mercury.1
 @@ -371,6 +371,7 @@ bind_address	(all)	IPv4 address the UI, TNC and broadcast ports listen on
@@ -340,10 +342,10 @@ index e73050b6..cbf3527f 100644
  input_device	(empty)	Audio capture device
  output_device	(empty)	Audio playback device
 diff --git a/mercury.ini.example b/mercury.ini.example
-index 6a0dfba1..b6194546 100644
+index a8d6c283..6c877ccd 100644
 --- a/mercury.ini.example
 +++ b/mercury.ini.example
-@@ -37,6 +37,16 @@ ui_protocol = ws
+@@ -40,6 +40,16 @@ ui_protocol = ws
  ;ui_tls_cert = /etc/ssl/certs/hermes.radio.crt
  ;ui_tls_key = /etc/ssl/private/hermes.radio.key
  
@@ -361,10 +363,10 @@ index 6a0dfba1..b6194546 100644
  waterfall_enabled = true
  
 diff --git a/tests/common/test_cfg_utils.c b/tests/common/test_cfg_utils.c
-index 7f3240fd..8e33e555 100644
+index 59762001..e023e0cf 100644
 --- a/tests/common/test_cfg_utils.c
 +++ b/tests/common/test_cfg_utils.c
-@@ -114,6 +114,33 @@ void test_bind_address_roundtrips_and_defaults_to_all_interfaces(void)
+@@ -117,6 +117,33 @@ void test_bind_address_roundtrips_and_defaults_to_all_interfaces(void)
      TEST_ASSERT_EQUAL_STRING("127.0.0.1", r.bind_address);
  }
  
@@ -398,7 +400,7 @@ index 7f3240fd..8e33e555 100644
  /* A config from before the names reads as before: no names, ids unchanged. */
  void test_config_without_device_names_reads_as_before(void)
  {
-@@ -591,5 +618,6 @@ int main(void)
+@@ -594,5 +621,6 @@ int main(void)
      RUN_TEST(test_cm108_report_encoding);
      RUN_TEST(test_cm108_linux_device_path_validation);
      RUN_TEST(test_bind_address_roundtrips_and_defaults_to_all_interfaces);

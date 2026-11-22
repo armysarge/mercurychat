@@ -1,5 +1,9 @@
 # M3c contracts against latest upstream Mercury: no divergence
 
+> **Correction (M4, 22 Nov 2026).** Two statements below are wrong; see [M4-pin.md](M4-pin.md).
+> - #565 was merged *without* its `bind_address` setting (only bind-error logging and a README firewall note), so 1.9.25 still listens on every interface and patch 0001 is still needed. #566 was closed, not merged. Upstream declined both as policy.
+> - "No divergence" missed a change: 1.9.25's QAM16C2 frame is 1183 bytes (was 1213) and DATAC17's is 1184 (was 1180). No contract exercised those modes. M4 fixes the tables and checks `mercury -l` on every pin run.
+
 **Checked:** 22 Nov 2026, with `lab/docker/contract/check-mercury.sh --latest`. This uses the fork's `upstream/mercuryv2` as it was locally, with no network fetch.
 
 **Latest build:**

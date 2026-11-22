@@ -486,7 +486,10 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
                 }
             }
         }
-        ["VERSION"] => send_line(&s, i, "VARA version 4.9.0 registered"),
+        ["VERSION"] => {
+            send_line(&s, i, "VARA version 4.9.0 registered");
+            send_line(&s, i, "VERSION VARA HF v4.9.0");
+        }
         ["BUFFER"] => send_line(&s, i, "BUFFER 0"),
         _ => send_line(&s, i, "WRONG"),
     }
