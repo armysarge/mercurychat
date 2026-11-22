@@ -221,22 +221,22 @@ const MIGRATION_5: &str = r#"
 ALTER TABLE station_profiles ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0;
 "#;
 
-/// The frequency list (M3b, D15): the operator's named entries and the
-/// suggested presets (`preset_key` set), shared by every station profile.
-/// Created in station databases too, where it stays empty.
-/// Where a QSO field's value came from (M3c B6): `peer report` when a
-/// peer's answer filled it; none when the operator typed it or before M3c.
 /// Quick messages (M3c B8): a macro listed at the top of the composer's menu.
 const MIGRATION_8: &str = r#"
 ALTER TABLE macros ADD COLUMN quick INTEGER NOT NULL DEFAULT 0;
 "#;
 
+/// Where a QSO field's value came from (M3c B6): `peer report` when a
+/// peer's answer filled it; none when the operator typed it or before M3c.
 const MIGRATION_7: &str = r#"
 ALTER TABLE qso_records ADD COLUMN rst_rcvd_source TEXT;
 ALTER TABLE qso_records ADD COLUMN name_source TEXT;
 ALTER TABLE qso_records ADD COLUMN qth_source TEXT;
 "#;
 
+/// The frequency list (M3b, D15): the operator's named entries and the
+/// suggested presets (`preset_key` set), shared by every station profile.
+/// Created in station databases too, where it stays empty.
 const MIGRATION_6: &str = r#"
 CREATE TABLE frequency_list (
   id          TEXT PRIMARY KEY,

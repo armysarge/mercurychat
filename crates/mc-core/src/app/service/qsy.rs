@@ -303,6 +303,8 @@ impl App {
                 }
             }
         }
+        let owns_rig = self.qsy.machine.as_ref().is_some_and(Qsy::moving);
+        self.beacon.sched.on_qsy(owns_rig, Instant::now());
         self.publish_qsy();
         result
     }

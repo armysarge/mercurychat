@@ -523,3 +523,19 @@ async fn no_reading_fallback_says_return_by_hand() {
     assert!(a.event(secs, |e| notice(e, "qsy.notify.returnByHand")).await.is_some());
     a.wait(5, "A's QSY over", |s| s.qsy.is_none()).await;
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_beacon_during_qsy_move() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = two(dir.path(), 0, true).await;
+    t.a.h.call(AppCommand::SetBeacon { on: true }).await.unwrap();
+    connect(&t.a, &t.b).await;
+    t.b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    propose_and_accept(&t.a, &t.b).await;
+    t.a.wait(10, "A moving", |s| stage(s) == Some("moving") && s.session.is_none()).await;
+    let before = t.net.broadcast_log().iter().filter(|(s, _)| *s == 0).count();
+    let e = t.a.h.call(AppCommand::SendBeaconNow).await.unwrap_err();
+    assert!(matches!(&e, AppError::Refused { reason: "qsy.refused.tuneDuringQsy", .. }), "{e:?}");
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    assert_eq!(t.net.broadcast_log().iter().filter(|(s, _)| *s == 0).count(), before, "nothing keyed");
+}

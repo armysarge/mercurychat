@@ -123,6 +123,18 @@ impl App {
             return;
         }
         let Some(peer) = self.session.as_ref().map(|s| s.peer.clone()) else { return };
+        // Unsolicited, it is the email share and nothing else (M4 B6): an SNR or
+        // station field nobody asked for fills nothing.
+        let r = if id == ObjectId::ZERO {
+            let email = r.station.and_then(|s| s.email);
+            InfoResponse {
+                snr: None,
+                station: email.map(|email| StationShare { email: Some(email), ..StationShare::default() }),
+                reason: None,
+            }
+        } else {
+            r
+        };
         self.fill_qso_from_peer(&r);
         self.emit(AppEvent::PeerInfo {
             peer,

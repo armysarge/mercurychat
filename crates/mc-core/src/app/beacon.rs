@@ -136,6 +136,8 @@ pub struct BeaconScheduler {
     /// Held after [`SILENT_HOLD`] of them: nothing is scheduled until a
     /// beacon is seen to go out or the operator arms beacons again.
     held: bool,
+    /// A QSY owns the rig (M4 B7): treated like a busy modem.
+    qsy: bool,
 }
 
 impl BeaconScheduler {
@@ -150,6 +152,7 @@ impl BeaconScheduler {
             waiting: false,
             silent: 0,
             held: false,
+            qsy: false,
         }
     }
 
@@ -243,7 +246,7 @@ impl BeaconScheduler {
     }
 
     fn block(&self, now: Instant) -> Option<Block> {
-        if !matches!(self.state, ModemState::Ready | ModemState::Listening) {
+        if self.qsy || !matches!(self.state, ModemState::Ready | ModemState::Listening) {
             return Some(Block::Modem);
         }
         match self.channel {
@@ -261,6 +264,7 @@ impl BeaconScheduler {
             return Some(NotConfirmedReason::BroadcastPortSilent.text().into());
         }
         match self.block(now)? {
+            Block::Modem if self.qsy => Some("a QSY is under way".into()),
             Block::Modem => {
                 if self.state == ModemState::Calling {
                     let why = GateRefusal::Calling.message();
@@ -312,6 +316,12 @@ impl BeaconScheduler {
         }
     }
 
+    /// A QSY owns the rig, or no longer does (M4 B7).
+    pub fn on_qsy(&mut self, owns_rig: bool, now: Instant) {
+        self.qsy = owns_rig;
+        self.release(now);
+    }
+
     pub fn on_state(&mut self, state: ModemState, now: Instant) {
         self.state = state;
         // Not attached: nothing stays armed across it (a recovery, a re-attach).
@@ -319,6 +329,12 @@ impl BeaconScheduler {
             self.disarm();
             return;
         }
+        self.release(now);
+    }
+
+    /// A beacon that fell due while the modem was blocked is one interval on
+    /// once it no longer is.
+    fn release(&mut self, now: Instant) {
         if self.active && self.waiting && self.block(now) != Some(Block::Modem) {
             self.waiting = false;
             let from = match self.block(now) {

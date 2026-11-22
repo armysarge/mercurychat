@@ -42,6 +42,21 @@ mod scheduler {
         assert!(s.suppressed(t0).is_some(), "the reason is given");
     }
 
+    /// M4 B7: while a QSY owns the rig nothing is sent; afterwards the
+    /// schedule resumes one interval on (the beacon is delayed, not lost).
+    #[test]
+    fn due_during_a_qsy_waits_for_it() {
+        let t0 = Instant::now();
+        let mut s = armed(0.5, t0);
+        s.on_qsy(true, t0 + 9 * MIN);
+        assert_eq!(s.tick(t0 + 10 * MIN), Tick::Nothing, "due during the QSY: nothing is sent");
+        assert_eq!(s.suppressed(t0 + 10 * MIN).as_deref(), Some("a QSY is under way"));
+        let end = t0 + 11 * MIN;
+        s.on_qsy(false, end);
+        assert_eq!(s.deadline(), Some(end + 10 * MIN), "the schedule resumes");
+        assert_eq!(s.suppressed(end), None);
+    }
+
     #[test]
     fn due_during_calling_is_skipped_not_queued() {
         let t0 = Instant::now();

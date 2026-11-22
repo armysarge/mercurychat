@@ -325,6 +325,34 @@ async fn unknown_response_id_ignored() {
     assert_eq!(p.snapshot().await.current_qso.unwrap().qth, None);
 }
 
+/// M4 B6: an unsolicited answer (id zero) is the email share only; SNR and
+/// station fields in it fill nothing.
+#[tokio::test(flavor = "multi_thread")]
+async fn unsolicited_answer_only_fills_email() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut p = pair(dir.path(), |_| {}, 1, 800).await;
+    let share = InfoResponse {
+        snr: Some(SnrReport { db: 7.0, age_s: 3, source: "telemetry".into() }),
+        station: Some(StationShare {
+            name: Some("Sneaky".into()),
+            qth: Some("Elsewhere".into()),
+            email: Some("pat@example.org".into()),
+            ..StationShare::default()
+        }),
+        reason: Some("rate".into()),
+    };
+    p.peer_sends(PeerMsg::InfoResponse(ObjectId::ZERO, Box::new(share))).await;
+    let Some(AppEvent::PeerInfo { snr, station, reason, .. }) = p.peer_info(Duration::from_secs(10)).await else {
+        panic!("the email share is shown")
+    };
+    assert_eq!((snr, reason), (None, None));
+    let station = station.expect("the email");
+    assert_eq!(station.email.as_deref(), Some("pat@example.org"));
+    assert_eq!((station.name, station.qth), (None, None));
+    let qso = p.snapshot().await.current_qso.unwrap();
+    assert_eq!((qso.name, qso.qth, qso.rst_rcvd), (None, None, None));
+}
+
 #[test]
 fn over_limit_value_left_out() {
     let mut p = StationProfile::new_existing(US);

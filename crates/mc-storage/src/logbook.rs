@@ -135,7 +135,6 @@ impl Store {
         Ok(row)
     }
 
-    /// Lock a record against further edits (idempotent).
     /// Fill a draft's empty RST received, name and QTH from a peer's report,
     /// each marked `source` (M3c B6). A field that has a value, typed or
     /// not, is left as it is.
@@ -161,6 +160,7 @@ impl Store {
         self.qso(id)
     }
 
+    /// Lock a record against further edits (idempotent).
     pub fn finalise_qso(&mut self, id: &str) -> Result<QsoRow> {
         self.conn.execute("UPDATE qso_records SET state = 'final' WHERE id = ?1", params![id])?;
         self.qso(id)

@@ -945,6 +945,8 @@ impl App {
 
     /// One beacon now, from the active profile, through the broadcast gate.
     fn send_beacon(&mut self) -> Result<(), AppError> {
+        // Keying now would hold the QSY's retune back (M4 B7).
+        self.qsy_owns_rig()?;
         let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
         // Without a known listen mode the gate refuses it anyway; DATAC3 is the one set at attach.
         let mode = self.listen_mode.current().unwrap_or(DATAC3);
