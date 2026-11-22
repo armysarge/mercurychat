@@ -767,6 +767,8 @@ impl App {
             AppCommand::ProposeQsy { entry_ids, note } => self.propose_qsy(entry_ids, note),
             AppCommand::AnswerQsy { accept } => self.answer_qsy(accept),
             AppCommand::QsyTuned => self.qsy_tuned(),
+            AppCommand::SuggestQsy { to, entry_ids } => self.suggest_qsy(to, entry_ids),
+            AppCommand::TuneSuggested { index } => self.tune_suggested(index),
         }
     }
 
@@ -814,7 +816,7 @@ impl App {
     /// Send a CQ (payload unused) or a beacon, if the gate allows it now
     /// (DSC-02). A refusal is answered, published and logged, never queued.
     fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
-        let len = (kind == BroadcastKind::Beacon).then_some(payload.len());
+        let len = matches!(kind, BroadcastKind::Beacon | BroadcastKind::Qsy).then_some(payload.len());
         if self.rig.tune.active {
             return Err(self.refuse_broadcast(kind, "not sent: Tune is on".into()));
         }
@@ -833,7 +835,7 @@ impl App {
         }
         let cmd = match kind {
             BroadcastKind::Cq => ModemCmd::Cq,
-            BroadcastKind::Beacon => ModemCmd::Broadcast(payload),
+            BroadcastKind::Beacon | BroadcastKind::Qsy => ModemCmd::Broadcast { kind, payload },
         };
         if !self.task.as_ref().is_some_and(|t| t.send(cmd)) {
             return Err(self.refuse_broadcast(kind, GateRefusal::Detached.message()));
@@ -1208,6 +1210,7 @@ impl App {
                 self.emit_all(events);
             }
             ReportKind::Frame(f) => {
+                self.qsy_frame(&f.payload);
                 let tuning = self.tuning(tokio::time::Instant::now());
                 let events = self.discovery.frame(self.chat.as_mut(), f, &tuning);
                 self.emit_all(events);

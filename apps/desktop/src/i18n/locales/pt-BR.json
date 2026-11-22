@@ -160,7 +160,8 @@
       "bytes": "{n} byte | {n} bytes",
       "sessionEnd": "Sessão encerrada · {freq} · {duration} · {bytes}",
       "cq": "CQ transmitido {time} UTC",
-      "beacon": "Beacon transmitido {time} UTC"
+      "beacon": "Beacon transmitido {time} UTC",
+      "qsy": "Sugestão de QSY transmitida {time} UTC"
     }
   },
   "session": {

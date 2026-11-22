@@ -28,6 +28,8 @@ pub enum BroadcastKind {
     Cq,
     /// An MCB/1 beacon on the broadcast port.
     Beacon,
+    /// An MCB/1 QSY suggestion (kind 3) on the broadcast port (M3c B5).
+    Qsy,
 }
 
 impl BroadcastKind {
@@ -35,6 +37,7 @@ impl BroadcastKind {
         match self {
             BroadcastKind::Cq => "CQ",
             BroadcastKind::Beacon => "beacon",
+            BroadcastKind::Qsy => "QSY suggestion",
         }
     }
 }
@@ -276,7 +279,9 @@ impl Tracker {
         let Some(f) = self.in_flight.as_mut().filter(|f| !f.left_idle) else { return Vec::new() };
         let (begin, end) = match f.kind {
             BroadcastKind::Cq => (matches!(o, Observation::Pending), matches!(o, Observation::CancelPending)),
-            BroadcastKind::Beacon => (matches!(o, Observation::Ptt(true)), matches!(o, Observation::Ptt(false))),
+            BroadcastKind::Beacon | BroadcastKind::Qsy => {
+                (matches!(o, Observation::Ptt(true)), matches!(o, Observation::Ptt(false)))
+            }
         };
         if begin {
             f.started = true;

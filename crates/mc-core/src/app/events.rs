@@ -145,6 +145,12 @@ pub enum AppEvent {
         key: String,
         text: String,
     },
+    /// A heard station suggests a QSY to us (MCB/1 kind 3; M3c B5). Shown
+    /// only when we are the addressee; nothing is negotiated.
+    QsySuggested {
+        from: String,
+        candidates: Vec<super::qsy::Tuning>,
+    },
     /// The rig changed (M3b): a reading, its link, a fault or a banner. At
     /// most 2 a second; the snapshot always has the latest.
     Rig {

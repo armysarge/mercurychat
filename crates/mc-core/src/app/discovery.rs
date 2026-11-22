@@ -519,9 +519,17 @@ impl Discovery {
                 let row = HeardRow { grid: b.grid, caps: Some(i64::from(b.caps)), ..row(&call, "beacon") };
                 self.record(store, row, "beacon", tuning)
             }
-            // QSY suggestions are handled with M3c Task 10.
+            // Heard traffic from its sender, whoever it is for; the
+            // addressee's card is the service's (M3c B5).
             Received::Qsy(q) => {
-                vec![self.note("broadcast", format!("QSY suggestion from {} to {}", shown(&q.from), shown(&q.to)))]
+                let call = match self.callsign(&q.from, "QSY suggestion") {
+                    Ok(c) => c,
+                    Err(evs) => return evs,
+                };
+                let mut out =
+                    vec![self.note("broadcast", format!("QSY suggestion from {} to {}", shown(&q.from), shown(&q.to)))];
+                out.extend(self.record(store, row(&call, "beacon"), "QSY suggestion", tuning));
+                out
             }
             Received::Unsupported(kind) => self.unsupported(format!("MCB/1 kind {kind}, unknown to this version")),
             Received::Malformed(e) => self.malformed(format!("malformed MCB/1 beacon: {e}")),

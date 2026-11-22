@@ -3,6 +3,7 @@
 //! caller's re-calls, and the fall back. The decisions are `app::qsy`'s.
 
 use super::{conflict, App};
+use crate::app::broadcast::BroadcastKind;
 use crate::app::contract::{AppCommand, AppError, CommandOk};
 use crate::app::events::{AppEvent, ModemState, SessionDirection};
 use crate::app::modem::ModemCmd;
@@ -12,6 +13,7 @@ use crate::app::qsy::{
 };
 use crate::app::rig::RigChange;
 use crate::session::PeerMsg;
+use mch_protocol::beacon::{self as mcb, Mode, QsySuggestion, Received, MAX_QSY_CANDIDATES};
 use mch_protocol::payload::{QsyAnswer, QsyCandidate, MAX_CANDIDATES, QSY_MODES};
 use mch_protocol::{ObjectId, CAP_QSY};
 use std::time::Duration;
@@ -46,11 +48,15 @@ pub(in crate::app) struct QsySide {
     /// The manual path's "Tuned" was pressed.
     tuned: bool,
     shown: Option<QsyView>,
+    /// The last suggestion addressed to us (MCB/1 kind 3): sender, candidates.
+    suggestion: Option<(String, Vec<Tuning>)>,
+    /// The sequence counter of the suggestions we send.
+    suggest_seq: u32,
 }
 
 impl QsySide {
     pub(in crate::app) fn new(windows: QsyWindows) -> QsySide {
-        QsySide { windows, ..QsySide::default() }
+        QsySide { windows, suggest_seq: rand::random(), ..QsySide::default() }
     }
 }
 
@@ -434,5 +440,70 @@ impl App {
             self.qsy.retune = None;
             let _ = self.qsy_input(QsyInput::RigSet { ok: true });
         }
+    }
+
+    /// "Suggest QSY" on a heard station (B5): one kind 3, only on this command.
+    pub(super) fn suggest_qsy(&mut self, to: String, entry_ids: Vec<String>) -> Result<CommandOk, AppError> {
+        let field = |message: String| AppError::Validation { errors: crate::app::chat::field("entryIds", message) };
+        let me = self.active_profile().ok_or_else(|| conflict("no station is selected".into()))?;
+        if entry_ids.is_empty() || entry_ids.len() > MAX_QSY_CANDIDATES {
+            return Err(field(format!("Choose 1 to {MAX_QSY_CANDIDATES} frequencies")));
+        }
+        let entries = self.entries()?;
+        let mut candidates = Vec::with_capacity(entry_ids.len());
+        for id in &entry_ids {
+            let e =
+                entries.iter().find(|e| &e.id == id).ok_or_else(|| conflict("that entry no longer exists".into()))?;
+            let mode = Mode::from_name(&e.mode)
+                .ok_or_else(|| field(format!("{}: the mode {} can't be suggested", e.name, e.mode)))?;
+            let hz = u32::try_from(e.freq_hz).map_err(|_| field(format!("{}: frequency out of range", e.name)))?;
+            candidates.push((hz, mode));
+        }
+        let s = QsySuggestion::new(self.qsy.suggest_seq, &me.callsign, &to, candidates)
+            .map_err(|e| AppError::Validation { errors: crate::app::chat::field("to", format!("not sent: {e}")) })?;
+        let payload = match self.listen_mode.current() {
+            Some(mode) => {
+                s.encode_for(mode).map_err(|e| self.refuse_broadcast(BroadcastKind::Qsy, format!("not sent: {e}")))?
+            }
+            None => s.encode(), // the gate refuses it without a listen mode
+        };
+        self.send_broadcast(BroadcastKind::Qsy, payload)?;
+        self.qsy.suggest_seq = self.qsy.suggest_seq.wrapping_add(1);
+        Ok(CommandOk::Done)
+    }
+
+    /// A broadcast frame: a kind 3 addressed to us is shown as a card.
+    pub(super) fn qsy_frame(&mut self, payload: &[u8]) {
+        let Received::Qsy(q) = mcb::classify(payload) else { return };
+        let Some(me) = self.active_profile() else { return };
+        if !q.to.eq_ignore_ascii_case(me.callsign.trim()) {
+            return;
+        }
+        let candidates: Vec<Tuning> = q
+            .candidates
+            .iter()
+            .map(|(hz, mode)| Tuning { freq_hz: u64::from(*hz), mode: mode.name().to_string(), passband_hz: None })
+            .collect();
+        let first = candidates.first().map(describe).unwrap_or_default();
+        let line = self.discovery.note("qsy", format!("{} suggests {first}", q.from));
+        self.emit(line);
+        self.qsy.suggestion = Some((q.from.clone(), candidates.clone()));
+        self.emit(AppEvent::QsySuggested { from: q.from, candidates });
+    }
+
+    /// "Tune and listen": the M3b rig set, refused while busy (RIG-03).
+    pub(super) fn tune_suggested(&mut self, index: u8) -> Result<CommandOk, AppError> {
+        let t = self
+            .qsy
+            .suggestion
+            .as_ref()
+            .and_then(|(_, c)| c.get(usize::from(index)))
+            .cloned()
+            .ok_or_else(|| conflict("there is no such suggestion".into()))?;
+        let mut changes = vec![RigChange::Frequency { hz: t.freq_hz }];
+        if !t.mode.is_empty() {
+            changes.push(RigChange::Mode { mode: t.mode.clone(), passband_hz: 0 });
+        }
+        self.rig_set_all(&changes)
     }
 }

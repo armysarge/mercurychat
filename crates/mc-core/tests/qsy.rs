@@ -34,10 +34,23 @@ fn windows() -> QsyWindows {
 
 struct App {
     h: AppHandle,
-    _rx: Receiver<EventEnvelope>,
+    rx: Receiver<EventEnvelope>,
 }
 
 impl App {
+    /// The first event matching `pred` within `secs`, if any.
+    async fn event(&mut self, secs: u64, pred: impl Fn(&AppEvent) -> bool) -> Option<AppEvent> {
+        let end = Instant::now() + Duration::from_secs(secs);
+        loop {
+            match tokio::time::timeout_at(end, self.rx.recv()).await {
+                Ok(Ok(e)) if pred(&e.event) => return Some(e.event),
+                Ok(Ok(_)) | Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
+                Ok(Err(e)) => panic!("{e}"),
+                Err(_) => return None,
+            }
+        }
+    }
+
     async fn snap(&self) -> AppSnapshot {
         match self.h.call(AppCommand::Snapshot).await.unwrap() {
             CommandOk::Snapshot(s) => s,
@@ -79,14 +92,25 @@ fn stage(s: &AppSnapshot) -> Option<&str> {
 
 /// An app on station `i` of `net`, listening, with `rig` (and `offset_hz`) if given.
 async fn app(root: &Path, net: &FakeNet, i: usize, call: &str, rig: Option<(&FakeRigctld, i32)>) -> App {
-    let base = if i == 0 { net.a_base } else { net.b_base };
+    app_with(root, net, i, call, rig, None).await
+}
+
+async fn app_with(
+    root: &Path,
+    net: &FakeNet,
+    i: usize,
+    call: &str,
+    rig: Option<(&FakeRigctld, i32)>,
+    telemetry_url: Option<String>,
+) -> App {
+    let (base, bcast) = if i == 0 { (net.a_base, net.a_bcast) } else { (net.b_base, net.b_bcast) };
     let mut p = StationProfile::new_existing(call);
     p.modem = ModemTarget::Existing {
         host: "127.0.0.1".into(),
         control_port: base,
         data_port: base + 1,
-        broadcast_port: None,
-        telemetry_url: None,
+        broadcast_port: Some(bcast),
+        telemetry_url,
     };
     let opts = AppOptions {
         sim_root: Some(root.join(call)),
@@ -107,7 +131,7 @@ async fn app(root: &Path, net: &FakeNet, i: usize, call: &str, rig: Option<(&Fak
             break;
         }
     }
-    let a = App { h, _rx: rx };
+    let a = App { h, rx };
     if let Some((fake, offset_hz)) = rig {
         let config = RigConfig { offset_hz, ..RigConfig::external("127.0.0.1", fake.addr.port()) };
         assert_eq!(a.h.call(AppCommand::SetRigConfig { config }).await.unwrap(), CommandOk::Done);
@@ -272,4 +296,110 @@ async fn no_retune_while_keyed() {
     assert_eq!(t.rb.as_ref().unwrap().freq(), START_HZ, "no retune while Mercury is keyed");
     t.net.send_control(1, "PTT OFF");
     wait_freq(t.rb.as_ref().unwrap(), NEW_HZ, 10, "B retuned once unkeyed").await;
+}
+
+// --- Task 10 (B5): QSY suggestions before a connection (MCB/1 kind 3) ---
+
+use mch_protocol::beacon::{self as mcb, Mode, QsySuggestion, Received};
+
+const OTHER: &str = "ZS1XYZ";
+
+fn suggestion(from: &str, to: &str) -> Vec<u8> {
+    QsySuggestion::new(7, from, to, vec![(NEW_HZ as u32, Mode::Usb)]).unwrap().encode()
+}
+
+fn is_suggested(e: &AppEvent) -> bool {
+    matches!(e, AppEvent::QsySuggested { .. })
+}
+
+fn kind3_sent_by(net: &FakeNet, side: usize) -> usize {
+    net.broadcast_log().iter().filter(|(s, p)| *s == side && matches!(mcb::classify(p), Received::Qsy(_))).count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suggestion_reaches_addressee_only() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let a = app(dir.path(), &net, 0, A, None).await;
+    let mut b = app(dir.path(), &net, 1, B, None).await;
+    let id = a.entry("40m chat", NEW_HZ).await;
+    a.h.call(AppCommand::SuggestQsy { to: B.into(), entry_ids: vec![id] }).await.unwrap();
+    match b.event(10, is_suggested).await {
+        Some(AppEvent::QsySuggested { from, candidates }) => {
+            assert_eq!(from, A);
+            assert_eq!((candidates[0].freq_hz, candidates[0].mode.as_str()), (NEW_HZ, "USB"));
+        }
+        other => panic!("B was not shown the suggestion: {other:?}"),
+    }
+    assert_eq!(kind3_sent_by(&net, 0), 1);
+    // One addressed to a third station is not shown to B.
+    assert!(net.air_broadcast(0, suggestion(OTHER, "ZS6OTHR")));
+    assert!(b.event(2, is_suggested).await.is_none());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suggestion_counts_as_heard_for_others() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let mut a = app(dir.path(), &net, 0, A, None).await;
+    assert!(net.air_broadcast(1, suggestion(OTHER, "ZS6OTHR")));
+    let heard = a.event(10, |e| matches!(e, AppEvent::Heard { station } if station.callsign == OTHER)).await;
+    assert!(heard.is_some(), "the sender is heard");
+    assert!(a.event(1, is_suggested).await.is_none(), "not addressed to A");
+}
+
+fn status_on_mode(listen_mode: u8) -> String {
+    format!(
+        r#"{{"type":"status","bitrate":0,"snr":0.0,"direction":"rx","tx_gain_db":0.0,"audio_ok":true,"audio_error":"","arq_tx_mode":"","arq_rx_mode":"","radio_frequency_hz":null,"radio_frequency_age_ms":null,"freq_offset_hz":0.0,"freq_offset_age_ms":0,"listen_mode":{listen_mode},"busy":""}}"#
+    )
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suggestion_over_capacity_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let ws = mercury_adapter::fake_ws::FakeWs::start().await;
+    ws.set_status(Some(&status_on_mode(7))); // DATAC15: 27 bytes
+    let a = app_with(dir.path(), &net, 0, A, None, Some(ws.url.clone())).await;
+    a.wait(10, "DATAC15 from telemetry", |s| s.telemetry.listen_mode == Some(7)).await;
+    let id = a.entry("40m chat", NEW_HZ).await;
+    let e = a.h.call(AppCommand::SuggestQsy { to: B.into(), entry_ids: vec![id] }).await.unwrap_err();
+    assert!(format!("{e:?}").contains("27"), "the refusal names the capacity: {e:?}");
+    assert_eq!(kind3_sent_by(&net, 0), 0);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suggestion_tune_refused_while_busy() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = two(dir.path(), 0, true).await;
+    let mut a = t.a;
+    assert!(t.net.air_broadcast(1, suggestion(OTHER, A)));
+    assert!(a.event(10, is_suggested).await.is_some());
+    connect(&a, &t.b).await;
+    let e = a.h.call(AppCommand::TuneSuggested { index: 0 }).await.unwrap_err();
+    assert!(matches!(&e, AppError::Refused { reason: "rig.refused.connected", .. }), "{e:?}");
+    assert_eq!(t.ra.freq(), START_HZ);
+    a.h.call(AppCommand::Disconnect).await.unwrap();
+    a.wait(10, "idle", |s| s.session.is_none() && matches!(s.modem, ModemState::Listening | ModemState::Ready)).await;
+    // Mercury keys the teardown frame after DISCONNECTED: retry until the gate allows it.
+    let end = Instant::now() + Duration::from_secs(5);
+    while a.h.call(AppCommand::TuneSuggested { index: 0 }).await.is_err() {
+        assert!(Instant::now() < end, "Tune and listen still refused once idle");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    wait_freq(&t.ra, NEW_HZ, 10, "tuned to the suggestion").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn suggestion_never_sent_automatically() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let mut a = app(dir.path(), &net, 0, A, None).await;
+    a.h.call(AppCommand::SetBeacon { on: true }).await.unwrap();
+    a.h.call(AppCommand::SendBeaconNow).await.unwrap();
+    assert!(net.air_broadcast(1, suggestion(OTHER, A)));
+    assert!(a.event(10, is_suggested).await.is_some());
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    assert!(net.broadcast_log().iter().any(|(s, p)| *s == 0 && matches!(mcb::classify(p), Received::Beacon(_))));
+    assert_eq!(kind3_sent_by(&net, 0), 0, "no kind 3 without the command");
 }

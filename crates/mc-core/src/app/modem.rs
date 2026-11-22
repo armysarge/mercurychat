@@ -82,7 +82,10 @@ pub enum ModemCmd {
     /// Call CQ once. Carried out only by an idle modem; refused elsewhere.
     Cq,
     /// Send one wrapped payload on the broadcast port. Idle only, as `Cq`.
-    Broadcast(Vec<u8>),
+    Broadcast {
+        kind: BroadcastKind,
+        payload: Vec<u8>,
+    },
     /// The operator re-armed beacons. Retry a closed broadcast connection.
     ReopenBroadcast,
     /// Mercury's tuning carrier (M3b). Carried out while idle; `Off` also
@@ -264,7 +267,7 @@ async fn cut_short(cmds: &mut mpsc::Receiver<ModemCmd>, abortable: bool, r: &Rep
 async fn refuse_broadcast(r: &Reporter, cmd: &ModemCmd, why: GateRefusal) -> bool {
     let kind = match cmd {
         ModemCmd::Cq => BroadcastKind::Cq,
-        ModemCmd::Broadcast(_) => BroadcastKind::Beacon,
+        ModemCmd::Broadcast { kind, .. } => *kind,
         _ => return false,
     };
     r.send(ReportKind::BroadcastRefused { kind, reason: why.message() }).await;
@@ -880,7 +883,7 @@ async fn serve(
                 }
                 continue;
             }
-            Idle::Cmd(Some(ModemCmd::Broadcast(payload))) => {
+            Idle::Cmd(Some(ModemCmd::Broadcast { kind, payload })) => {
                 // The actor has gated it; checked again against what this
                 // modem itself knows.
                 let gate = broadcast_gate(idle(listening), false, Some(payload.len()), st.listen_mode());
@@ -891,7 +894,6 @@ async fn serve(
                         port.send(&payload).await.map_err(|e| format!("not sent: the broadcast port failed ({e})"))
                     }
                 };
-                let kind = BroadcastKind::Beacon;
                 match sent {
                     Ok(()) => r.send(ReportKind::BroadcastSubmitted(kind)).await,
                     Err(reason) => r.send(ReportKind::BroadcastRefused { kind, reason }).await,

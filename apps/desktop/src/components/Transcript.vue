@@ -56,7 +56,7 @@ function summary(q: Qso): string {
   return t("transcript.sys.sessionEnd", { freq, duration: duration(q.startUtc, end), bytes: t("transcript.sys.bytes", bytes) });
 }
 
-type Sys = { kind: "session-end" | "cq" | "beacon"; utc: string; key: string; text: string };
+type Sys = { kind: "session-end" | "cq" | "beacon" | "qsy"; utc: string; key: string; text: string };
 /** System rows for the open conversation, oldest first; none while filtering. */
 const sysRows = computed<Sys[]>(() => {
   if (!chat.open || props.filter?.trim()) return [];

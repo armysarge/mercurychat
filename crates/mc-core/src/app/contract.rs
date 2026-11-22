@@ -318,6 +318,17 @@ pub enum AppCommand {
     },
     /// The manual path's "Tuned": an acknowledgement only.
     QsyTuned,
+    /// Suggest a QSY to a heard station before any connection (M3c B5): 1 to
+    /// 3 frequency-list entries in one MCB/1 kind 3, through the CQ gate.
+    SuggestQsy {
+        to: String,
+        entry_ids: Vec<String>,
+    },
+    /// "Tune and listen" on the last suggestion addressed to us: the M3b rig
+    /// set, refused while busy (RIG-03).
+    TuneSuggested {
+        index: u8,
+    },
 }
 
 // Every float in a command is validated finite before use.
