@@ -35,4 +35,9 @@ band: string | null,
  * Mercury's telemetry when under 2 s old as that frame arrived. Mercury
  * has no slots: this is an offset, nothing more.
  */
-offsetHz: Reading<number> | null, };
+offsetHz: Reading<number> | null, 
+/**
+ * Name, QTH and status from its last MCB/1 kind 2 beacon (source
+ * `beacon`), kept for this modem only (M3c B7).
+ */
+name: Reading<string> | null, qth: Reading<string> | null, status: Reading<string> | null, };

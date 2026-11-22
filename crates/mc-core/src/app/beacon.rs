@@ -22,8 +22,9 @@
 
 use super::broadcast::{GateRefusal, NotConfirmedReason};
 use super::events::ModemState;
+use crate::profile::StationProfile;
 use mc_storage::{now_utc, StorageError, Store};
-use mch_protocol::beacon::{Beacon, CAP_CHAT};
+use mch_protocol::beacon::{listen_capacity, Beacon, ExtendedBeacon, Tlv, CAP_CHAT};
 use serde::Serialize;
 use std::time::Duration;
 use tokio::time::Instant;
@@ -340,19 +341,91 @@ impl BeaconScheduler {
 // ---- what the actor keeps around the scheduler ------------------------------
 
 /// A profile's stored beacon settings. The key scheme is
-/// `profile.{id}.beacon.{preferred|interval_min|include_grid}` in the shared
-/// settings table: the preference is shown and never applied by itself.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// `profile.{id}.beacon.{preferred|interval_min|include_grid|name|qth|status}`
+/// in the shared settings table: the preference is shown and never applied by itself.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BeaconPrefs {
     pub preferred: bool,
     pub interval_min: u32,
     pub include_grid: bool,
+    /// Carry the profile's name and QTH (M3c B7; kind 2 when any field is on).
+    pub name: bool,
+    pub qth: bool,
+    /// A status line of up to 40 bytes.
+    pub status: Option<String>,
 }
 
 impl Default for BeaconPrefs {
     fn default() -> Self {
-        BeaconPrefs { preferred: false, interval_min: DEFAULT_INTERVAL_MIN, include_grid: true }
+        BeaconPrefs {
+            preferred: false,
+            interval_min: DEFAULT_INTERVAL_MIN,
+            include_grid: true,
+            name: false,
+            qth: false,
+            status: None,
+        }
     }
+}
+
+/// The longest status line (B7).
+pub const STATUS_MAX: usize = 40;
+/// The longest name or QTH a beacon carries; a longer one is left out.
+const NAME_QTH_MAX: usize = 24;
+
+/// The fields a beacon with these settings carries for profile `p`. Name and
+/// QTH come from the profile and are left out (never cut) when over 24 bytes.
+fn tlvs(prefs: &BeaconPrefs, p: &StationProfile) -> Vec<Tlv> {
+    let field = |on: bool, v: &Option<String>| {
+        v.as_deref().map(str::trim).filter(|s| on && !s.is_empty() && s.len() <= NAME_QTH_MAX).map(String::from)
+    };
+    let status = prefs.status.as_deref().map(str::trim).filter(|s| !s.is_empty() && s.len() <= STATUS_MAX);
+    let mut out = Vec::new();
+    out.extend(field(prefs.name, &p.name).map(Tlv::Name));
+    out.extend(field(prefs.qth, &p.qth).map(Tlv::Qth));
+    out.extend(status.map(|s| Tlv::Status(s.to_string())));
+    out
+}
+
+/// The encoding with no capacity check.
+fn encoded(prefs: &BeaconPrefs, p: &StationProfile, seq: u32) -> Result<Vec<u8>, String> {
+    let grid = p.grid.as_deref().filter(|_| prefs.include_grid);
+    let beacon = Beacon::new(seq, &p.callsign, grid, CAP_CHAT).map_err(|e| format!("not sent: {e}"))?;
+    let fields = tlvs(prefs, p);
+    if fields.is_empty() {
+        return Ok(beacon.encode());
+    }
+    ExtendedBeacon::new(beacon, fields).map(|e| e.encode()).map_err(|e| format!("not sent: {e}"))
+}
+
+/// The next beacon's MCB/1 payload: kind 1 when no field is ticked, else
+/// kind 2, refused over the listen mode's capacity (B7). A mode with no
+/// known capacity is left to the broadcast gate, which refuses it.
+pub fn beacon_payload(prefs: &BeaconPrefs, p: &StationProfile, seq: u32, listen_mode: u8) -> Result<Vec<u8>, String> {
+    let bytes = encoded(prefs, p, seq)?;
+    if let Some(cap) = listen_capacity(listen_mode).filter(|cap| bytes.len() > *cap) {
+        return Err(format!("not sent: the beacon is {} bytes, over the listen mode's {cap}", bytes.len()));
+    }
+    Ok(bytes)
+}
+
+/// The listen mode's capacity less this beacon's length (negative: it does
+/// not fit). A mode with no known capacity counts as DATAC3, the one set at attach.
+pub fn bytes_left(prefs: &BeaconPrefs, p: &StationProfile, listen_mode: u8) -> i32 {
+    let cap = listen_capacity(listen_mode).or_else(|| listen_capacity(1)).unwrap_or(0) as i32;
+    cap - encoded(prefs, p, 0).map_or(i32::MAX / 2, |b| b.len() as i32)
+}
+
+/// What the beacon carries, with the bytes left at the current listen mode.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BeaconContentView {
+    pub include_grid: bool,
+    pub name: bool,
+    pub qth: bool,
+    pub status: Option<String>,
+    pub bytes_left: i32,
 }
 
 fn key(id: &str, name: &str) -> String {
@@ -376,7 +449,17 @@ impl BeaconPrefs {
                 .filter(|m| (MIN_INTERVAL_MIN..=MAX_INTERVAL_MIN).contains(m))
                 .unwrap_or(d.interval_min),
             include_grid: get("include_grid").map_or(d.include_grid, |v| v == "1"),
+            name: get("name").map_or(d.name, |v| v == "1"),
+            qth: get("qth").map_or(d.qth, |v| v == "1"),
+            status: get("status").filter(|s| !s.is_empty() && s.len() <= STATUS_MAX),
         }
+    }
+
+    /// The name, QTH and status choice, as one (B7).
+    pub fn save_fields(&self, store: &mut Store, id: &str) -> Result<(), StorageError> {
+        store.set_setting(&key(id, "name"), if self.name { "1" } else { "0" })?;
+        store.set_setting(&key(id, "qth"), if self.qth { "1" } else { "0" })?;
+        store.set_setting(&key(id, "status"), self.status.as_deref().unwrap_or(""))
     }
 
     pub fn save_preferred(store: &mut Store, id: &str, on: bool) -> Result<(), StorageError> {
@@ -393,7 +476,7 @@ impl BeaconPrefs {
 
     /// Drop a deleted profile's settings.
     pub fn forget(store: &mut Store, id: &str) {
-        for name in ["preferred", "interval_min", "include_grid"] {
+        for name in ["preferred", "interval_min", "include_grid", "name", "qth", "status"] {
             if let Err(e) = store.delete_setting(&key(id, name)) {
                 tracing::warn!("could not remove a beacon setting: {e}");
             }
@@ -452,9 +535,8 @@ impl BeaconState {
 
     /// The MCB/1 payload for the next beacon. The sequence number moves only
     /// when [`submitted`](Self::submitted) says one was actually sent.
-    pub fn payload(&self, callsign: &str, grid: Option<&str>) -> Result<Vec<u8>, String> {
-        let grid = grid.filter(|_| self.prefs.include_grid);
-        Beacon::new(self.seq, callsign, grid, CAP_CHAT).map(|b| b.encode()).map_err(|e| format!("not sent: {e}"))
+    pub fn payload(&self, p: &StationProfile, listen_mode: u8) -> Result<Vec<u8>, String> {
+        beacon_payload(&self.prefs, p, self.seq, listen_mode)
     }
 
     /// A beacon was handed to the modem.

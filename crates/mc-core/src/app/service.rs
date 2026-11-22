@@ -3,7 +3,10 @@
 //! refused at once rather than making the UI wait. Every state change is
 //! persisted first, then published as an event.
 
-use super::beacon::{BeaconPrefs, BeaconState, Tick, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD};
+use super::beacon::{
+    bytes_left, BeaconContentView, BeaconPrefs, BeaconState, Tick, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD,
+    STATUS_MAX,
+};
 use super::broadcast::{
     activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, NotConfirmedReason,
     Tracker,
@@ -37,6 +40,8 @@ use freq::FreqSide;
 use rig::RigSide;
 
 const ACTIVE_PROFILE: &str = "activeProfileId";
+/// The listen mode set at attach (MODE 1).
+const DATAC3: u8 = 1;
 /// The setting holding the interface language (`system` when absent).
 pub const UI_LANGUAGE_SETTING: &str = "ui.language";
 /// The values `ui.language` may hold. The UI maps `system` to the OS language.
@@ -606,10 +611,26 @@ impl App {
             AppCommand::SetBeaconInterval { minutes } => self.set_beacon_interval(minutes).map(|_| CommandOk::Done),
             AppCommand::SetBeaconContent { include_grid } => {
                 let id = self.beacon_profile()?;
+                let prefs = BeaconPrefs { include_grid, ..self.beacon.prefs.clone() };
+                self.beacon_fits(&prefs)?;
                 BeaconPrefs::save_include_grid(&mut self.store, &id, include_grid).map_err(storage)?;
                 self.beacon.prefs.include_grid = include_grid;
                 Ok(CommandOk::Done)
             }
+            AppCommand::SetBeaconFields { name, qth, status } => {
+                let id = self.beacon_profile()?;
+                let status = status.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                if status.as_ref().is_some_and(|s| s.len() > STATUS_MAX || s.chars().any(char::is_control)) {
+                    let why = format!("At most {STATUS_MAX} bytes, on one line");
+                    return Err(AppError::Validation { errors: chat::field("status", why) });
+                }
+                let prefs = BeaconPrefs { name, qth, status, ..self.beacon.prefs.clone() };
+                self.beacon_fits(&prefs)?;
+                prefs.save_fields(&mut self.store, &id).map_err(storage)?;
+                self.beacon.prefs = prefs;
+                self.beacon_content()
+            }
+            AppCommand::BeaconContent => self.beacon_content(),
             AppCommand::SendBeaconNow => self.send_beacon().map(|_| CommandOk::Done),
             AppCommand::Qsos { limit } => {
                 let rows = self.chat_store()?.qsos(limit.clamp(1, 500)).map_err(storage)?;
@@ -844,6 +865,29 @@ impl App {
         Ok(())
     }
 
+    /// The beacon these settings make, checked against the listen mode (B7).
+    fn beacon_fits(&self, prefs: &BeaconPrefs) -> Result<(), AppError> {
+        let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+        let left = bytes_left(prefs, &p, self.listen_mode.current().unwrap_or(DATAC3));
+        if left < 0 {
+            let why = format!("That beacon does not fit the listen mode: {} bytes over", -left);
+            return Err(AppError::Validation { errors: chat::field("beacon", why) });
+        }
+        Ok(())
+    }
+
+    fn beacon_content(&self) -> Result<CommandOk, AppError> {
+        let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+        let prefs = &self.beacon.prefs;
+        Ok(CommandOk::BeaconContent(BeaconContentView {
+            include_grid: prefs.include_grid,
+            name: prefs.name,
+            qth: prefs.qth,
+            status: prefs.status.clone(),
+            bytes_left: bytes_left(prefs, &p, self.listen_mode.current().unwrap_or(DATAC3)),
+        }))
+    }
+
     fn beacon_profile(&self) -> Result<String, AppError> {
         self.beacon.profile.clone().ok_or_else(|| conflict("no station is selected".into()))
     }
@@ -888,7 +932,9 @@ impl App {
     /// One beacon now, from the active profile, through the broadcast gate.
     fn send_beacon(&mut self) -> Result<(), AppError> {
         let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
-        let payload = match self.beacon.payload(&p.callsign, p.grid.as_deref()) {
+        // Without a known listen mode the gate refuses it anyway; DATAC3 is the one set at attach.
+        let mode = self.listen_mode.current().unwrap_or(DATAC3);
+        let payload = match self.beacon.payload(&p, mode) {
             Ok(payload) => payload,
             Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
         };

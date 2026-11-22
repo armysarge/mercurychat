@@ -3,7 +3,7 @@
 //! database directly (docs/02 §2, §7).
 
 use super::audio::AudioSettingsView;
-use super::beacon::BeaconStatus;
+use super::beacon::{BeaconContentView, BeaconStatus};
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::events::{ModemState, SessionInfo};
@@ -161,6 +161,16 @@ pub enum AppCommand {
     SetBeaconContent {
         include_grid: bool,
     },
+    /// What else the beacon carries (M3c B7): the profile's name and QTH, and
+    /// a status line of up to 40 bytes. Any of them makes it kind 2. Refused,
+    /// unsaved, when the beacon would not fit the listen mode.
+    SetBeaconFields {
+        name: bool,
+        qth: bool,
+        status: Option<String>,
+    },
+    /// The beacon's content and the bytes left at the current listen mode.
+    BeaconContent,
     /// Logbook records, newest first (at most 500).
     Qsos {
         limit: u32,
@@ -359,6 +369,7 @@ pub enum CommandOk {
     Macro(MacroDef),
     Expanded { text: String, missing: Vec<String> },
     Share(ShareConfig),
+    BeaconContent(BeaconContentView),
     Done,
 }
 

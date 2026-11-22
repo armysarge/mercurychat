@@ -848,3 +848,183 @@ mod refused {
         }
     }
 }
+
+/// M3c Task 11 (B7): the extended beacon (MCB/1 kind 2) and its heard fields.
+mod extended {
+    use mc_core::app::{beacon_payload, bytes_left, BeaconPrefs};
+    use mc_core::profile::StationProfile;
+    use mch_protocol::beacon::{self as mcb, listen_capacity, Received, Tlv};
+
+    const DATAC3: u8 = 1;
+
+    fn station() -> StationProfile {
+        let mut p = StationProfile::new_existing("ZS6ABC");
+        p.grid = Some("KG33xx".into());
+        p.name = Some("Pat".into());
+        p.qth = Some("Pretoria".into());
+        p
+    }
+
+    fn ticked(name: bool, qth: bool, status: Option<&str>) -> BeaconPrefs {
+        BeaconPrefs { name, qth, status: status.map(String::from), ..BeaconPrefs::default() }
+    }
+
+    #[test]
+    fn nothing_ticked_sends_kind1() {
+        let payload = beacon_payload(&BeaconPrefs::default(), &station(), 9, DATAC3).unwrap();
+        assert!(matches!(mcb::classify(&payload), Received::Beacon(_)), "{payload:?}");
+    }
+
+    #[test]
+    fn bytes_left_matches_encoded_len() {
+        for prefs in [ticked(false, false, None), ticked(true, false, None), ticked(true, true, Some("QRV 40m"))] {
+            let len = beacon_payload(&prefs, &station(), 1, DATAC3).unwrap().len() as i32;
+            assert_eq!(bytes_left(&prefs, &station(), DATAC3), listen_capacity(DATAC3).unwrap() as i32 - len);
+        }
+        assert!(bytes_left(&ticked(true, true, Some("QRV 40m")), &station(), 7) < 0, "over DATAC15's 27 bytes");
+    }
+
+    #[test]
+    fn long_profile_qth_left_out_of_beacon() {
+        let mut p = station();
+        // A profile QTH may hold 48 bytes; the beacon's TLV holds 24.
+        p.qth = Some("Q".repeat(25));
+        let payload = beacon_payload(&ticked(true, true, None), &p, 1, DATAC3).unwrap();
+        let Received::Extended(e) = mcb::classify(&payload) else { panic!("not kind 2") };
+        assert_eq!(e.tlvs, vec![Tlv::Name("Pat".into())], "left out, not truncated");
+    }
+
+    #[cfg(feature = "sim")]
+    mod service {
+        use super::*;
+        use mc_core::app::{spawn_app, AppCommand, AppError, AppEvent, AppHandle, AppOptions, CommandOk, ModemState};
+        use mc_core::profile::ModemTarget;
+        use mc_storage::Store;
+        use mch_protocol::beacon::{Beacon, ExtendedBeacon, CAP_CHAT};
+        use mercury_adapter::fake::FakeNet;
+        use mercury_adapter::fake_ws::FakeWs;
+        use std::path::Path;
+        use std::time::Duration;
+        use tokio::sync::broadcast::Receiver;
+        use tokio::time::Instant;
+
+        fn status_on_mode(listen_mode: u8) -> String {
+            format!(
+                r#"{{"type":"status","bitrate":0,"snr":0.0,"direction":"rx","tx_gain_db":0.0,"audio_ok":true,"audio_error":"","arq_tx_mode":"","arq_rx_mode":"","radio_frequency_hz":null,"radio_frequency_age_ms":null,"freq_offset_hz":0.0,"freq_offset_age_ms":0,"listen_mode":{listen_mode},"busy":""}}"#
+            )
+        }
+
+        async fn app(
+            root: &Path,
+            net: &FakeNet,
+            ws: Option<&FakeWs>,
+        ) -> (AppHandle, Receiver<mc_core::app::EventEnvelope>) {
+            let mut p = station();
+            p.modem = ModemTarget::Existing {
+                host: "127.0.0.1".into(),
+                control_port: net.a_base,
+                data_port: net.a_base + 1,
+                broadcast_port: Some(net.a_bcast),
+                telemetry_url: ws.map(|w| w.url.clone()),
+            };
+            let opts = AppOptions {
+                sim_root: Some(root.into()),
+                stations_root: Some(root.join("stations")),
+                ..AppOptions::default()
+            };
+            let h = spawn_app(Store::open_in_memory().unwrap(), opts);
+            let id = match h.call(AppCommand::SaveProfile { profile: p }).await.unwrap() {
+                CommandOk::Profile(p) => p.id,
+                other => panic!("{other:?}"),
+            };
+            let mut rx = h.subscribe();
+            h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+            loop {
+                let ev = tokio::time::timeout(Duration::from_secs(15), rx.recv()).await.expect("listening").unwrap();
+                if let AppEvent::ModemState { state: ModemState::Listening, .. } = ev.event {
+                    break;
+                }
+            }
+            (h, rx)
+        }
+
+        fn content(name: bool, qth: bool, status: Option<&str>) -> AppCommand {
+            AppCommand::SetBeaconFields { name, qth, status: status.map(String::from) }
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn ticked_fields_send_kind2() {
+            let dir = tempfile::tempdir().unwrap();
+            let net = FakeNet::start().await;
+            let (h, _rx) = app(dir.path(), &net, None).await;
+            h.call(content(true, true, Some("QRV 40m"))).await.unwrap();
+            h.call(AppCommand::SetBeacon { on: true }).await.unwrap();
+            h.call(AppCommand::SendBeaconNow).await.unwrap();
+            let end = Instant::now() + Duration::from_secs(10);
+            while net.broadcast_log().is_empty() {
+                assert!(Instant::now() < end, "no beacon went out");
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            let (_, payload) = net.broadcast_log().remove(0);
+            let Received::Extended(e) = mcb::classify(&payload) else { panic!("not kind 2: {payload:?}") };
+            let want = vec![Tlv::Name("Pat".into()), Tlv::Qth("Pretoria".into()), Tlv::Status("QRV 40m".into())];
+            assert_eq!(e.tlvs, want);
+            assert_eq!(e.beacon.callsign, "ZS6ABC");
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn selection_over_capacity_not_saved() {
+            let dir = tempfile::tempdir().unwrap();
+            let net = FakeNet::start().await;
+            let ws = FakeWs::start().await;
+            ws.set_status(Some(&status_on_mode(7))); // DATAC15: 27 bytes
+            let (h, _rx) = app(dir.path(), &net, Some(&ws)).await;
+            let end = Instant::now() + Duration::from_secs(10);
+            loop {
+                let s = match h.call(AppCommand::Snapshot).await.unwrap() {
+                    CommandOk::Snapshot(s) => s,
+                    other => panic!("{other:?}"),
+                };
+                if s.telemetry.listen_mode == Some(7) {
+                    break;
+                }
+                assert!(Instant::now() < end, "no DATAC15 from telemetry");
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            let e = h.call(content(true, true, Some("QRV 40m"))).await.unwrap_err();
+            assert!(matches!(e, AppError::Validation { .. }), "{e:?}");
+            match h.call(AppCommand::BeaconContent).await.unwrap() {
+                CommandOk::BeaconContent(c) => {
+                    assert_eq!((c.name, c.qth, c.status), (false, false, None), "not saved");
+                    assert!(c.bytes_left >= 0);
+                }
+                other => panic!("{other:?}"),
+            }
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn kind2_fills_heard_name_qth_status() {
+            let dir = tempfile::tempdir().unwrap();
+            let net = FakeNet::start().await;
+            let (_h, mut rx) = app(dir.path(), &net, None).await;
+            let b = Beacon::new(3, "ZS1XYZ", Some("JF96"), CAP_CHAT).unwrap();
+            let tlvs = vec![Tlv::Name("Sam".into()), Tlv::Qth("Cape Town".into()), Tlv::Status("QRV 20m".into())];
+            assert!(net.air_broadcast(1, ExtendedBeacon::new(b, tlvs).unwrap().encode()));
+            let end = Instant::now() + Duration::from_secs(10);
+            let station = loop {
+                let ev = tokio::time::timeout_at(end, rx.recv()).await.expect("heard").unwrap();
+                if let AppEvent::Heard { station } = ev.event {
+                    if station.callsign == "ZS1XYZ" {
+                        break station;
+                    }
+                }
+            };
+            let field =
+                |r: &Option<mc_core::app::Reading<String>>| r.as_ref().map(|r| (r.value.clone(), r.source.clone()));
+            assert_eq!(field(&station.name), Some(("Sam".into(), "beacon".into())));
+            assert_eq!(field(&station.qth), Some(("Cape Town".into(), "beacon".into())));
+            assert_eq!(field(&station.status), Some(("QRV 20m".into(), "beacon".into())));
+            assert_eq!(station.grid.as_deref(), Some("JF96"));
+        }
+    }
+}

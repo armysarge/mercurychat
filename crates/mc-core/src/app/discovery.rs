@@ -50,6 +50,7 @@ pub struct Reading<T> {
 // so equality is total.
 impl Eq for Reading<f32> {}
 impl Eq for Reading<u64> {}
+impl Eq for Reading<String> {}
 
 /// How a station was last heard.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
@@ -102,6 +103,11 @@ pub struct HeardStation {
     /// Mercury's telemetry when under 2 s old as that frame arrived. Mercury
     /// has no slots: this is an offset, nothing more.
     pub offset_hz: Option<Reading<f32>>,
+    /// Name, QTH and status from its last MCB/1 kind 2 beacon (source
+    /// `beacon`), kept for this modem only (M3c B7).
+    pub name: Option<Reading<String>>,
+    pub qth: Option<Reading<String>>,
+    pub status: Option<Reading<String>>,
 }
 
 /// One line of the activity log. `kind` is a short lowercase word: state,
@@ -170,7 +176,11 @@ fn station(r: HeardSummaryRow, offsets: &Offsets) -> HeardStation {
     });
     let band = freq.as_ref().and_then(|f| band_for(f.value)).map(String::from);
     let offset_hz = offsets.get(&r.callsign, &r.last_utc);
+    let fields = offsets.fields.get(&r.callsign).cloned().unwrap_or_default();
     HeardStation {
+        name: fields.name,
+        qth: fields.qth,
+        status: fields.status,
         freq,
         band,
         offset_hz,
@@ -201,35 +211,82 @@ fn unheard(callsign: &str, favourite: bool) -> HeardStation {
         freq: None,
         band: None,
         offset_hz: None,
+        name: None,
+        qth: None,
+        status: None,
     }
 }
 
 /// The carrier offset of the frame each station was last heard by, kept in
 /// memory for this modem only: (that observation's time, the offset).
 #[derive(Default)]
-pub struct Offsets(HashMap<String, (String, Reading<f32>)>);
+pub struct Offsets {
+    offsets: HashMap<String, (String, Reading<f32>)>,
+    /// Each station's last kind 2 fields (a kind 1 beacon clears them).
+    fields: HashMap<String, BeaconFields>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct BeaconFields {
+    name: Option<Reading<String>>,
+    qth: Option<Reading<String>>,
+    status: Option<Reading<String>>,
+}
 
 impl Offsets {
     /// The offset of `callsign`'s observation at `observed_utc`, if it had one.
     fn get(&self, callsign: &str, observed_utc: &str) -> Option<Reading<f32>> {
-        self.0.get(callsign).filter(|(at, _)| at == observed_utc).map(|(_, r)| r.clone())
+        self.offsets.get(callsign).filter(|(at, _)| at == observed_utc).map(|(_, r)| r.clone())
     }
 
     /// Record (or, with `None`, clear) the offset of `callsign`'s newest
     /// observation. The oldest entry makes way when the map is full.
     fn set(&mut self, callsign: &str, observed_utc: &str, offset: Option<Reading<f32>>) {
         let Some(mut r) = offset else {
-            self.0.remove(callsign);
+            self.offsets.remove(callsign);
             return;
         };
-        if self.0.len() >= OFFSETS_KEPT && !self.0.contains_key(callsign) {
-            let oldest = self.0.iter().min_by(|a, b| a.1 .0.cmp(&b.1 .0)).map(|(k, _)| k.clone());
+        if self.offsets.len() >= OFFSETS_KEPT && !self.offsets.contains_key(callsign) {
+            let oldest = self.offsets.iter().min_by(|a, b| a.1 .0.cmp(&b.1 .0)).map(|(k, _)| k.clone());
             if let Some(k) = oldest {
-                self.0.remove(&k);
+                self.offsets.remove(&k);
             }
         }
         r.at_utc = observed_utc.to_string();
-        self.0.insert(callsign.to_string(), (observed_utc.to_string(), r));
+        self.offsets.insert(callsign.to_string(), (observed_utc.to_string(), r));
+    }
+
+    /// What `callsign`'s beacon heard at `at_utc` carried; the oldest
+    /// station makes way when the map is full.
+    fn set_fields(&mut self, callsign: &str, at_utc: &str, tlvs: &[beacon::Tlv]) {
+        let reading =
+            |v: &str| Reading { value: v.to_string(), source: "beacon".into(), at_utc: at_utc.into(), age_ms: None };
+        let mut f = BeaconFields::default();
+        for t in tlvs {
+            match t {
+                beacon::Tlv::Name(v) => f.name = Some(reading(v)),
+                beacon::Tlv::Qth(v) => f.qth = Some(reading(v)),
+                beacon::Tlv::Status(v) => f.status = Some(reading(v)),
+                beacon::Tlv::Unknown(..) => {}
+            }
+        }
+        if f.name.is_none() && f.qth.is_none() && f.status.is_none() {
+            self.fields.remove(callsign);
+            return;
+        }
+        if self.fields.len() >= OFFSETS_KEPT && !self.fields.contains_key(callsign) {
+            let oldest = self
+                .fields
+                .iter()
+                .min_by_key(|(_, f)| {
+                    [&f.name, &f.qth, &f.status].iter().find_map(|r| r.as_ref().map(|r| r.at_utc.clone()))
+                })
+                .map(|(k, _)| k.clone());
+            if let Some(k) = oldest {
+                self.fields.remove(&k);
+            }
+        }
+        self.fields.insert(callsign.to_string(), f);
     }
 }
 
@@ -511,14 +568,8 @@ impl Discovery {
         match beacon::classify(&f.payload) {
             // A kind 2 beacon is heard by its kind 1 fields here; its TLV
             // fields come in with the extended beacon (M3c Task 11).
-            Received::Beacon(b) | Received::Extended(beacon::ExtendedBeacon { beacon: b, .. }) => {
-                let call = match self.callsign(&b.callsign, "beacon") {
-                    Ok(c) => c,
-                    Err(evs) => return evs,
-                };
-                let row = HeardRow { grid: b.grid, caps: Some(i64::from(b.caps)), ..row(&call, "beacon") };
-                self.record(store, row, "beacon", tuning)
-            }
+            Received::Beacon(b) => self.beacon(store, b, &[], tuning),
+            Received::Extended(e) => self.beacon(store, e.beacon, &e.tlvs, tuning),
             // Heard traffic from its sender, whoever it is for; the
             // addressee's card is the service's (M3c B5).
             Received::Qsy(q) => {
@@ -536,6 +587,30 @@ impl Discovery {
             Received::Foreign => {
                 self.unsupported(format!("another application's broadcast ({} bytes)", f.payload.len()))
             }
+        }
+    }
+
+    /// A kind 1 or kind 2 beacon: heard by its kind 1 fields, with the
+    /// kind 2 fields kept alongside.
+    fn beacon(
+        &mut self,
+        store: Option<&mut Store>,
+        b: beacon::Beacon,
+        tlvs: &[beacon::Tlv],
+        tuning: &Tuning,
+    ) -> Vec<AppEvent> {
+        let call = match self.callsign(&b.callsign, "beacon") {
+            Ok(c) => c,
+            Err(evs) => return evs,
+        };
+        let row = HeardRow { grid: b.grid, caps: Some(i64::from(b.caps)), ..row(&call, "beacon") };
+        let Some(store) = store else { return Vec::new() };
+        match self.insert(store, row, tuning) {
+            Some(row) => {
+                self.offsets.set_fields(&row.callsign, &row.observed_utc, tlvs);
+                self.heard(store, &row.callsign, "beacon")
+            }
+            None => Vec::new(),
         }
     }
 

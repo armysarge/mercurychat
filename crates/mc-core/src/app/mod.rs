@@ -23,8 +23,8 @@ mod telemetry;
 pub use crate::macros::{expand, Expanded, MacroContext, MacroDef};
 pub use audio::{AudioDeviceView, AudioSettingsView};
 pub use beacon::{
-    BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus, ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN,
-    MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD,
+    beacon_payload, bytes_left, BeaconContentView, BeaconPrefs, BeaconScheduler, BeaconState, BeaconStatus,
+    ChannelState, Tick, BUSY_HOLD, DEFAULT_INTERVAL_MIN, MAX_INTERVAL_MIN, MIN_INTERVAL_MIN, SILENT_HOLD,
 };
 pub use broadcast::{
     broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, NotConfirmedReason, TRANSMIT_WINDOW,
