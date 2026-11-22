@@ -106,7 +106,8 @@ async fn old_peer_never_receives_new_frames() {
     let (net, mut a, mut b) = pair(dir.path(), 0, &["chat", "file"]).await;
     let (minor, caps) = a.negotiated().await;
     assert_eq!(minor, 0, "the peer's minor is recorded, not ours");
-    assert_eq!(caps, ["chat", "file"]);
+    // M4: the old "file" is not ours any more (file/2 is).
+    assert_eq!(caps, ["chat"]);
     b.negotiated().await;
 
     net.set_hold_from(0, true);
@@ -147,9 +148,9 @@ async fn negotiated_caps_are_the_intersection() {
     let dir = tempfile::tempdir().unwrap();
     let (_net, mut a, mut b) = pair(dir.path(), 1, &["chat", "file", "info/1", "future/9"]).await;
     let (minor, caps) = a.negotiated().await;
-    assert_eq!((minor, caps), (1, vec!["chat".to_string(), "file".into(), "info/1".into()]));
+    assert_eq!((minor, caps), (1, vec!["chat".to_string(), "info/1".into()]));
     let (_, caps) = b.negotiated().await;
-    assert_eq!(caps, ["chat", "file", "info/1"]);
+    assert_eq!(caps, ["chat", "info/1"]);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -179,4 +180,39 @@ async fn unnegotiated_frame_ends_session() {
     net.inject(0, encode(&raw).unwrap());
     let end = tokio::time::timeout(Duration::from_secs(10), b.end).await.expect("B's session ended").unwrap();
     assert!(matches!(end, SessionEnd::Protocol(_)), "{end:?}");
+}
+
+/// M4 C1: a minor-1 peer (no file/2) is refused before the wire and never
+/// receives 0x20..=0x26.
+#[tokio::test(flavor = "multi_thread")]
+async fn minor1_peer_never_receives_file_frames() {
+    let dir = tempfile::tempdir().unwrap();
+    let (net, mut a, mut b) = pair(dir.path(), 1, &["chat", "file", "qsy/1", "info/1"]).await;
+    a.negotiated().await;
+    b.negotiated().await;
+    let src = dir.path().join("note.txt");
+    std::fs::write(&src, b"hello over the air").unwrap();
+    net.set_hold_from(0, true);
+    a.cmds.send(SessionCommand::SendFile { path: src, opts: Default::default() }).await.unwrap();
+    let r = a
+        .next("FileRejected", |e| matches!(e, SessionEvent::FileRejected { .. } | SessionEvent::FileFailed { .. }))
+        .await;
+    assert!(
+        matches!(&r, SessionEvent::FileRejected { reason, .. } if reason == "not supported by this station"),
+        "{r:?}"
+    );
+    a.cmds.send(SessionCommand::SendChat { id: ObjectId([5; 16]), text: "chat still goes".into() }).await.unwrap();
+    a.next("ChatSubmitted", |e| matches!(e, SessionEvent::ChatSubmitted { .. })).await;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+    while net.held_len() == 0 {
+        assert!(tokio::time::Instant::now() < deadline, "A sent nothing");
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    let bytes: Vec<u8> = net.take_held().iter().flat_map(|(_, b)| b.clone()).collect();
+    let mut d = Decoder::new();
+    d.push(&bytes);
+    while let Some(f) = d.next_frame().unwrap() {
+        assert!(!(0x20..=0x26).contains(&(f.ftype as u8)), "a file frame reached the minor-1 peer: {:?}", f.ftype);
+    }
 }

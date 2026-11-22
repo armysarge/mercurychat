@@ -24,11 +24,13 @@ use std::fmt;
 pub const MAGIC: [u8; 4] = *b"MCH1";
 pub const MAJOR: u8 = 1;
 /// Highest minor version this implementation speaks (1: QSY and info, M3c B1-B2).
-pub const MINOR: u8 = 1;
+pub const MINOR: u8 = 2;
 /// HELLO capability for QSY_PROPOSE / QSY_ANSWER.
 pub const CAP_QSY: &str = "qsy/1";
 /// HELLO capability for INFO_REQUEST / INFO_RESPONSE.
 pub const CAP_INFO: &str = "info/1";
+/// Files with an encoding and a wire size (minor 2, M4 C1): 0x20..=0x26.
+pub const CAP_FILE: &str = "file/2";
 pub const HEADER_LEN: usize = 28;
 /// Absolute payload ceiling before any allocation.
 pub const MAX_PAYLOAD: usize = 8192;
@@ -106,6 +108,7 @@ impl FrameType {
         match self {
             QsyPropose | QsyAnswer => Some(CAP_QSY),
             InfoRequest | InfoResponse => Some(CAP_INFO),
+            FileOffer | FileAccept | FileReject | FileChunk | FileEnd | FileReceipt | FileCancel => Some(CAP_FILE),
             _ => None,
         }
     }
@@ -299,8 +302,8 @@ mod tests {
     }
 
     #[test]
-    fn minor_is_1() {
-        assert_eq!(MINOR, 1);
+    fn minor_is_2() {
+        assert_eq!(MINOR, 2);
     }
 
     #[test]
@@ -312,20 +315,11 @@ mod tests {
         for t in [InfoRequest, InfoResponse] {
             assert_eq!(t.capability(), Some(CAP_INFO));
         }
-        for t in [
-            Hello,
-            HelloAck,
-            Chat,
-            ChatReceipt,
-            FileOffer,
-            FileAccept,
-            FileReject,
-            FileChunk,
-            FileEnd,
-            FileReceipt,
-            FileCancel,
-            Error,
-        ] {
+        // M4 C1: files need file/2.
+        for t in [FileOffer, FileAccept, FileReject, FileChunk, FileEnd, FileReceipt, FileCancel] {
+            assert_eq!(t.capability(), Some(CAP_FILE), "{t:?}");
+        }
+        for t in [Hello, HelloAck, Chat, ChatReceipt, Error] {
             assert_eq!(t.capability(), None, "{t:?}");
         }
         assert_eq!((CAP_QSY, CAP_INFO), ("qsy/1", "info/1"));

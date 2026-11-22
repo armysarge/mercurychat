@@ -110,7 +110,15 @@ pub fn chat_text(f: &Frame) -> Result<String, ProtocolError> {
     String::from_utf8(f.payload.clone()).map_err(|_| bad("chat is not valid UTF-8"))
 }
 
-/// FILE_OFFER (0x20).
+/// How a file's bytes travel (minor 2, M4 C1).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Encoding {
+    Zstd,
+}
+
+/// FILE_OFFER (0x20). `size` and `sha256` are the file as it lands on disk;
+/// `wire_size` is what the chunks carry (minor 2, M4 C1).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct FileOffer {
@@ -120,6 +128,9 @@ pub struct FileOffer {
     pub sha256: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mime: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<Encoding>,
+    pub wire_size: u64,
 }
 
 impl FileOffer {
@@ -133,6 +144,12 @@ impl FileOffer {
         }
         if let Some(m) = &self.mime {
             check_len("mime", m, 127)?;
+        }
+        if self.wire_size == 0 {
+            return Err(bad("wire_size must be at least 1"));
+        }
+        if self.encoding.is_none() && self.wire_size != self.size {
+            return Err(bad("without an encoding, wire_size equals size"));
         }
         Ok(())
     }
@@ -483,7 +500,14 @@ mod tests {
 
     #[test]
     fn offer_hash_must_be_lowercase_hex() {
-        let o = FileOffer { name: "a.bin".into(), size: 1, sha256: "A".repeat(64), mime: None };
+        let o = FileOffer {
+            name: "a.bin".into(),
+            size: 1,
+            sha256: "A".repeat(64),
+            mime: None,
+            encoding: None,
+            wire_size: 1,
+        };
         assert!(o.validate().is_err());
     }
 
@@ -555,5 +579,41 @@ mod tests {
         let f = chunk_frame(ObjectId::ZERO, 4096, &[0xC0, 0xDB]).unwrap();
         let (o, d) = parse_chunk(&f).unwrap();
         assert_eq!((o, d), (4096, &[0xC0u8, 0xDB][..]));
+    }
+
+    // --- M4 C1: minor-2 offers ---
+
+    fn offer(encoding: Option<Encoding>, size: u64, wire_size: u64) -> FileOffer {
+        FileOffer {
+            name: "a.txt".into(),
+            size,
+            sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+            mime: None,
+            encoding,
+            wire_size,
+        }
+    }
+
+    #[test]
+    fn offer_plain_wire_size_must_equal_size() {
+        assert!(offer(None, 10, 10).to_frame(ObjectId::ZERO).is_ok());
+        assert!(offer(None, 10, 9).to_frame(ObjectId::ZERO).is_err());
+        assert!(offer(Some(Encoding::Zstd), 10, 4).to_frame(ObjectId::ZERO).is_ok());
+        assert!(offer(Some(Encoding::Zstd), 10, 0).to_frame(ObjectId::ZERO).is_err(), "wire_size at least 1");
+    }
+
+    #[test]
+    fn unknown_encoding_rejected() {
+        let json = br#"{"name":"a","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad","encoding":"gzip","wire_size":2}"#;
+        let f = Frame::new(FrameType::FileOffer, ObjectId::ZERO, json.to_vec());
+        assert!(FileOffer::from_frame(&f).is_err());
+    }
+
+    #[test]
+    fn offer_without_wire_size_rejected() {
+        let json =
+            br#"{"name":"a","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}"#;
+        let f = Frame::new(FrameType::FileOffer, ObjectId::ZERO, json.to_vec());
+        assert!(FileOffer::from_frame(&f).is_err(), "the minor-0 shape is not a minor-2 offer");
     }
 }

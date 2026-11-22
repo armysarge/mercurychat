@@ -35,13 +35,29 @@ fn vectors() -> Vec<(&'static str, Frame)> {
         ("chat_utf8_multiline", chat_frame(id, "73 ✓\r\nline two\nÅß€😀").unwrap()),
         ("chat_empty", chat_frame(id, "").unwrap()),
         ("chat_receipt", Frame::empty(FrameType::ChatReceipt, id)),
+        // Minor 2 (M4 C1): the wire size, and the encoding when compressed.
         (
-            "file_offer",
+            "file_offer_plain",
             FileOffer {
                 name: "log.adi".into(),
                 size: 3,
                 sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
                 mime: Some("text/plain".into()),
+                encoding: None,
+                wire_size: 3,
+            }
+            .to_frame(id)
+            .unwrap(),
+        ),
+        (
+            "file_offer_zstd",
+            FileOffer {
+                name: "notes.txt".into(),
+                size: 2048,
+                sha256: "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".into(),
+                mime: None,
+                encoding: Some(Encoding::Zstd),
+                wire_size: 611,
             }
             .to_frame(id)
             .unwrap(),

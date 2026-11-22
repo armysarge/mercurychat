@@ -37,9 +37,14 @@ pub struct SessionConfig {
     pub capabilities: Vec<String>,
 }
 
-/// What this version announces in HELLO: chat, files, QSY and info (M3c B1).
+/// What this version announces in HELLO: chat, files (`file/2`, M4 C1), QSY
+/// and info (M3c B1). The old `file` is not announced: no build before M4
+/// could accept a file.
 pub fn default_capabilities() -> Vec<String> {
-    ["chat", "file", mch_protocol::CAP_QSY, mch_protocol::CAP_INFO].iter().map(|c| c.to_string()).collect()
+    ["chat", mch_protocol::CAP_FILE, mch_protocol::CAP_QSY, mch_protocol::CAP_INFO]
+        .iter()
+        .map(|c| c.to_string())
+        .collect()
 }
 
 /// A minor-1 message to or from the peer; each goes on the wire only when
@@ -558,6 +563,11 @@ impl<'a> Session<'a> {
                 }
             }
             SessionCommand::SendFile { path, opts } => {
+                if !self.negotiated(FrameType::FileOffer) {
+                    let reason = "not supported by this station".to_string();
+                    self.emit(SessionEvent::FileRejected { id: ObjectId::random(), reason });
+                    return;
+                }
                 self.queued_files.push_back((path, opts));
                 self.start_next_file().await;
             }
@@ -614,7 +624,7 @@ impl<'a> Session<'a> {
         if opts.corrupt_declared_hash {
             sha = hex::encode(Sha256::digest(b"not the file"));
         }
-        let offer = FileOffer { name: name.clone(), size, sha256: sha, mime: None };
+        let offer = FileOffer { name: name.clone(), size, sha256: sha, mime: None, encoding: None, wire_size: size };
         let Ok(frame) = offer.to_frame(id) else { return };
         let peer = self.cfg.peer_call.clone();
         let _ = self.store.upsert_transfer(&peer, "out", &id.0, &name, size, &real_sha, "offered");
