@@ -27,6 +27,24 @@ pub const PEER_EVERY: Duration = Duration::from_secs(60);
 /// The gap between SIM1's CQ and its beacon, so each is heard on its own.
 const PEER_GAP: Duration = Duration::from_secs(2);
 
+/// What SIM1 is like. The app reads it from the environment
+/// (`SimPeer::from_env`); tests set it directly.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct SimPeer {
+    /// `MC_SIM_PEER_MINOR0=1`: an older MercuryChat (MCH/1 minor 0, no `file/2`).
+    pub minor0: bool,
+    /// `MC_SIM_PEER_OFFERS=1`: SIM1 offers `notes.txt` 5 s after a session
+    /// starts and, once that ends, a 640-px photo.
+    pub offers: bool,
+}
+
+impl SimPeer {
+    pub fn from_env() -> SimPeer {
+        let on = |k: &str| std::env::var_os(k).is_some_and(|v| v == "1");
+        SimPeer { minor0: on("MC_SIM_PEER_MINOR0"), offers: on("MC_SIM_PEER_OFFERS") }
+    }
+}
+
 pub struct SimModem {
     pub net: Arc<FakeNet>,
     pub peer_callsign: String,
@@ -45,21 +63,31 @@ impl Drop for SimModem {
 }
 
 impl SimModem {
-    /// Start the pair: our station in `station_dir`, `SIM1` in `peer_dir`.
+    /// Start the pair: our station in `station_dir`, `SIM1` in `peer_dir`,
+    /// SIM1 as the environment says.
     pub async fn start(station_dir: &Path, peer_dir: &Path, callsign: &str) -> Result<SimModem, StationError> {
+        Self::start_with(station_dir, peer_dir, callsign, SimPeer::from_env()).await
+    }
+
+    pub async fn start_with(
+        station_dir: &Path,
+        peer_dir: &Path,
+        callsign: &str,
+        sim_peer: SimPeer,
+    ) -> Result<SimModem, StationError> {
         let ours = Callsign::parse(callsign).map_err(|e| StationError::Wrong(e.to_string()))?;
         let net = FakeNet::start().await;
         let peer_call = Callsign::parse(PEER_CALLSIGN).expect("valid simulator callsign");
         let mut cfg = StationConfig::defaults(peer_call, Endpoint::base("127.0.0.1", net.b_base), peer_dir);
-        // MC_SIM_PEER_MINOR0=1: SIM1 is an older MercuryChat (MCH/1 minor 0, chat and file only).
-        if std::env::var_os("MC_SIM_PEER_MINOR0").is_some_and(|v| v == "1") {
+        // An older MercuryChat: MCH/1 minor 0, chat and the never-wired `file`.
+        if sim_peer.minor0 {
             cfg.proto_minor = 0;
             cfg.capabilities = vec!["chat".into(), "file".into()];
         }
         let mut peer = Station::open(cfg)?;
         peer.attach().await?;
         peer.set_listen(true).await?;
-        let peer = tokio::spawn(serve_peer(peer, true, None)).abort_handle();
+        let peer = tokio::spawn(serve_peer_with(peer, true, None, sim_peer.offers)).abort_handle();
         let mut station =
             Station::open(StationConfig::defaults(ours, Endpoint::base("127.0.0.1", net.a_base), station_dir))?;
         station.attach().await?;
@@ -128,6 +156,52 @@ fn peer_reply(m: &PeerMsg) -> Option<PeerMsg> {
     }
 }
 
+/// SIM1 answers a file offer after this, like an operator would.
+pub const PEER_ACCEPT_AFTER: Duration = Duration::from_secs(2);
+/// With offers on, SIM1 offers its first file this long into a session.
+pub const PEER_OFFER_AFTER: Duration = Duration::from_secs(5);
+
+/// The text SIM1 offers: about 2 KB of made-up station notes.
+fn sim_notes() -> Vec<u8> {
+    let mut out = String::from("SIM1 station notes (simulator, made up)\n\n");
+    let lines = [
+        "Antenna: a wire dipole at 10 m, fed with ladder line.",
+        "Rig: 100 W HF transceiver, USB data, ALC kept at zero.",
+        "Mercury: BW2300 by day, BW500 when the band is poor.",
+        "Schedule: 40 m in the evening, 20 m at midday.",
+        "Notes: thanks for the QSO, 73 and good DX.",
+    ];
+    let mut i = 0;
+    while out.len() < 2000 {
+        out.push_str(&format!("{:02}. {}\n", i + 1, lines[i % lines.len()]));
+        i += 1;
+    }
+    out.into_bytes()
+}
+
+/// The photo SIM1 offers: a 640 x 480 gradient made here, as JPEG (no
+/// camera, no metadata, nobody's picture).
+fn sim_photo() -> Vec<u8> {
+    let img = image::RgbImage::from_fn(640, 480, |x, y| {
+        image::Rgb([(x * 255 / 639) as u8, (y * 255 / 479) as u8, (((x + y) * 255) / 1118) as u8])
+    });
+    let mut out = Vec::new();
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80)
+        .encode_image(&img)
+        .expect("a JPEG encodes in memory");
+    out
+}
+
+/// Write `bytes` as `name` under SIM1's own folder and prepare it to send.
+fn sim_prepare(peer: &Station, name: &str, bytes: &[u8]) -> Option<crate::files::Prepared> {
+    let dir = peer.cfg.data_dir.join("sim-src");
+    std::fs::create_dir_all(&dir).ok()?;
+    let src = dir.join(name);
+    std::fs::write(&src, bytes).ok()?;
+    let p = crate::files::prepare(&src, crate::files::PhotoSize::Original, &peer.tmp_dir(), 1 << 20);
+    p.map_err(|e| tracing::warn!("SIM1 could not prepare {name}: {e:?}")).ok()
+}
+
 /// A chat a peer station stored: (sender, id, text).
 pub type Received = (String, ObjectId, String);
 
@@ -136,7 +210,19 @@ pub type Received = (String, ObjectId, String);
 /// new chat is reported on `received` once it has been stored (its receipt
 /// is already on the way); with `echo`, it is answered with `echo: {text}`.
 /// Returns when the modem's control connection is gone.
-pub async fn serve_peer(mut peer: Station, echo: bool, received: Option<mpsc::UnboundedSender<Received>>) {
+pub async fn serve_peer(peer: Station, echo: bool, received: Option<mpsc::UnboundedSender<Received>>) {
+    serve_peer_with(peer, echo, received, false).await
+}
+
+/// As `serve_peer`; every file offered is accepted after
+/// `PEER_ACCEPT_AFTER`, and with `offers` SIM1 offers its own two files
+/// in each session (M4).
+pub async fn serve_peer_with(
+    mut peer: Station,
+    echo: bool,
+    received: Option<mpsc::UnboundedSender<Received>>,
+    offers: bool,
+) {
     loop {
         let info = match peer.wait_incoming(Duration::from_secs(3600)).await {
             Ok(info) => info,
@@ -154,8 +240,48 @@ pub async fn serve_peer(mut peer: Station, echo: bool, received: Option<mpsc::Un
         let (_req_tx, mut req_rx) = mpsc::channel(1);
         let (ev_tx, mut ev_rx) = mpsc::unbounded_channel();
         let from = info.peer.clone();
+        let notes = offers.then(|| sim_prepare(&peer, "notes.txt", &sim_notes())).flatten();
+        let photo = offers.then(|| sim_prepare(&peer, "photo.jpg", &sim_photo())).flatten();
         let watch = async {
+            // SIM1's own offers: the notes first, the photo once they end.
+            let mut notes = notes;
+            let mut photo = photo;
+            let mut offered: Option<ObjectId> = None;
             while let Some(ev) = ev_rx.recv().await {
+                match &ev {
+                    SessionEvent::Negotiated { caps, .. } if caps.iter().any(|c| c == mch_protocol::CAP_FILE) => {
+                        if let Some(prepared) = notes.take() {
+                            let id = ObjectId::random();
+                            offered = Some(id);
+                            let tx = cmd_tx.clone();
+                            tokio::spawn(async move {
+                                tokio::time::sleep(PEER_OFFER_AFTER).await;
+                                let _ = tx.send(SessionCommand::SendFile { id, prepared }).await;
+                            });
+                        }
+                    }
+                    SessionEvent::FileOffered { id, .. } => {
+                        let (tx, id) = (cmd_tx.clone(), *id);
+                        tokio::spawn(async move {
+                            tokio::time::sleep(PEER_ACCEPT_AFTER).await;
+                            let _ = tx.send(SessionCommand::AcceptFile { id }).await;
+                        });
+                    }
+                    SessionEvent::FileDelivered { id }
+                    | SessionEvent::FileRejected { id, .. }
+                    | SessionEvent::FileFailed { id, .. }
+                    | SessionEvent::FileCancelled { id, .. }
+                        if offered == Some(*id) =>
+                    {
+                        offered = None;
+                        if let Some(prepared) = photo.take() {
+                            let id = ObjectId::random();
+                            offered = Some(id);
+                            let _ = cmd_tx.send(SessionCommand::SendFile { id, prepared }).await;
+                        }
+                    }
+                    _ => {}
+                }
                 if let SessionEvent::Peer(m) = &ev {
                     if let Some(reply) = peer_reply(m) {
                         let _ = cmd_tx.send(SessionCommand::Peer(reply)).await;

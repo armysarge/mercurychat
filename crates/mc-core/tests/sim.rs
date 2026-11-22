@@ -285,3 +285,123 @@ async fn sim_rig_settings_show_the_sim_rig_and_test_it() {
     assert_eq!(steps.len(), 6);
     assert!(steps.iter().all(|s| s.ok == Some(true)), "{steps:?}");
 }
+
+// ---- M4 Task 10: files on the simulator -----------------------------------
+
+use mc_core::files::{prepare, PhotoSize};
+use mc_core::sim::SimPeer;
+use mc_core::{SessionCommand, SessionEvent};
+use mch_protocol::ObjectId;
+use mercury_adapter::Callsign;
+use tokio::sync::mpsc;
+
+/// Our station on the simulator calls SIM1 and runs the session.
+struct SimSession {
+    _sim: tokio::task::JoinHandle<()>,
+    cmds: mpsc::Sender<SessionCommand>,
+    events: mpsc::UnboundedReceiver<SessionEvent>,
+    dir: std::path::PathBuf,
+}
+
+impl SimSession {
+    async fn start(dir: &std::path::Path, peer: SimPeer) -> (SimSession, Vec<String>) {
+        let mut sim = SimModem::start_with(&dir.join("station"), &dir.join("peer"), "ZS6ABC", peer).await.unwrap();
+        let info = sim.station.call(&Callsign::parse("SIM1").unwrap(), Duration::from_secs(10)).await.unwrap();
+        let (cmds, mut cmd_rx) = mpsc::channel(16);
+        let (ev_tx, mut events) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            let (_req_tx, mut req_rx) = mpsc::channel(4);
+            sim.station.run_session(&info, &mut cmd_rx, &mut req_rx, ev_tx).await;
+            drop(sim);
+        });
+        let caps = loop {
+            match tokio::time::timeout(Duration::from_secs(10), events.recv()).await.expect("negotiated") {
+                Some(SessionEvent::Negotiated { caps, .. }) => break caps,
+                Some(_) => {}
+                None => panic!("the session ended"),
+            }
+        };
+        (SimSession { _sim: task, cmds, events, dir: dir.to_path_buf() }, caps)
+    }
+
+    async fn next(&mut self, secs: u64, what: &str, pred: impl Fn(&SessionEvent) -> bool) -> SessionEvent {
+        let end = tokio::time::Instant::now() + Duration::from_secs(secs);
+        loop {
+            match tokio::time::timeout_at(end, self.events.recv()).await {
+                Ok(Some(e)) if pred(&e) => return e,
+                Ok(Some(_)) => {}
+                Ok(None) => panic!("waiting for {what}: the session ended"),
+                Err(_) => panic!("no {what} within {secs} s"),
+            }
+        }
+    }
+
+    async fn send_file(&self, name: &str, bytes: &[u8]) -> ObjectId {
+        let src = self.dir.join(name);
+        std::fs::write(&src, bytes).unwrap();
+        let prepared = prepare(&src, PhotoSize::Original, &self.dir.join("tmp"), 1 << 20).unwrap();
+        let id = ObjectId::random();
+        self.cmds.send(SessionCommand::SendFile { id, prepared }).await.unwrap();
+        id
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sim_peer_accepts_a_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, _) = SimSession::start(dir.path(), SimPeer::default()).await;
+    let t = tokio::time::Instant::now();
+    let id = s.send_file("hello.txt", &b"hello SIM1, 73\n".repeat(50)).await;
+    let done = s
+        .next(15, "FileDelivered", |e| {
+            matches!(
+                e,
+                SessionEvent::FileDelivered { .. }
+                    | SessionEvent::FileRejected { .. }
+                    | SessionEvent::FileFailed { .. }
+            )
+        })
+        .await;
+    assert_eq!(done, SessionEvent::FileDelivered { id });
+    assert!(t.elapsed() >= Duration::from_secs(2), "SIM1 answers after about 2 s, like an operator");
+    assert!(dir.path().join("peer").join("files").join("hello.txt").exists(), "SIM1 saved it");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn sim_peer_offers_when_asked() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, _) = SimSession::start(dir.path(), SimPeer { offers: true, ..SimPeer::default() }).await;
+    for (name, check) in [("notes.txt", 0usize), ("photo.jpg", 1)] {
+        let o = s.next(20, "FileOffered", |e| matches!(e, SessionEvent::FileOffered { .. })).await;
+        let SessionEvent::FileOffered { id, name: got, .. } = o else { unreachable!() };
+        assert_eq!(got, name);
+        s.cmds.send(SessionCommand::AcceptFile { id }).await.unwrap();
+        let r = s
+            .next(20, "FileReceived", |e| {
+                matches!(e, SessionEvent::FileReceived { .. } | SessionEvent::FileFailed { .. })
+            })
+            .await;
+        let SessionEvent::FileReceived { path, .. } = r else { panic!("{r:?}") };
+        let bytes = std::fs::read(&path).unwrap();
+        if check == 0 {
+            assert!((1500..=2500).contains(&bytes.len()), "about 2 KB of text: {}", bytes.len());
+            assert!(std::str::from_utf8(&bytes).is_ok());
+        } else {
+            let img = image::load_from_memory(&bytes).unwrap();
+            assert_eq!(img.width().max(img.height()), 640, "a 640-px photo");
+            assert_eq!(image::guess_format(&bytes).unwrap(), image::ImageFormat::Jpeg);
+        }
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn old_sim_peer_has_no_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut s, caps) = SimSession::start(dir.path(), SimPeer { minor0: true, ..SimPeer::default() }).await;
+    assert!(!caps.iter().any(|c| c == "file/2"), "{caps:?}");
+    let id = s.send_file("hello.txt", b"hello").await;
+    let r = s
+        .next(10, "refusal", |e| matches!(e, SessionEvent::FileRejected { .. } | SessionEvent::FileOffered { .. }))
+        .await;
+    assert_eq!(r, SessionEvent::FileRejected { id, reason: "not supported by this station".into() });
+}

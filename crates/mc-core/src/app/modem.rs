@@ -586,7 +586,8 @@ async fn run(
         }
         ModemTarget::Simulator => {
             let on_air = opts.sim_peer_broadcasts;
-            simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air, opts.sim_rig).await
+            simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air, opts.sim_rig, &opts.files)
+                .await
         }
     }
 }
@@ -601,6 +602,7 @@ async fn simulator(
     forwarders: &mut Forwarders,
     on_air: bool,
     with_rig: bool,
+    files: &FileOptions,
 ) {
     r.state(ModemState::Attaching, None).await;
     let peer_dir = station_dir.join("sim-peer");
@@ -633,6 +635,7 @@ async fn simulator(
         _ = stopped(&mut cmds, &r) => return,
     }
     let mut sim = sim;
+    files.apply(&mut sim.station.cfg);
     // The rig a Mercury keys through: it follows our side's PTT.
     let rig = match with_rig {
         true => Some(std::sync::Arc::new(mercury_adapter::fake_rig::FakeRigctld::start().await)),
@@ -667,6 +670,7 @@ async fn simulator(
     _forwarders: &mut Forwarders,
     _on_air: bool,
     _with_rig: bool,
+    _files: &FileOptions,
 ) {
     r.fault("the simulator is not part of this build".into()).await;
 }
