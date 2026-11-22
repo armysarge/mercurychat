@@ -8,6 +8,8 @@ import { useI18n } from "vue-i18n";
 import ActivityDrawer from "./ActivityDrawer.vue";
 import BeaconControl from "./BeaconControl.vue";
 import QsoCard from "./QsoCard.vue";
+import QsyCard from "./QsyCard.vue";
+import SessionMenu from "./SessionMenu.vue";
 import TelemetryPanel from "./TelemetryPanel.vue";
 import { activeProfile, chat, modemLabel, queuedBytes, session, snapshot } from "../store";
 
@@ -40,6 +42,7 @@ function where() {
         <div class="stat"><span class="muted">{{ t("session.direction") }}</span><span>{{ t(session.direction === "outgoing" ? "direction.outgoing" : "direction.incoming") }}</span></div>
         <div class="stat"><span class="muted">{{ t("session.application") }}</span><span>{{ session.peerApp ?? t("session.unknownApp") }} · MCH/1</span></div>
         <div class="stat"><span class="muted">{{ t("session.since") }}</span><span class="mono">{{ since(session.sinceUtc) }}</span></div>
+        <SessionMenu />
       </template>
       <p v-else class="muted small">{{ t("session.none") }}</p>
       <div v-if="chat.open" class="stat">
@@ -47,6 +50,7 @@ function where() {
       </div>
     </section>
 
+    <QsyCard />
     <QsoCard />
 
     <section class="card stack" aria-labelledby="h-link">

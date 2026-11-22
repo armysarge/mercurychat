@@ -238,7 +238,8 @@
       "audio": "Audio",
       "notifications": "Notificaciones",
       "appearance": "Apariencia",
-      "about": "Acerca de"
+      "about": "Acerca de",
+      "beacon": "Baliza"
     }
   },
   "appearance": {
@@ -422,7 +423,8 @@
     "unstar": "Quitar destacado de {callsign}",
     "noMatch": "Ninguna estación oída coincide.",
     "notReachable": "Oída no es lo mismo que alcanzable: una estación oída aquí puede no responder a una llamada.",
-    "announce": "{callsign} oída: {source}"
+    "announce": "{callsign} oída: {source}",
+    "fromBeacon": "De su baliza"
   },
   "beacon": {
     "title": "Balizas",
@@ -543,7 +545,13 @@
     "saved": "Guardado",
     "finalNote": "Finalizado: este registro ya no se puede cambiar.",
     "freqNone": "Frecuencia no disponible",
-    "freqInvalid": "Escriba la frecuencia en MHz, por ejemplo 7.105"
+    "freqInvalid": "Escriba la frecuencia en MHz, por ejemplo 7.105",
+    "peerReport": "{field}: informe del corresponsal",
+    "field": {
+      "rstRcvd": "RST recibido",
+      "name": "Nombre",
+      "qth": "QTH"
+    }
   },
   "logbook": {
     "title": "Libro de guardia",
@@ -602,7 +610,16 @@
     "about": "Sobre la estación",
     "emailNote": "Su correo entra en un borrador solo cuando elige Insertar correo en el menú Macros.",
     "save": "Guardar información de la estación",
-    "saved": "Guardado"
+    "saved": "Guardado",
+    "limit": "Como máximo {n} bytes",
+    "overLimit": "Más de {n} bytes: no se incluye en las respuestas a otras estaciones",
+    "share": {
+      "title": "Compartir con otras estaciones",
+      "intro": "Se responde automáticamente cuando una estación en sesión pide sus datos. Solo van los campos marcados.",
+      "emailNever": "Su correo nunca va en una respuesta: envíelo con Enviar mi correo durante una sesión.",
+      "save": "Guardar lo compartido",
+      "saved": "Guardado."
+    }
   },
   "about": {
     "title": "Acerca de",
@@ -909,6 +926,23 @@
       "unsupported": "esta estación no lo admite",
       "noSession": "no hay ninguna sesión",
       "noEmail": "esta estación no tiene correo electrónico"
+    },
+    "requestSnr": "Pedir SNR",
+    "requestStation": "Pedir datos de la estación",
+    "sendEmail": "Enviar mi correo",
+    "noEmail": "Esta estación no tiene correo configurado",
+    "olderPeer": "{peer} usa un MercuryChat anterior: algunos controles de la sesión no están disponibles.",
+    "confirmEmail": "¿Enviar {email} a {peer}? Se envía una vez, y solo ahora.",
+    "sendEmailConfirm": "Enviar correo",
+    "emailSent": "Correo enviado a {peer}.",
+    "snrReport": "{peer} recibe su señal a {db} dB (informe del corresponsal, {source}, hace {age} s)",
+    "source": {
+      "telemetry": "telemetría",
+      "sn": "línea SN"
+    },
+    "reason": {
+      "rate": "Demasiadas peticiones: inténtelo en unos segundos.",
+      "noReading": "No hay una lectura reciente de su señal."
     }
   },
   "qsy": {
@@ -927,6 +961,51 @@
       "noAnswer": "{peer} no respondió al QSY",
       "timedOut": "La oferta de QSY de {peer} caducó",
       "fellBack": "Sin contacto con {peer} en la nueva frecuencia: de vuelta a {original}"
-    }
+    },
+    "title": "QSY",
+    "countdownTitle": "Tiempo que queda en este paso",
+    "seconds": "{n} s",
+    "stage": {
+      "proposed": "Esperando la respuesta de {peer}",
+      "offered": "{peer} propone un QSY",
+      "accepted": "Aceptado: esperando la confirmación de {peer}",
+      "agreed": "Acordado: la sesión termina y ambas estaciones resintonizan",
+      "moving": "En la nueva frecuencia: llamando o escuchando a {peer}",
+      "fallingBack": "Volviendo a la frecuencia original"
+    },
+    "candidates": "Frecuencias",
+    "accept": "Aceptar",
+    "decline": "Rechazar",
+    "tuneNow": "Sintonice {freq} ahora",
+    "tuned": "Sintonizado",
+    "propose": "Proponer QSY",
+    "pending": "ya hay un QSY pendiente",
+    "proposeIntro": "Elija hasta {n} frecuencias de la lista. Valen entradas de otra banda.",
+    "suggestIntro": "Elija hasta {n} frecuencias para sugerir a {peer}.",
+    "noEntries": "La lista de frecuencias está vacía: añada entradas en Ajustes, Equipo.",
+    "note": "Nota (opcional)",
+    "proposeSend": "Proponer {n} frecuencia | Proponer {n} frecuencias",
+    "suggestSend": "Sugerir {n} frecuencia | Sugerir {n} frecuencias",
+    "suggest": "QSY",
+    "suggestAria": "Sugerir un QSY a {callsign}",
+    "suggestTitle": "Sugerir un QSY a {peer}",
+    "suggested": "{peer} sugiere {freq}",
+    "suggestionOnly": "Solo una sugerencia: no se acuerda nada hasta que haya una sesión.",
+    "tuneAndListen": "Sintonizar y escuchar en {freq}",
+    "dismiss": "Descartar",
+    "tunedListening": "Sintonizado: escuchando allí."
+  },
+  "beaconSettings": {
+    "title": "Contenido de la baliza",
+    "intro": "Su baliza lleva su indicativo y su localizador. Marque más para enviar una baliza ampliada; debe caber en el modo de escucha.",
+    "name": "Nombre ({value})",
+    "qth": "QTH ({value})",
+    "status": "Línea de estado (hasta 40 bytes)",
+    "left": "Quedan {n} bytes",
+    "over": "{n} bytes de más para el modo de escucha",
+    "longLeftOut": "Un nombre o QTH de más de 24 bytes no se incluye en la baliza; no se recorta.",
+    "save": "Guardar contenido de la baliza",
+    "saved": "Contenido de la baliza guardado.",
+    "tooBig": "No cabe: {n} bytes de más."
   }
 }

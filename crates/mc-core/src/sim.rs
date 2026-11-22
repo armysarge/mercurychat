@@ -5,9 +5,10 @@
 //! the whole chat loop can be exercised without a radio. Each side has its own
 //! data directory, so their locks never meet the app's own.
 
-use crate::session::{SessionCommand, SessionEvent};
+use crate::session::{PeerMsg, SessionCommand, SessionEvent};
 use crate::station::{Station, StationConfig, StationError};
 use mch_protocol::beacon::{Beacon, CAP_CHAT};
+use mch_protocol::payload::{InfoResponse, InfoWhat, QsyAnswer, SnrReport, StationShare};
 use mch_protocol::ObjectId;
 use mercury_adapter::fake::FakeNet;
 use mercury_adapter::{Callsign, Endpoint};
@@ -49,8 +50,13 @@ impl SimModem {
         let ours = Callsign::parse(callsign).map_err(|e| StationError::Wrong(e.to_string()))?;
         let net = FakeNet::start().await;
         let peer_call = Callsign::parse(PEER_CALLSIGN).expect("valid simulator callsign");
-        let mut peer =
-            Station::open(StationConfig::defaults(peer_call, Endpoint::base("127.0.0.1", net.b_base), peer_dir))?;
+        let mut cfg = StationConfig::defaults(peer_call, Endpoint::base("127.0.0.1", net.b_base), peer_dir);
+        // MC_SIM_PEER_MINOR0=1: SIM1 is an older MercuryChat (MCH/1 minor 0, chat and file only).
+        if std::env::var_os("MC_SIM_PEER_MINOR0").is_some_and(|v| v == "1") {
+            cfg.proto_minor = 0;
+            cfg.capabilities = vec!["chat".into(), "file".into()];
+        }
+        let mut peer = Station::open(cfg)?;
         peer.attach().await?;
         peer.set_listen(true).await?;
         let peer = tokio::spawn(serve_peer(peer, true, None)).abort_handle();
@@ -93,6 +99,35 @@ impl SimModem {
     }
 }
 
+/// SIM1's answer to a minor-1 message (M3c): it accepts the first QSY
+/// candidate, and answers information requests from made-up values.
+fn peer_reply(m: &PeerMsg) -> Option<PeerMsg> {
+    match m {
+        PeerMsg::QsyPropose(id, _) => Some(PeerMsg::QsyAnswer(*id, QsyAnswer::Accept { index: 0 })),
+        PeerMsg::InfoRequest(id, req) => {
+            let answer = match req.what {
+                InfoWhat::Snr => InfoResponse {
+                    snr: Some(SnrReport { db: 6.0, age_s: 1, source: "telemetry".into() }),
+                    station: None,
+                    reason: None,
+                },
+                InfoWhat::Station => InfoResponse {
+                    snr: None,
+                    station: Some(StationShare {
+                        name: Some("Sim".into()),
+                        qth: Some("Simulator".into()),
+                        locator: Some(PEER_GRID.into()),
+                        ..StationShare::default()
+                    }),
+                    reason: None,
+                },
+            };
+            Some(PeerMsg::InfoResponse(*id, Box::new(answer)))
+        }
+        _ => None,
+    }
+}
+
 /// A chat a peer station stored: (sender, id, text).
 pub type Received = (String, ObjectId, String);
 
@@ -121,6 +156,12 @@ pub async fn serve_peer(mut peer: Station, echo: bool, received: Option<mpsc::Un
         let from = info.peer.clone();
         let watch = async {
             while let Some(ev) = ev_rx.recv().await {
+                if let SessionEvent::Peer(m) = &ev {
+                    if let Some(reply) = peer_reply(m) {
+                        let _ = cmd_tx.send(SessionCommand::Peer(reply)).await;
+                    }
+                    continue;
+                }
                 if let SessionEvent::ChatReceived { id, text, duplicate: false } = ev {
                     if let Some(tx) = &received {
                         let _ = tx.send((from.clone(), id, text.clone()));

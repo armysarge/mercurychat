@@ -13,6 +13,7 @@ import MacroEditor from "../components/MacroEditor.vue";
 import NotificationSettings from "../components/NotificationSettings.vue";
 import ProfileForms from "../components/ProfileForms.vue";
 import AudioSettings from "../components/AudioSettings.vue";
+import BeaconSettings from "../components/BeaconSettings.vue";
 import RigSettings from "../components/RigSettings.vue";
 import StationInfo from "../components/StationInfo.vue";
 import ThemePicker from "../components/ThemePicker.vue";
@@ -22,7 +23,7 @@ import Switch from "../components/Switch.vue";
 
 const { t } = useI18n();
 
-const TABS = ["station", "profiles", "rig", "audio", "notifications", "appearance", "about"] as const;
+const TABS = ["station", "profiles", "rig", "audio", "beacon", "notifications", "appearance", "about"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_KEY = "mc.settingsTab";
 const tab = ref<Tab>(
@@ -190,6 +191,9 @@ async function chooseFinalise(on: boolean) {
     <div v-show="tab === 'audio'" id="panel-audio" class="panel" role="tabpanel" aria-labelledby="tab-audio">
       <!-- Mounted only while shown: it asks the core for Mercury's devices every 2 s. -->
       <AudioSettings v-if="tab === 'audio'" />
+    </div>
+    <div v-show="tab === 'beacon'" id="panel-beacon" class="panel" role="tabpanel" aria-labelledby="tab-beacon">
+      <BeaconSettings v-if="tab === 'beacon'" />
     </div>
     <div v-show="tab === 'notifications'" id="panel-notifications" class="panel" role="tabpanel" aria-labelledby="tab-notifications">
       <NotificationSettings />

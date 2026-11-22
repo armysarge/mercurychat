@@ -201,6 +201,9 @@ export class Mirror {
       case "scheduleNext":
         v.snapshot.scheduleNext = ev.next;
         break;
+      case "qsy":
+        v.snapshot.qsy = ev.qsy;
+        break;
       case "qso":
         // The card follows the latest session's record; an edit of an older one (Logbook) leaves it.
         if (!v.snapshot.currentQso || v.snapshot.currentQso.id === ev.qso.id || ev.qso.startUtc >= v.snapshot.currentQso.startUtc) {

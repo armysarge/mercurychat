@@ -171,6 +171,13 @@ pub enum AppCommand {
     },
     /// The beacon's content and the bytes left at the current listen mode.
     BeaconContent,
+    /// The bytes left were these fields chosen; nothing is saved (Settings →
+    /// Beacon's live count).
+    PreviewBeaconFields {
+        name: bool,
+        qth: bool,
+        status: Option<String>,
+    },
     /// Logbook records, newest first (at most 500).
     Qsos {
         limit: u32,

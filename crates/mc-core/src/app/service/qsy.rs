@@ -276,7 +276,7 @@ impl App {
                     let text = notice_text(&key, &peer, original.as_ref());
                     let line = self.discovery.note("qsy", text.clone());
                     self.emit(line);
-                    self.emit(AppEvent::QsyNotice { key, text });
+                    self.emit(AppEvent::QsyNotice { key, text, peer, original: original.as_ref().map(describe) });
                 }
                 QsyAction::Done => {
                     self.qsy.calling = false;

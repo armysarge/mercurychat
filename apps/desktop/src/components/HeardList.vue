@@ -10,7 +10,9 @@ import { useI18n } from "vue-i18n";
 import type { HeardSource } from "../bindings/HeardSource";
 import type { HeardStation } from "../bindings/HeardStation";
 import type { Reading } from "../bindings/Reading";
-import { activeProfile, app, chat, discovery, discoveryError, openPeer, setFavourite } from "../store";
+import QsyPropose from "./QsyPropose.vue";
+import { describeTuning, extras, tuneSuggested } from "../extras";
+import { activeProfile, app, chat, discovery, discoveryError, inSession, openPeer, setFavourite } from "../store";
 
 const { t } = useI18n();
 const emit = defineEmits<{ opened: [peer: string] }>();
@@ -51,6 +53,18 @@ function provenance(r: Reading<number>): string {
 }
 const mhz = (hz: number) => (hz / 1e6).toFixed(3);
 
+/** The station a QSY suggestion is being written to (B5), or "". */
+const suggesting = ref("");
+/** "Tune and listen" was pressed: the card stays until dismissed. */
+const tuned = ref(false);
+async function tune(i: number) {
+  tuned.value = await tuneSuggested(i);
+}
+function dismiss() {
+  extras.suggestion = null;
+  tuned.value = false;
+}
+
 async function pick(h: HeardStation) {
   await openPeer(h.callsign);
   if (app.page !== "operate" && app.page !== "conversations") app.page = "operate";
@@ -67,6 +81,23 @@ async function pick(h: HeardStation) {
       </select>
     </div>
     <p v-if="discoveryError.star" class="err small" role="alert">{{ discoveryError.star }}</p>
+    <section v-if="extras.suggestion" class="card stack small qsy-suggestion" role="status" aria-live="polite">
+      <p>{{ t("qsy.suggested", { peer: extras.suggestion.from, freq: describeTuning(extras.suggestion.candidates[0]) }) }}</p>
+      <p class="muted">{{ t("qsy.suggestionOnly") }}</p>
+      <div class="row">
+        <button v-for="(c, i) in extras.suggestion.candidates" :key="i" class="qsy-tune-suggested" :title="inSession ? t('rig.refused.connected') : ''" @click="tune(i)">
+          {{ t("qsy.tuneAndListen", { freq: describeTuning(c) }) }}
+        </button>
+        <button class="quiet" @click="dismiss">{{ t("qsy.dismiss") }}</button>
+      </div>
+      <p v-if="tuned" class="ok">{{ t("qsy.tunedListening") }}</p>
+      <p v-if="extras.error && !suggesting" class="err" role="alert">{{ extras.error }}</p>
+    </section>
+    <section v-if="suggesting" class="card stack small qsy-suggest">
+      <p class="label">{{ t("qsy.suggestTitle", { peer: suggesting }) }}</p>
+      <QsyPropose :to="suggesting" @done="suggesting = ''" />
+      <p v-if="extras.error" class="err" role="alert">{{ extras.error }}</p>
+    </section>
     <ul v-if="shown.length" class="list" :aria-label="t('heard.listAria')">
       <li
         v-for="h in shown"
@@ -90,7 +121,19 @@ async function pick(h: HeardStation) {
             <span v-if="h.offsetHz" class="mono offset" :title="provenance(h.offsetHz)">{{ t("heard.offset", { hz: h.offsetHz.value.toFixed(1) }) }}</span>
             <span v-if="h.count > 1" class="count">{{ t("heard.count", h.count) }}</span>
           </span>
+          <span v-if="h.name || h.qth || h.status" class="line small beacon-fields" :title="t('heard.fromBeacon')">
+            <span v-if="h.name" class="name">{{ h.name.value }}</span>
+            <span v-if="h.qth" class="qth muted">{{ h.qth.value }}</span>
+            <span v-if="h.status" class="status muted">“{{ h.status.value }}”</span>
+          </span>
         </button>
+        <button
+          class="suggest-qsy quiet small"
+          :aria-label="t('qsy.suggestAria', { callsign: h.callsign })"
+          :title="t('qsy.suggestAria', { callsign: h.callsign })"
+          :disabled="!activeProfile"
+          @click="suggesting = h.callsign"
+        >{{ t("qsy.suggest") }}</button>
         <button
           class="star quiet"
           :aria-pressed="h.favourite"
@@ -116,7 +159,7 @@ async function pick(h: HeardStation) {
 .search { width: 100%; min-width: 0; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .row {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 2px;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: start; gap: 2px;
   border: 1px solid transparent; border-radius: 9px;
 }
 .row.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: var(--raised); }
@@ -132,6 +175,8 @@ async function pick(h: HeardStation) {
 .call { overflow-wrap: anywhere; }
 .meta { gap: 2px 8px; }
 .meta > span { white-space: nowrap; }
+.suggest-qsy { min-height: 0; padding: 4px 6px; border-color: transparent; }
+.beacon-fields { gap: 2px 8px; }
 .star { min-height: 0; padding: 4px 8px; border-color: transparent; font-size: calc(16px * var(--font-scale)); line-height: 1; color: var(--warning); }
 .star[aria-pressed="false"] { color: var(--text-2); }
 .note { border-top: 1px solid var(--border); padding-top: var(--space); }

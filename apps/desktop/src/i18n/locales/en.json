@@ -237,7 +237,8 @@
       "audio": "Audio",
       "notifications": "Notifications",
       "appearance": "Appearance",
-      "about": "About"
+      "about": "About",
+      "beacon": "Beacon"
     }
   },
   "appearance": {
@@ -421,7 +422,8 @@
     "unstar": "Unstar {callsign}",
     "noMatch": "No heard station matches.",
     "notReachable": "Heard is not the same as reachable: a station heard here may not answer a call.",
-    "announce": "{callsign} heard: {source}"
+    "announce": "{callsign} heard: {source}",
+    "fromBeacon": "From its beacon"
   },
   "beacon": {
     "title": "Beacons",
@@ -542,7 +544,13 @@
     "saved": "Saved",
     "finalNote": "Finalised: this record can no longer be changed.",
     "freqNone": "Frequency unavailable",
-    "freqInvalid": "Enter the frequency in MHz, for example 7.105"
+    "freqInvalid": "Enter the frequency in MHz, for example 7.105",
+    "peerReport": "{field}: peer report",
+    "field": {
+      "rstRcvd": "RST received",
+      "name": "Name",
+      "qth": "QTH"
+    }
   },
   "logbook": {
     "title": "Logbook",
@@ -601,7 +609,16 @@
     "about": "About the station",
     "emailNote": "Your email goes into a draft only when you choose Insert email in the Macros menu.",
     "save": "Save station information",
-    "saved": "Saved"
+    "saved": "Saved",
+    "limit": "At most {n} bytes",
+    "overLimit": "Over {n} bytes: left out of answers to other stations",
+    "share": {
+      "title": "Share with other stations",
+      "intro": "Answered automatically when a station in a session asks for your station info. Only the ticked fields go.",
+      "emailNever": "Your email is never in an answer: send it with Send my email in a session.",
+      "save": "Save sharing",
+      "saved": "Sharing saved."
+    }
   },
   "about": {
     "title": "About",
@@ -908,6 +925,23 @@
       "unsupported": "not supported by this station",
       "noSession": "there is no session",
       "noEmail": "no email is set for this station"
+    },
+    "requestSnr": "Request SNR",
+    "requestStation": "Request station info",
+    "sendEmail": "Send my email",
+    "noEmail": "No email is set for this station",
+    "olderPeer": "{peer} runs an older MercuryChat: some session controls are not supported.",
+    "confirmEmail": "Send {email} to {peer}? It goes once, and only now.",
+    "sendEmailConfirm": "Send email",
+    "emailSent": "Email sent to {peer}.",
+    "snrReport": "{peer} reports your signal at {db} dB (peer report, {source}, {age} s old)",
+    "source": {
+      "telemetry": "telemetry",
+      "sn": "SN line"
+    },
+    "reason": {
+      "rate": "Asked too often: try again in a few seconds.",
+      "noReading": "No recent reading of your signal."
     }
   },
   "qsy": {
@@ -926,6 +960,51 @@
       "noAnswer": "No answer from {peer} to the QSY",
       "timedOut": "The QSY offer from {peer} ran out of time",
       "fellBack": "No contact with {peer} on the new frequency: back to {original}"
-    }
+    },
+    "title": "QSY",
+    "countdownTitle": "Time left in this step",
+    "seconds": "{n} s",
+    "stage": {
+      "proposed": "Waiting for {peer} to answer",
+      "offered": "{peer} proposes a QSY",
+      "accepted": "Accepted: waiting for {peer} to confirm",
+      "agreed": "Agreed: the session ends, then both stations retune",
+      "moving": "On the new frequency: calling or listening for {peer}",
+      "fallingBack": "Going back to the original frequency"
+    },
+    "candidates": "Frequencies",
+    "accept": "Accept",
+    "decline": "Decline",
+    "tuneNow": "Tune to {freq} now",
+    "tuned": "Tuned",
+    "propose": "Propose QSY",
+    "pending": "a QSY is already pending",
+    "proposeIntro": "Choose up to {n} frequencies from the list. Entries on another band are fine.",
+    "suggestIntro": "Choose up to {n} frequencies to suggest to {peer}.",
+    "noEntries": "The frequency list is empty: add entries under Settings, Rig.",
+    "note": "Note (optional)",
+    "proposeSend": "Propose {n} frequency | Propose {n} frequencies",
+    "suggestSend": "Suggest {n} frequency | Suggest {n} frequencies",
+    "suggest": "QSY",
+    "suggestAria": "Suggest a QSY to {callsign}",
+    "suggestTitle": "Suggest a QSY to {peer}",
+    "suggested": "{peer} suggests {freq}",
+    "suggestionOnly": "A suggestion only: nothing is agreed until a session is.",
+    "tuneAndListen": "Tune and listen on {freq}",
+    "dismiss": "Dismiss",
+    "tunedListening": "Tuned: listening there."
+  },
+  "beaconSettings": {
+    "title": "Beacon content",
+    "intro": "Your beacon carries your callsign and locator. Tick more to send an extended beacon; it must fit the listen mode.",
+    "name": "Name ({value})",
+    "qth": "QTH ({value})",
+    "status": "Status line (up to 40 bytes)",
+    "left": "{n} bytes left",
+    "over": "{n} bytes too many for the listen mode",
+    "longLeftOut": "A name or QTH over 24 bytes is left out of the beacon, not cut.",
+    "save": "Save beacon content",
+    "saved": "Beacon content saved.",
+    "tooBig": "Does not fit: {n} bytes too many."
   }
 }

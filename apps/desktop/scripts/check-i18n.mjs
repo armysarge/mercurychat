@@ -266,6 +266,10 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "audioSettings.channelOpt.": () => constOf("components/AudioSettings.vue", "CHANNELS"),
     "rigSettings.step.": () => constOf("components/RigSettings.vue", "STEPS"),
     "freqList.purposeOpt.": () => constOf("components/FrequencyListEditor.vue", "PURPOSES"),
+    // M3c: the QSY card's stages and notices, and the QSO card's peer-report fields.
+    "qsy.stage.": () => constOf("components/QsyCard.vue", "STAGES"),
+    "qsy.notify.": () => constOf("components/QsyCard.vue", "noticeKeys"),
+    "qso.field.": () => constOf("components/QsoCard.vue", "PEER_FIELDS"),
     "transcript.status.": () => {
       const t = readFileSync(join(src, "components", "Transcript.vue"), "utf8");
       const block = /const STATUS[^=]*=\s*\{([\s\S]*?)\n\};/.exec(t)?.[1] ?? "";

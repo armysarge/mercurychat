@@ -631,6 +631,19 @@ impl App {
                 self.beacon_content()
             }
             AppCommand::BeaconContent => self.beacon_content(),
+            AppCommand::PreviewBeaconFields { name, qth, status } => {
+                let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+                let status = status.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                let prefs = BeaconPrefs { name, qth, status, ..self.beacon.prefs.clone() };
+                let left = bytes_left(&prefs, &p, self.listen_mode.current().unwrap_or(DATAC3));
+                Ok(CommandOk::BeaconContent(BeaconContentView {
+                    include_grid: prefs.include_grid,
+                    name,
+                    qth,
+                    status: prefs.status,
+                    bytes_left: left,
+                }))
+            }
             AppCommand::SendBeaconNow => self.send_beacon().map(|_| CommandOk::Done),
             AppCommand::Qsos { limit } => {
                 let rows = self.chat_store()?.qsos(limit.clamp(1, 500)).map_err(storage)?;

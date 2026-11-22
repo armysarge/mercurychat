@@ -238,7 +238,8 @@
       "audio": "Áudio",
       "notifications": "Notificações",
       "appearance": "Aparência",
-      "about": "Sobre"
+      "about": "Sobre",
+      "beacon": "Beacon"
     }
   },
   "appearance": {
@@ -422,7 +423,8 @@
     "unstar": "Desmarcar {callsign}",
     "noMatch": "Nenhuma estação ouvida corresponde.",
     "notReachable": "Ouvida não é o mesmo que alcançável: uma estação ouvida aqui pode não atender uma chamada.",
-    "announce": "{callsign} ouvida: {source}"
+    "announce": "{callsign} ouvida: {source}",
+    "fromBeacon": "Do beacon dela"
   },
   "beacon": {
     "title": "Beacons",
@@ -543,7 +545,13 @@
     "saved": "Salvo",
     "finalNote": "Finalizado: este registro não pode mais ser alterado.",
     "freqNone": "Frequência indisponível",
-    "freqInvalid": "Digite a frequência em MHz, por exemplo 7.105"
+    "freqInvalid": "Digite a frequência em MHz, por exemplo 7.105",
+    "peerReport": "{field}: relato do correspondente",
+    "field": {
+      "rstRcvd": "RST recebido",
+      "name": "Nome",
+      "qth": "QTH"
+    }
   },
   "logbook": {
     "title": "Logbook",
@@ -602,7 +610,16 @@
     "about": "Sobre a estação",
     "emailNote": "Seu e-mail entra num rascunho só quando você escolhe Inserir e-mail no menu Macros.",
     "save": "Salvar informações da estação",
-    "saved": "Salvo"
+    "saved": "Salvo",
+    "limit": "No máximo {n} bytes",
+    "overLimit": "Mais de {n} bytes: fica fora das respostas a outras estações",
+    "share": {
+      "title": "Compartilhar com outras estações",
+      "intro": "Respondido automaticamente quando uma estação em sessão pede seus dados. Só vão os campos marcados.",
+      "emailNever": "Seu e-mail nunca vai numa resposta: envie-o com Enviar meu e-mail durante uma sessão.",
+      "save": "Salvar compartilhamento",
+      "saved": "Compartilhamento salvo."
+    }
   },
   "about": {
     "title": "Sobre",
@@ -909,6 +926,23 @@
       "unsupported": "não suportado por esta estação",
       "noSession": "não há sessão",
       "noEmail": "nenhum e-mail definido para esta estação"
+    },
+    "requestSnr": "Pedir SNR",
+    "requestStation": "Pedir dados da estação",
+    "sendEmail": "Enviar meu e-mail",
+    "noEmail": "Nenhum e-mail definido para esta estação",
+    "olderPeer": "{peer} usa um MercuryChat mais antigo: alguns controles da sessão não são suportados.",
+    "confirmEmail": "Enviar {email} para {peer}? Vai uma vez, só agora.",
+    "sendEmailConfirm": "Enviar e-mail",
+    "emailSent": "E-mail enviado para {peer}.",
+    "snrReport": "{peer} recebe seu sinal a {db} dB (relato do correspondente, {source}, há {age} s)",
+    "source": {
+      "telemetry": "telemetria",
+      "sn": "linha SN"
+    },
+    "reason": {
+      "rate": "Pedidos demais: tente de novo em alguns segundos.",
+      "noReading": "Nenhuma leitura recente do seu sinal."
     }
   },
   "qsy": {
@@ -927,6 +961,51 @@
       "noAnswer": "Sem resposta de {peer} ao QSY",
       "timedOut": "A oferta de QSY de {peer} expirou",
       "fellBack": "Sem contato com {peer} na nova frequência: de volta a {original}"
-    }
+    },
+    "title": "QSY",
+    "countdownTitle": "Tempo restante nesta etapa",
+    "seconds": "{n} s",
+    "stage": {
+      "proposed": "Aguardando a resposta de {peer}",
+      "offered": "{peer} propõe um QSY",
+      "accepted": "Aceito: aguardando a confirmação de {peer}",
+      "agreed": "Combinado: a sessão termina e as duas estações mudam de frequência",
+      "moving": "Na nova frequência: chamando ou escutando {peer}",
+      "fallingBack": "Voltando à frequência original"
+    },
+    "candidates": "Frequências",
+    "accept": "Aceitar",
+    "decline": "Recusar",
+    "tuneNow": "Sintonize {freq} agora",
+    "tuned": "Sintonizado",
+    "propose": "Propor QSY",
+    "pending": "já há um QSY pendente",
+    "proposeIntro": "Escolha até {n} frequências da lista. Entradas de outra banda servem.",
+    "suggestIntro": "Escolha até {n} frequências para sugerir a {peer}.",
+    "noEntries": "A lista de frequências está vazia: adicione entradas em Configurações, Rádio.",
+    "note": "Nota (opcional)",
+    "proposeSend": "Propor {n} frequência | Propor {n} frequências",
+    "suggestSend": "Sugerir {n} frequência | Sugerir {n} frequências",
+    "suggest": "QSY",
+    "suggestAria": "Sugerir um QSY a {callsign}",
+    "suggestTitle": "Sugerir um QSY a {peer}",
+    "suggested": "{peer} sugere {freq}",
+    "suggestionOnly": "Apenas uma sugestão: nada é combinado até haver uma sessão.",
+    "tuneAndListen": "Sintonizar e escutar em {freq}",
+    "dismiss": "Dispensar",
+    "tunedListening": "Sintonizado: escutando lá."
+  },
+  "beaconSettings": {
+    "title": "Conteúdo do beacon",
+    "intro": "Seu beacon leva seu indicativo e seu locator. Marque mais campos para enviar um beacon estendido; ele precisa caber no modo de escuta.",
+    "name": "Nome ({value})",
+    "qth": "QTH ({value})",
+    "status": "Linha de status (até 40 bytes)",
+    "left": "Restam {n} bytes",
+    "over": "{n} bytes a mais para o modo de escuta",
+    "longLeftOut": "Um nome ou QTH com mais de 24 bytes fica fora do beacon, sem ser cortado.",
+    "save": "Salvar conteúdo do beacon",
+    "saved": "Conteúdo do beacon salvo.",
+    "tooBig": "Não cabe: {n} bytes a mais."
   }
 }

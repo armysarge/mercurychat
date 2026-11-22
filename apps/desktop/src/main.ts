@@ -5,6 +5,7 @@ import { installShellGuards } from "./shellGuards";
 import "./tokens.css";
 import "./ui.css";
 import { initAppearance } from "./themes/state.ts";
+import "./extras"; // M3c: QSY, information and suggestion events from the start
 
 // Until the core's snapshot says which language was chosen, use the one last
 // remembered (or the system's).

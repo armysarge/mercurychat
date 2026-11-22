@@ -139,11 +139,14 @@ pub enum AppEvent {
     Qsy {
         qsy: Option<QsyView>,
     },
-    /// Something the operator is told about a QSY: `key` is the i18n key,
-    /// `text` the English line (also in the activity log).
+    /// Something the operator is told about a QSY: `key` is the i18n key
+    /// (its parameters `peer` and `original`), `text` the English line (also
+    /// in the activity log).
     QsyNotice {
         key: String,
         text: String,
+        peer: String,
+        original: Option<String>,
     },
     /// A heard station suggests a QSY to us (MCB/1 kind 3; M3c B5). Shown
     /// only when we are the addressee; nothing is negotiated.
