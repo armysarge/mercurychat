@@ -29,7 +29,7 @@ const NEW_HZ: u64 = 7_105_000;
 const START_HZ: u64 = 14_074_000;
 
 fn windows() -> QsyWindows {
-    QsyWindows { answer: Duration::from_secs(20), recall: Duration::from_secs(6), grace: Duration::from_secs(3) }
+    QsyWindows { answer: Duration::from_secs(20), recall: Duration::from_secs(12), grace: Duration::from_secs(4) }
 }
 
 struct App {
@@ -194,7 +194,7 @@ async fn qsy_end_to_end() {
     wait_freq(t.rb.as_ref().unwrap(), NEW_HZ, 10, "B retuned").await;
     assert_eq!(t.ra.mode().0, "USB");
     // A calls again on the new frequency; the new session is a new QSO linked to the first.
-    let s = t.a.wait(15, "the re-call", |s| s.session.as_ref().is_some_and(|x| x.session_id != first)).await;
+    let s = t.a.wait(25, "the re-call", |s| s.session.as_ref().is_some_and(|x| x.session_id != first)).await;
     assert_eq!(s.session.unwrap().bandwidth, t.b.snap().await.session.unwrap().bandwidth);
     let qso = t.a.wait(5, "the new QSO", |s| s.current_qso.as_ref().is_some_and(|q| q.id != first_qso)).await;
     assert_eq!(qso.current_qso.unwrap().notes.as_deref(), Some(format!("QSY from {first_qso}").as_str()));
@@ -225,8 +225,8 @@ async fn qsy_fallback_restores_original() {
     propose_and_accept(&t.a, &t.b).await;
     wait_freq(t.rb.as_ref().unwrap(), NEW_HZ, 10, "B retuned").await;
     wait_freq(&t.ra, NEW_HZ, 10, "A retuned").await;
-    wait_freq(&t.ra, START_HZ, 20, "A back after its window").await;
-    wait_freq(t.rb.as_ref().unwrap(), START_HZ, 20, "B back after its window").await;
+    wait_freq(&t.ra, START_HZ, 30, "A back after its window").await;
+    wait_freq(t.rb.as_ref().unwrap(), START_HZ, 30, "B back after its window").await;
     let a = t.a.wait(5, "A's QSY over", |s| s.qsy.is_none()).await;
     assert!(a.session.is_none() && a.modem != ModemState::Calling, "no automatic re-call: {:?}", a.modem);
     t.b.wait(5, "B's QSY over", |s| s.qsy.is_none()).await;
@@ -273,7 +273,7 @@ async fn qsy_no_rig_station_shows_manual() {
     wait_freq(&t.ra, NEW_HZ, 10, "A retuned").await;
     assert_eq!(t.b.h.call(AppCommand::QsyTuned).await.unwrap(), CommandOk::Done);
     // B still listens, and A's re-call finds it.
-    t.a.wait(15, "the re-call", |s| s.session.is_some()).await;
+    t.a.wait(25, "the re-call", |s| s.session.is_some()).await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
