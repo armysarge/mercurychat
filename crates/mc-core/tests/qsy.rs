@@ -29,7 +29,12 @@ const NEW_HZ: u64 = 7_105_000;
 const START_HZ: u64 = 14_074_000;
 
 fn windows() -> QsyWindows {
-    QsyWindows { answer: Duration::from_secs(20), recall: Duration::from_secs(12), grace: Duration::from_secs(4) }
+    QsyWindows {
+        answer: Duration::from_secs(20),
+        recall: Duration::from_secs(12),
+        grace: Duration::from_secs(4),
+        agreed: Duration::from_secs(6),
+    }
 }
 
 struct App {
@@ -459,4 +464,62 @@ async fn link_down_manual_path_shows_the_dial() {
     let s = t.b.wait(10, "B's manual path", |s| s.qsy.as_ref().is_some_and(|q| q.manual.is_some())).await;
     let manual = s.qsy.unwrap().manual.unwrap();
     assert_eq!(manual.freq_hz, NEW_HZ - 1500, "the dial: the candidate less B's own offset");
+}
+
+// --- M4: the deferred M3c minors through the service ---
+
+fn notice(e: &AppEvent, want: &str) -> bool {
+    matches!(e, AppEvent::QsyNotice { key, .. } if key == want)
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tune_refused_while_qsy_moving() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = two(dir.path(), 0, true).await;
+    let other = t.a.entry("30m elsewhere", 10_140_000).await;
+    connect(&t.a, &t.b).await;
+    t.b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    propose_and_accept(&t.a, &t.b).await;
+    t.a.wait(10, "A moving", |s| stage(s) == Some("moving") && s.session.is_none()).await;
+    wait_freq(&t.ra, NEW_HZ, 10, "A retuned").await;
+    let e = t.a.h.call(AppCommand::TuneToEntry { id: other }).await.unwrap_err();
+    assert!(matches!(&e, AppError::Refused { reason: "qsy.refused.tuneDuringQsy", .. }), "{e:?}");
+    assert!(t.net.air_broadcast(1, suggestion(OTHER, A)));
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    let e = t.a.h.call(AppCommand::TuneSuggested { index: 0 }).await.unwrap_err();
+    assert!(matches!(&e, AppError::Refused { reason: "qsy.refused.tuneDuringQsy", .. }), "{e:?}");
+    assert_eq!(t.ra.freq(), NEW_HZ, "nothing moved the rig");
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn abandoned_qsy_keeps_the_session() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut t = two(dir.path(), 0, true).await;
+    let session = connect(&t.a, &t.b).await;
+    // A's DISCONNECT is acknowledged but the link stays up.
+    t.net.set_hold_disconnect(true);
+    propose_and_accept(&t.a, &t.b).await;
+    assert!(t.a.event(windows().agreed.as_secs() + 10, |e| notice(e, "qsy.notify.abandoned")).await.is_some());
+    assert!(t.b.event(10, |e| notice(e, "qsy.notify.abandoned")).await.is_some());
+    t.a.wait(5, "A's QSY over", |s| s.qsy.is_none()).await;
+    t.b.wait(5, "B's QSY over", |s| s.qsy.is_none()).await;
+    let s = t.a.snap().await;
+    assert_eq!(s.session.map(|x| x.session_id), Some(session), "the session goes on");
+    assert_eq!((t.ra.freq(), t.rb.as_ref().unwrap().freq()), (START_HZ, START_HZ));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn no_reading_fallback_says_return_by_hand() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let rb = FakeRigctld::start().await;
+    // A has no rig and no telemetry: its dial is unknown.
+    let mut a = app(dir.path(), &net, 0, A, None).await;
+    let b = app(dir.path(), &net, 1, B, Some((&rb, 0))).await;
+    connect(&a, &b).await;
+    b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    propose_and_accept(&a, &b).await;
+    let secs = (windows().recall + windows().agreed).as_secs() + 15;
+    assert!(a.event(secs, |e| notice(e, "qsy.notify.returnByHand")).await.is_some());
+    a.wait(5, "A's QSY over", |s| s.qsy.is_none()).await;
 }

@@ -27,7 +27,18 @@ const chosen = computed(() => {
   const q = qsy.value;
   return q && q.chosen !== null ? q.candidates[q.chosen] ?? null : null;
 });
-const noticeKeys = ["declined", "declinedRig", "ownRig", "noAnswer", "timedOut", "fellBack"] as const;
+const noticeKeys = [
+  "declined",
+  "declinedRig",
+  "declinedPending",
+  "ownRig",
+  "noAnswer",
+  "timedOut",
+  "fellBack",
+  "returnByHand",
+  "abandoned",
+  "passband",
+] as const;
 const notice = computed(() => {
   const n = extras.notice;
   if (!n) return "";

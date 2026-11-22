@@ -952,7 +952,8 @@
       "pending": "ya hay un QSY pendiente",
       "nothingToAnswer": "no hay ningún QSY que responder",
       "noCandidate": "no existe esa opción",
-      "rig": "el equipo no puede cambiar ahora: {message}"
+      "rig": "el equipo no puede cambiar ahora: {message}",
+      "tuneDuringQsy": "no mientras hay un QSY en curso"
     },
     "notify": {
       "declined": "{peer} rechazó el QSY",
@@ -960,7 +961,11 @@
       "ownRig": "QSY rechazado: el equipo de esta estación no puede cambiar ahora",
       "noAnswer": "{peer} no respondió al QSY",
       "timedOut": "La oferta de QSY de {peer} caducó",
-      "fellBack": "Sin contacto con {peer} en la nueva frecuencia: de vuelta a {original}"
+      "fellBack": "Sin contacto con {peer} en la nueva frecuencia: de vuelta a {original}",
+      "passband": "El QSY de {peer} pedía una banda de paso de más de 20 kHz: rechazado",
+      "returnByHand": "Sin contacto con {peer} en la nueva frecuencia: vuelve a tu frecuencia original a mano",
+      "abandoned": "El QSY con {peer} se abandonó: el enlace no se cortó. La sesión continúa",
+      "declinedPending": "{peer} está ocupado con otro QSY"
     },
     "title": "QSY",
     "countdownTitle": "Tiempo que queda en este paso",

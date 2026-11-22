@@ -83,6 +83,12 @@ fn notice_text(key: &str, peer: &str, original: Option<&Tuning>) -> String {
         qsy::NOTE_OWN_RIG => "QSY declined: this station's rig can't change now".into(),
         qsy::NOTE_NO_ANSWER => format!("No answer from {peer} to the QSY"),
         qsy::NOTE_TIMED_OUT => format!("The QSY offer from {peer} ran out of time"),
+        qsy::NOTE_PASSBAND => format!("{peer}'s QSY asked for a passband over 20 kHz: declined"),
+        qsy::NOTE_RETURN_BY_HAND => {
+            format!("No contact with {peer} on the new frequency: return to your original frequency by hand")
+        }
+        qsy::NOTE_ABANDONED => format!("The QSY with {peer} was abandoned: the link did not drop. The session goes on"),
+        qsy::NOTE_DECLINED_PENDING => format!("{peer} is busy with another QSY"),
         qsy::NOTE_FELL_BACK => match original {
             Some(t) => format!("No contact with {peer} on the new frequency: back to {}", describe(t)),
             None => format!("No contact with {peer} on the new frequency"),
@@ -119,6 +125,15 @@ fn candidate(e: &crate::app::frequencies::FrequencyEntry) -> Result<QsyCandidate
 
 impl App {
     /// A QSY is under way: the schedule and other retunes stand aside.
+    /// While a QSY is agreed, moving or falling back, the rig is its own:
+    /// other tuning is refused (M4 B4).
+    pub(super) fn qsy_owns_rig(&self) -> Result<(), AppError> {
+        if self.qsy.machine.as_ref().is_some_and(Qsy::moving) {
+            return Err(refused("qsy.refused.tuneDuringQsy", "not while a QSY is under way"));
+        }
+        Ok(())
+    }
+
     pub(super) fn qsy_pending(&self) -> bool {
         self.qsy.machine.as_ref().is_some_and(Qsy::pending)
     }
@@ -368,14 +383,15 @@ impl App {
         }
     }
 
-    /// The displayed tuning now: the rig's, else the telemetry frequency.
-    fn qsy_original(&self, now: Instant) -> Tuning {
+    /// The displayed tuning now: the rig's, else the telemetry frequency;
+    /// `None` when neither knows it (M4 B2).
+    fn qsy_original(&self, now: Instant) -> Option<Tuning> {
         let v = self.rig.policy.view(now);
         if let (true, Some(f)) = (self.rig.policy.link_up(), v.frequency.as_ref()) {
-            return Tuning { freq_hz: f.value, mode: v.mode.unwrap_or_default(), passband_hz: v.passband_hz };
+            return Some(Tuning { freq_hz: f.value, mode: v.mode.unwrap_or_default(), passband_hz: v.passband_hz });
         }
-        let freq = self.tuning(now).freq.map_or(0, |f| f.value);
-        Tuning { freq_hz: freq, mode: String::new(), passband_hz: None }
+        let freq = self.tuning(now).freq.map(|f| f.value).filter(|hz| *hz > 0)?;
+        Some(Tuning { freq_hz: freq, mode: String::new(), passband_hz: None })
     }
 
     pub(super) fn qsy_wake(&self) -> Option<Instant> {
@@ -510,6 +526,7 @@ impl App {
 
     /// "Tune and listen": the M3b rig set, refused while busy (RIG-03).
     pub(super) fn tune_suggested(&mut self, index: u8) -> Result<CommandOk, AppError> {
+        self.qsy_owns_rig()?;
         let t = self
             .qsy
             .suggestion

@@ -176,6 +176,7 @@ impl App {
     }
 
     fn tune_entry(&mut self, e: &FrequencyEntry) -> Result<CommandOk, AppError> {
+        self.qsy_owns_rig()?;
         let changes = [
             RigChange::Frequency { hz: e.freq_hz },
             RigChange::Mode { mode: e.mode.clone(), passband_hz: e.passband_hz.unwrap_or(0) },

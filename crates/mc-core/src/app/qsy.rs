@@ -24,11 +24,17 @@ pub const ANSWER_WINDOW: Duration = Duration::from_secs(60);
 pub const RECALL_WINDOW: Duration = Duration::from_secs(120);
 /// The answerer listens this much longer than the caller calls.
 pub const LISTEN_GRACE: Duration = Duration::from_secs(20);
+/// Once agreed, how long the link may stay up before the QSY is abandoned (M4 B3).
+pub const AGREED_DEADLINE: Duration = Duration::from_secs(30);
+/// The widest passband a proposal may ask for (M4 B1).
+pub const MAX_PASSBAND_HZ: u32 = 20_000;
 
 /// Refusals the operator sees.
 pub const ALREADY_PENDING: &str = "a QSY is already pending";
 pub const NOTHING_TO_ANSWER: &str = "there is no QSY to answer";
 pub const NO_SUCH_CANDIDATE: &str = "no such candidate";
+/// No QSY while a file is moving: it would end the session (M4).
+pub const REASON_TRANSFER: &str = "a file transfer is in progress";
 
 /// Decline reason codes on the wire (at most 32 bytes).
 pub const REASON_RIG: &str = "rig";
@@ -44,6 +50,10 @@ pub const NOTE_NO_ANSWER: &str = "qsy.notify.noAnswer";
 pub const NOTE_TIMED_OUT: &str = "qsy.notify.timedOut";
 pub const NOTE_FELL_BACK: &str = "qsy.notify.fellBack";
 pub const NOTE_OWN_RIG: &str = "qsy.notify.ownRig";
+pub const NOTE_PASSBAND: &str = "qsy.notify.passband";
+pub const NOTE_RETURN_BY_HAND: &str = "qsy.notify.returnByHand";
+pub const NOTE_ABANDONED: &str = "qsy.notify.abandoned";
+pub const NOTE_DECLINED_PENDING: &str = "qsy.notify.declinedPending";
 
 /// The windows (B3): constants in the app; tests shorten them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,11 +61,12 @@ pub struct QsyWindows {
     pub answer: Duration,
     pub recall: Duration,
     pub grace: Duration,
+    pub agreed: Duration,
 }
 
 impl Default for QsyWindows {
     fn default() -> Self {
-        QsyWindows { answer: ANSWER_WINDOW, recall: RECALL_WINDOW, grace: LISTEN_GRACE }
+        QsyWindows { answer: ANSWER_WINDOW, recall: RECALL_WINDOW, grace: LISTEN_GRACE, agreed: AGREED_DEADLINE }
     }
 }
 
@@ -117,9 +128,10 @@ pub enum QsyInput {
         answer: QsyAnswer,
         gate: Gate,
     },
+    /// `original` is `None` when neither the rig nor telemetry knows the dial.
     Disconnected {
         now: Instant,
-        original: Tuning,
+        original: Option<Tuning>,
     },
     /// The result of the retune (after its one retry).
     RigSet {
@@ -200,19 +212,21 @@ enum Stage {
         chosen: u8,
         no_rig: bool,
     },
-    /// Both checks passed; awaiting DISCONNECTED.
+    /// Both checks passed; awaiting DISCONNECTED, until `deadline` (M4 B3).
     Agreed {
         id: ObjectId,
         candidates: Vec<QsyCandidate>,
         chosen: u8,
         no_rig: bool,
+        deadline: Instant,
     },
     /// Apart, on the new frequency, until the window ends or the peer is seen.
     Moving {
         candidates: Vec<QsyCandidate>,
         chosen: u8,
         target: Tuning,
-        original: Tuning,
+        /// `None`: the dial was unknown, so the fall back is by hand (M4 B2).
+        original: Option<Tuning>,
         deadline: Instant,
         no_rig: bool,
         retuning: bool,
@@ -257,9 +271,10 @@ impl Qsy {
     /// When the next `Tick` is due, if a window is running.
     pub fn deadline(&self) -> Option<Instant> {
         match &self.stage {
-            Stage::Proposed { deadline, .. } | Stage::Offered { deadline, .. } | Stage::Moving { deadline, .. } => {
-                Some(*deadline)
-            }
+            Stage::Proposed { deadline, .. }
+            | Stage::Offered { deadline, .. }
+            | Stage::Agreed { deadline, .. }
+            | Stage::Moving { deadline, .. } => Some(*deadline),
             _ => None,
         }
     }
@@ -290,6 +305,11 @@ impl Qsy {
         !matches!(self.stage, Stage::Idle)
     }
 
+    /// Agreed, moving or falling back: the rig is the QSY's (M4 B4).
+    pub fn moving(&self) -> bool {
+        matches!(self.stage, Stage::Agreed { .. } | Stage::Moving { .. } | Stage::FallingBack { .. })
+    }
+
     fn idle(&mut self) {
         self.stage = Stage::Idle;
     }
@@ -310,8 +330,15 @@ impl Qsy {
     }
 
     /// Both checks passed: commit. Only the caller disconnects.
-    fn agree(&mut self, id: ObjectId, candidates: Vec<QsyCandidate>, chosen: u8, no_rig: bool) -> Vec<QsyAction> {
-        self.stage = Stage::Agreed { id, candidates, chosen, no_rig };
+    fn agree(
+        &mut self,
+        id: ObjectId,
+        candidates: Vec<QsyCandidate>,
+        chosen: u8,
+        no_rig: bool,
+        now: Instant,
+    ) -> Vec<QsyAction> {
+        self.stage = Stage::Agreed { id, candidates, chosen, no_rig, deadline: now + self.windows.agreed };
         match self.role {
             Role::Caller => vec![QsyAction::Disconnect],
             Role::Answerer => vec![],
@@ -338,11 +365,18 @@ impl Qsy {
                 if self.pending() && !crossed {
                     return vec![decline(id, Some(REASON_PENDING))];
                 }
+                if propose.candidates.iter().any(|c| c.passband_hz > MAX_PASSBAND_HZ) {
+                    // Declined before the operator sees it (M4 B1): no rig takes it.
+                    if crossed {
+                        self.idle();
+                    }
+                    return vec![decline(id, Some(REASON_RIG)), note(NOTE_PASSBAND)];
+                }
                 self.stage = Stage::Offered { id, candidates: propose.candidates, deadline: now + self.windows.answer };
                 vec![]
             }
             QsyInput::AnswerAsked { accept, gate } => self.on_answer_asked(accept, gate),
-            QsyInput::AnswerReceived { id, answer, gate } => self.on_answer_received(id, answer, gate),
+            QsyInput::AnswerReceived { id, answer, gate } => self.on_answer_received(id, answer, gate, now),
             QsyInput::Disconnected { now, original } => self.on_disconnected(now, original),
             QsyInput::RigSet { ok } => self.on_rig_set(ok),
             // A connection in progress always beats a timer (B3), the fall back's too.
@@ -377,7 +411,7 @@ impl Qsy {
         vec![answer(id, QsyAnswer::Accept { index })]
     }
 
-    fn on_answer_received(&mut self, id: ObjectId, a: QsyAnswer, gate: Gate) -> Vec<QsyAction> {
+    fn on_answer_received(&mut self, id: ObjectId, a: QsyAnswer, gate: Gate, now: Instant) -> Vec<QsyAction> {
         match (&self.stage, a) {
             // Our proposal accepted: check our own gate again, then confirm.
             (Stage::Proposed { id: p, candidates, .. }, QsyAnswer::Accept { index }) if *p == id => {
@@ -392,7 +426,7 @@ impl Qsy {
                     return vec![decline(id, Some(REASON_RIG)), note(NOTE_OWN_RIG)];
                 }
                 let mut actions = vec![answer(id, QsyAnswer::Accept { index })];
-                actions.extend(self.agree(id, candidates, index, gate == Gate::NoRig));
+                actions.extend(self.agree(id, candidates, index, gate == Gate::NoRig, now));
                 actions
             }
             // The proposer's confirmation of our accept.
@@ -400,7 +434,7 @@ impl Qsy {
                 if *p == id && index == *chosen =>
             {
                 let (candidates, chosen, no_rig) = (candidates.clone(), *chosen, *no_rig);
-                self.agree(id, candidates, chosen, no_rig)
+                self.agree(id, candidates, chosen, no_rig, now)
             }
             (Stage::Agreed { id: p, .. }, QsyAnswer::Accept { .. }) if *p == id => vec![],
             // An accept for nothing pending (late, or after we withdrew): decline, stay.
@@ -413,15 +447,22 @@ impl Qsy {
                 | Stage::Agreed { id: p, .. },
                 QsyAnswer::Decline { reason },
             ) if *p == id => {
+                let agreed = matches!(self.stage, Stage::Agreed { .. });
                 self.idle();
-                let key = if reason.as_deref() == Some(REASON_RIG) { NOTE_DECLINED_RIG } else { NOTE_DECLINED };
+                let key = match reason.as_deref() {
+                    Some(REASON_RIG) => NOTE_DECLINED_RIG,
+                    Some(REASON_PENDING) => NOTE_DECLINED_PENDING,
+                    // The peer's agreed deadline passed first (M4 B3).
+                    Some(REASON_TIMEOUT) if agreed => NOTE_ABANDONED,
+                    _ => NOTE_DECLINED,
+                };
                 vec![note(key), QsyAction::Done]
             }
             (_, QsyAnswer::Decline { .. }) => vec![],
         }
     }
 
-    fn on_disconnected(&mut self, now: Instant, original: Tuning) -> Vec<QsyAction> {
+    fn on_disconnected(&mut self, now: Instant, original: Option<Tuning>) -> Vec<QsyAction> {
         let (candidates, chosen, no_rig) = match &self.stage {
             // Accepted covers the link dropping before the confirmation
             // arrived: we agreed, so we go (the window brings us back).
@@ -434,7 +475,7 @@ impl Qsy {
             }
             _ => return vec![],
         };
-        self.original = Some(original.clone());
+        self.original = original.clone();
         let target = Tuning::from(&candidates[usize::from(chosen)]);
         let deadline = now + self.window();
         let actions = if no_rig {
@@ -494,8 +535,19 @@ impl Qsy {
                 self.idle();
                 vec![decline(id, Some(REASON_TIMEOUT)), note(NOTE_TIMED_OUT), QsyAction::Done]
             }
+            Stage::Agreed { id, deadline, .. } if now >= *deadline => {
+                // The link never dropped (M4 B3): stand down on both sides, the session goes on.
+                let id = *id;
+                self.idle();
+                vec![decline(id, Some(REASON_TIMEOUT)), note(NOTE_ABANDONED), QsyAction::Done]
+            }
             Stage::Moving { deadline, original, no_rig, .. } if now >= *deadline => {
                 let (original, no_rig) = (original.clone(), *no_rig);
+                let Some(original) = original else {
+                    // No reading to come back to (M4 B2): never retune to a guess.
+                    self.idle();
+                    return vec![note(NOTE_RETURN_BY_HAND), QsyAction::Done];
+                };
                 if no_rig {
                     self.idle();
                     vec![QsyAction::ShowManual(original), note(NOTE_FELL_BACK), QsyAction::Done]
@@ -676,7 +728,7 @@ mod tests {
         let go = relay(&conf, &mut a, Gate::Pass, t);
         assert_eq!(go, vec![QsyAction::Disconnect]);
         assert_eq!(b.view(t).stage, "agreed");
-        let moved = b.on(QsyInput::Disconnected { now: t + S, original: original() }, t + S);
+        let moved = b.on(QsyInput::Disconnected { now: t + S, original: Some(original()) }, t + S);
         assert_eq!(moved, vec![QsyAction::Retune(target(0))]);
     }
 
@@ -689,8 +741,8 @@ mod tests {
         let conf = relay(&acc, &mut a, Gate::Pass, t);
         assert!(disconnects(&conf));
         // The confirmation never reaches b: the link drops first.
-        let da = a.on(QsyInput::Disconnected { now: t + S, original: original() }, t + S);
-        let db = b.on(QsyInput::Disconnected { now: t + 2 * S, original: original() }, t + 2 * S);
+        let da = a.on(QsyInput::Disconnected { now: t + S, original: Some(original()) }, t + S);
+        let db = b.on(QsyInput::Disconnected { now: t + 2 * S, original: Some(original()) }, t + 2 * S);
         assert_eq!(da, vec![QsyAction::Retune(target(0))]);
         assert_eq!(db, vec![QsyAction::Retune(target(0))]);
         assert_eq!(b.on(QsyInput::RigSet { ok: true }, t + 3 * S), vec![QsyAction::Listen]);
@@ -739,7 +791,7 @@ mod tests {
         let mut q = if caller { a } else { b };
         assert_eq!(q.view(t).stage, "agreed");
         let gate = if caller { ga } else { gb };
-        let acts = q.on(QsyInput::Disconnected { now: t, original: original() }, t);
+        let acts = q.on(QsyInput::Disconnected { now: t, original: Some(original()) }, t);
         if gate == Gate::NoRig {
             assert_eq!(acts[0], QsyAction::ShowManual(target(0)));
         } else {
@@ -794,7 +846,7 @@ mod tests {
         let acc = b.on(QsyInput::AnswerAsked { accept: Some(0), gate: Gate::NoRig }, t);
         assert!(matches!(sent(&acc)[..], [PeerMsg::QsyAnswer(_, QsyAnswer::Accept { index: 0 })]));
         relay(&relay(&acc, &mut a, Gate::Pass, t), &mut b, Gate::NoRig, t);
-        let acts = b.on(QsyInput::Disconnected { now: t, original: original() }, t);
+        let acts = b.on(QsyInput::Disconnected { now: t, original: Some(original()) }, t);
         assert_eq!(acts, vec![QsyAction::ShowManual(target(0)), QsyAction::Listen]);
         assert_eq!(b.view(t).manual, Some(target(0)));
         let end = t + RECALL_WINDOW + LISTEN_GRACE;
@@ -840,7 +892,7 @@ mod tests {
         assert!(b.pending());
         relay(&conf, &mut b, Gate::Pass, late);
         assert_eq!(b.view(late).stage, "agreed");
-        let db = b.on(QsyInput::Disconnected { now: late + S, original: original() }, late + S);
+        let db = b.on(QsyInput::Disconnected { now: late + S, original: Some(original()) }, late + S);
         assert_eq!(db, vec![QsyAction::Retune(target(0))], "the answerer moves with the caller");
     }
 
@@ -871,7 +923,7 @@ mod tests {
         relay(&propose(&mut a, Gate::Pass, t), &mut b, Gate::Pass, t);
         let acc = b.on(QsyInput::AnswerAsked { accept: Some(0), gate: Gate::Pass }, t);
         relay(&acc, &mut a, Gate::Pass, t);
-        a.on(QsyInput::Disconnected { now: t, original: original() }, t);
+        a.on(QsyInput::Disconnected { now: t, original: Some(original()) }, t);
         a.on(QsyInput::RigSet { ok: true }, t + S);
         let end = t + RECALL_WINDOW;
         assert!(a.on(QsyInput::Tick(end), end).contains(&QsyAction::Fallback(original())));
@@ -879,5 +931,110 @@ mod tests {
         assert_eq!(a.on(QsyInput::PeerSeen, end + S), vec![QsyAction::Done]);
         assert!(!a.pending(), "a connection beats the timer");
         assert!(a.on(QsyInput::RigSet { ok: true }, end + 2 * S).is_empty());
+    }
+    // --- M4: the deferred M3c minors (B1, B2, B3, B8) ---
+
+    #[test]
+    fn oversize_passband_declined_with_rig() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        let mut c = cands();
+        c[1].passband_hz = MAX_PASSBAND_HZ + 1;
+        let prop =
+            a.on(QsyInput::ProposeAsked { id: ObjectId::random(), candidates: c, note: None, gate: Gate::Pass }, t);
+        let acts = relay(&prop, &mut b, Gate::Pass, t);
+        assert!(declined_with(&acts, REASON_RIG), "{acts:?}");
+        assert!(acts.contains(&QsyAction::Notify(NOTE_PASSBAND.into())), "{acts:?}");
+        assert!(!b.pending());
+        // A passband at the limit is fine.
+        let (mut a, mut b) = pair();
+        let mut c = cands();
+        c[1].passband_hz = MAX_PASSBAND_HZ;
+        let prop =
+            a.on(QsyInput::ProposeAsked { id: ObjectId::random(), candidates: c, note: None, gate: Gate::Pass }, t);
+        assert!(relay(&prop, &mut b, Gate::Pass, t).is_empty());
+        assert!(b.pending());
+    }
+
+    #[test]
+    fn fallback_without_reading_does_not_retune() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        agree(true, &mut a, &mut b, Gate::Pass, Gate::Pass, t);
+        a.on(QsyInput::Disconnected { now: t, original: None }, t);
+        a.on(QsyInput::RigSet { ok: true }, t + S);
+        let end = t + RECALL_WINDOW;
+        let acts = a.on(QsyInput::Tick(end), end);
+        assert!(!acts.iter().any(|x| matches!(x, QsyAction::Fallback(_) | QsyAction::Retune(_))), "{acts:?}");
+        assert!(acts.contains(&QsyAction::Notify(NOTE_RETURN_BY_HAND.into())), "{acts:?}");
+        assert!(acts.contains(&QsyAction::Done));
+        assert!(!a.pending());
+    }
+
+    #[test]
+    fn agreed_deadline_abandons() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        let last = agree(true, &mut a, &mut b, Gate::Pass, Gate::Pass, t);
+        assert!(disconnects(&last));
+        assert_eq!(a.deadline(), Some(t + AGREED_DEADLINE));
+        let before = t + AGREED_DEADLINE - S;
+        assert!(a.on(QsyInput::Tick(before), before).is_empty());
+        let end = t + AGREED_DEADLINE;
+        let acts = a.on(QsyInput::Tick(end), end);
+        assert!(declined_with(&acts, REASON_TIMEOUT), "{acts:?}");
+        assert!(acts.contains(&QsyAction::Notify(NOTE_ABANDONED.into())) && acts.contains(&QsyAction::Done));
+        assert!(!a.pending() && !disconnects(&acts));
+        // The peer, still agreed, is told and stands down too.
+        let back = relay(&acts, &mut b, Gate::Pass, end);
+        assert!(back.contains(&QsyAction::Notify(NOTE_ABANDONED.into())), "{back:?}");
+        assert!(!b.pending());
+    }
+
+    #[test]
+    fn accepted_then_agreed_also_has_deadline() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        agree(true, &mut a, &mut b, Gate::Pass, Gate::Pass, t);
+        assert_eq!(b.view(t).stage, "agreed");
+        assert_eq!(b.deadline(), Some(t + AGREED_DEADLINE));
+        let end = t + AGREED_DEADLINE;
+        let acts = b.on(QsyInput::Tick(end), end);
+        assert!(acts.contains(&QsyAction::Notify(NOTE_ABANDONED.into())), "{acts:?}");
+        assert!(!b.pending());
+    }
+
+    #[test]
+    fn pending_decline_has_its_own_note() {
+        let (mut a, _) = pair();
+        let t = Instant::now();
+        let prop = propose(&mut a, Gate::Pass, t);
+        let PeerMsg::QsyPropose(id, _) = sent(&prop)[0].clone() else { panic!() };
+        let acts = a.on(
+            QsyInput::AnswerReceived {
+                id,
+                answer: QsyAnswer::Decline { reason: Some(REASON_PENDING.into()) },
+                gate: Gate::Pass,
+            },
+            t,
+        );
+        assert!(acts.contains(&QsyAction::Notify(NOTE_DECLINED_PENDING.into())), "{acts:?}");
+    }
+
+    #[test]
+    fn moving_covers_agreed_to_fallback() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        assert!(!a.moving());
+        relay(&propose(&mut a, Gate::Pass, t), &mut b, Gate::Pass, t);
+        assert!(!a.moving(), "a proposal alone does not block tuning");
+        let acc = b.on(QsyInput::AnswerAsked { accept: Some(0), gate: Gate::Pass }, t);
+        relay(&acc, &mut a, Gate::Pass, t);
+        assert!(a.moving(), "agreed");
+        a.on(QsyInput::Disconnected { now: t, original: Some(original()) }, t);
+        assert!(a.moving(), "moving");
+        a.on(QsyInput::RigSet { ok: true }, t + S);
+        a.on(QsyInput::Tick(t + RECALL_WINDOW), t + RECALL_WINDOW);
+        assert!(a.moving(), "falling back");
     }
 }
