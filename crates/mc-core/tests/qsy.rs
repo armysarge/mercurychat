@@ -403,3 +403,60 @@ async fn suggestion_never_sent_automatically() {
     assert!(net.broadcast_log().iter().any(|(s, p)| *s == 0 && matches!(mcb::classify(p), Received::Beacon(_))));
     assert_eq!(kind3_sent_by(&net, 0), 0, "no kind 3 without the command");
 }
+
+// --- Final review: the real rig gate through the service, and the manual path's dial ---
+
+/// B's answer is refused by its own gate: `decline rig` to A, no disconnect, no rig change.
+async fn declined_by_bs_rig(t: &mut Two) {
+    let before = [t.a.snap().await.session.map(|x| x.session_id), t.b.snap().await.session.map(|x| x.session_id)];
+    let id = t.a.entry("40m chat", NEW_HZ).await;
+    t.a.h.call(AppCommand::ProposeQsy { entry_ids: vec![id], note: None }).await.unwrap();
+    t.b.wait(10, "B's offer", |s| stage(s) == Some("offered")).await;
+    let e = t.b.h.call(AppCommand::AnswerQsy { accept: Some(0) }).await.unwrap_err();
+    assert!(matches!(&e, AppError::Refused { reason: "qsy.refused.rig", .. }), "{e:?}");
+    let told = t.a.event(10, |e| matches!(e, AppEvent::QsyNotice { key, .. } if key == "qsy.notify.declinedRig")).await;
+    assert!(told.is_some(), "A is told B's rig declined");
+    t.a.wait(5, "A's QSY over", |s| s.qsy.is_none()).await;
+    assert!(t.b.snap().await.qsy.is_none());
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    for (app, was) in [&t.a, &t.b].into_iter().zip(before) {
+        assert!(was.is_some());
+        assert_eq!(app.snap().await.session.map(|x| x.session_id), was, "the session goes on");
+    }
+    assert_eq!(t.ra.freq(), START_HZ);
+    assert_eq!(t.rb.as_ref().unwrap().freq(), START_HZ);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gate_offset_below_zero_declines_rig() {
+    let dir = tempfile::tempdir().unwrap();
+    // B's dial would be 7 105 000 - 8 000 000 < 0.
+    let mut t = two(dir.path(), 8_000_000, true).await;
+    connect(&t.a, &t.b).await;
+    declined_by_bs_rig(&mut t).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn gate_ptt_unknown_declines_rig() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut t = two(dir.path(), 0, true).await;
+    connect(&t.a, &t.b).await;
+    // rigctld can't read PTT (as without -P): the link stays up, PTT unknown.
+    t.rb.as_ref().unwrap().ptt_error(Some(-11));
+    t.b.wait(10, "B's PTT unknown", |s| s.rig.link == RigLinkView::Up && s.rig.ptt == RigPttView::Unknown).await;
+    declined_by_bs_rig(&mut t).await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn link_down_manual_path_shows_the_dial() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = two(dir.path(), 1500, true).await;
+    connect(&t.a, &t.b).await;
+    // B's rigctld goes away: no rig link, so B accepts and tunes by hand.
+    t.rb.as_ref().unwrap().kill();
+    t.b.wait(10, "B's link down", |s| s.rig.link != RigLinkView::Up).await;
+    propose_and_accept(&t.a, &t.b).await;
+    let s = t.b.wait(10, "B's manual path", |s| s.qsy.as_ref().is_some_and(|q| q.manual.is_some())).await;
+    let manual = s.qsy.unwrap().manual.unwrap();
+    assert_eq!(manual.freq_hz, NEW_HZ - 1500, "the dial: the candidate less B's own offset");
+}

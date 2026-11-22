@@ -262,7 +262,7 @@ impl App {
                 }
                 QsyAction::ShowManual(t) => {
                     self.qsy.tuned = false;
-                    let line = self.discovery.note("rig", format!("Tune to {} now", describe(&t)));
+                    let line = self.discovery.note("rig", format!("Tune to {} now", describe(&self.qsy_dial(&t))));
                     self.emit(line);
                 }
                 QsyAction::Call => {
@@ -272,7 +272,11 @@ impl App {
                 QsyAction::Listen => {}
                 QsyAction::Notify(key) => {
                     let peer = self.qsy.peer.clone().unwrap_or_default();
-                    let original = self.qsy.machine.as_ref().and_then(Qsy::original).cloned();
+                    let mut original = self.qsy.machine.as_ref().and_then(Qsy::original).cloned();
+                    if !self.rig.policy.link_up() {
+                        // Tuned by hand: say where the dial goes.
+                        original = original.map(|t| self.qsy_dial(&t));
+                    }
                     let text = notice_text(&key, &peer, original.as_ref());
                     let line = self.discovery.note("qsy", text.clone());
                     self.emit(line);
@@ -308,10 +312,15 @@ impl App {
     pub(super) fn qsy_view(&self, now: Instant) -> Option<QsyView> {
         let m = self.qsy.machine.as_ref().filter(|m| m.pending())?;
         let mut v = m.view(now);
-        if self.qsy.tuned {
-            v.manual = None;
-        }
+        v.manual = if self.qsy.tuned { None } else { v.manual.map(|t| self.qsy_dial(&t)) };
         Some(v)
+    }
+
+    /// The manual path's instruction: the radio's dial, which is the
+    /// displayed frequency less this station's own offset (B3, B4).
+    fn qsy_dial(&self, t: &Tuning) -> Tuning {
+        let dial = i64::try_from(t.freq_hz).unwrap_or(i64::MAX) - i64::from(self.rig_offset_hz());
+        Tuning { freq_hz: u64::try_from(dial).unwrap_or(0), ..t.clone() }
     }
 
     /// The session ended: the machine hears DISCONNECTED, with the tuning to come back to.
@@ -335,10 +344,18 @@ impl App {
         (p == peer).then_some(id)
     }
 
-    /// PENDING or CONNECTED on the new frequency.
+    /// PENDING or CONNECTED on the new frequency. It also cancels a fall
+    /// back whose retune has not gone out yet (B3: a connection in progress
+    /// beats a timer); one already sent to the rig completes.
     pub(super) fn qsy_peer_seen(&mut self) {
-        let moving = self.qsy.machine.as_ref().is_some_and(|m| m.view(Instant::now()).stage == "moving");
-        if moving {
+        let stage = self.qsy.machine.as_ref().map(|m| m.view(Instant::now()).stage);
+        let unsent = self.qsy.retune.as_ref().is_none_or(|r| r.in_flight.is_empty());
+        let cancel = match stage.as_deref() {
+            Some("moving") => true,
+            Some("fallingBack") => unsent,
+            _ => false,
+        };
+        if cancel {
             self.qsy.retune = None;
             let _ = self.qsy_input(QsyInput::PeerSeen);
         }

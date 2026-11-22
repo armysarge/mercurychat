@@ -657,6 +657,11 @@ impl App {
     /// Frequency control None or the link down it is `NoRig` (the manual
     /// path). Mercury keying during the session is expected; the retune
     /// itself waits for its PTT to be off.
+    /// This station's frequency offset (displayed = dial + offset, B4).
+    pub(super) fn rig_offset_hz(&self) -> i32 {
+        self.rig.cfg.offset_hz
+    }
+
     pub(super) fn rig_gate_for_qsy(&self, t: &crate::app::qsy::Tuning) -> crate::app::qsy::Gate {
         use crate::app::qsy::Gate;
         if self.rig.cfg.freq_control == FreqControl::None || !self.rig.policy.link_up() {

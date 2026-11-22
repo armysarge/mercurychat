@@ -190,12 +190,14 @@ enum Stage {
         candidates: Vec<QsyCandidate>,
         deadline: Instant,
     },
-    /// We accepted; awaiting the proposer's confirmation.
+    /// We accepted; awaiting the proposer's confirmation. No timer: it ends
+    /// with the confirmation, a decline, or the session (final review: a
+    /// confirm on a slow link may arrive after any fixed window, and the
+    /// caller has already disconnected by then).
     Accepted {
         id: ObjectId,
         candidates: Vec<QsyCandidate>,
         chosen: u8,
-        deadline: Instant,
         no_rig: bool,
     },
     /// Both checks passed; awaiting DISCONNECTED.
@@ -255,10 +257,9 @@ impl Qsy {
     /// When the next `Tick` is due, if a window is running.
     pub fn deadline(&self) -> Option<Instant> {
         match &self.stage {
-            Stage::Proposed { deadline, .. }
-            | Stage::Offered { deadline, .. }
-            | Stage::Accepted { deadline, .. }
-            | Stage::Moving { deadline, .. } => Some(*deadline),
+            Stage::Proposed { deadline, .. } | Stage::Offered { deadline, .. } | Stage::Moving { deadline, .. } => {
+                Some(*deadline)
+            }
             _ => None,
         }
     }
@@ -331,18 +332,22 @@ impl Qsy {
                 vec![QsyAction::Send(PeerMsg::QsyPropose(id, QsyPropose { candidates, note }))]
             }
             QsyInput::ProposalReceived { id, propose } => {
-                if self.pending() {
+                // Crossed proposals: the caller's wins (final review). The
+                // answerer withdraws its own, which the caller declines.
+                let crossed = matches!(self.stage, Stage::Proposed { .. }) && self.role == Role::Answerer;
+                if self.pending() && !crossed {
                     return vec![decline(id, Some(REASON_PENDING))];
                 }
                 self.stage = Stage::Offered { id, candidates: propose.candidates, deadline: now + self.windows.answer };
                 vec![]
             }
-            QsyInput::AnswerAsked { accept, gate } => self.on_answer_asked(accept, gate, now),
+            QsyInput::AnswerAsked { accept, gate } => self.on_answer_asked(accept, gate),
             QsyInput::AnswerReceived { id, answer, gate } => self.on_answer_received(id, answer, gate),
             QsyInput::Disconnected { now, original } => self.on_disconnected(now, original),
             QsyInput::RigSet { ok } => self.on_rig_set(ok),
+            // A connection in progress always beats a timer (B3), the fall back's too.
             QsyInput::PeerSeen => match self.stage {
-                Stage::Moving { .. } => {
+                Stage::Moving { .. } | Stage::FallingBack { .. } => {
                     self.idle();
                     vec![QsyAction::Done]
                 }
@@ -352,7 +357,7 @@ impl Qsy {
         }
     }
 
-    fn on_answer_asked(&mut self, accept: Option<u8>, gate: Gate, now: Instant) -> Vec<QsyAction> {
+    fn on_answer_asked(&mut self, accept: Option<u8>, gate: Gate) -> Vec<QsyAction> {
         let Stage::Offered { id, candidates, .. } = &self.stage else {
             return vec![QsyAction::Refuse(NOTHING_TO_ANSWER.into())];
         };
@@ -368,13 +373,7 @@ impl Qsy {
             self.idle();
             return vec![decline(id, Some(REASON_RIG)), QsyAction::Refuse(reason.into())];
         }
-        self.stage = Stage::Accepted {
-            id,
-            candidates,
-            chosen: index,
-            deadline: now + self.windows.answer,
-            no_rig: gate == Gate::NoRig,
-        };
+        self.stage = Stage::Accepted { id, candidates, chosen: index, no_rig: gate == Gate::NoRig };
         vec![answer(id, QsyAnswer::Accept { index })]
     }
 
@@ -495,10 +494,6 @@ impl Qsy {
                 self.idle();
                 vec![decline(id, Some(REASON_TIMEOUT)), note(NOTE_TIMED_OUT), QsyAction::Done]
             }
-            Stage::Accepted { deadline, .. } if now >= *deadline => {
-                self.idle();
-                vec![note(NOTE_NO_ANSWER), QsyAction::Done]
-            }
             Stage::Moving { deadline, original, no_rig, .. } if now >= *deadline => {
                 let (original, no_rig) = (original.clone(), *no_rig);
                 if no_rig {
@@ -520,9 +515,7 @@ impl Qsy {
             Stage::Idle => ("idle", vec![], None, None, None),
             Stage::Proposed { candidates, deadline, .. } => ("proposed", cands(candidates), None, left(deadline), None),
             Stage::Offered { candidates, deadline, .. } => ("offered", cands(candidates), None, left(deadline), None),
-            Stage::Accepted { candidates, chosen, deadline, .. } => {
-                ("accepted", cands(candidates), Some(*chosen), left(deadline), None)
-            }
+            Stage::Accepted { candidates, chosen, .. } => ("accepted", cands(candidates), Some(*chosen), None, None),
             Stage::Agreed { candidates, chosen, .. } => ("agreed", cands(candidates), Some(*chosen), None, None),
             Stage::Moving { candidates, chosen, deadline, manual, .. } => {
                 ("moving", cands(candidates), Some(*chosen), left(deadline), manual.clone())
@@ -829,5 +822,62 @@ mod tests {
     fn passband_zero_is_rig_default() {
         assert_eq!(target(1).passband_hz, None);
         assert_eq!(target(0).passband_hz, Some(2400));
+    }
+
+    // ---- Final review fixes ----
+
+    #[test]
+    fn accept_confirm_after_60s_still_agrees() {
+        // A slow link: the proposer's confirmation reaches the answerer more than 60 s after its accept.
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        relay(&propose(&mut a, Gate::Pass, t), &mut b, Gate::Pass, t);
+        let acc = b.on(QsyInput::AnswerAsked { accept: Some(0), gate: Gate::Pass }, t);
+        let conf = relay(&acc, &mut a, Gate::Pass, t + 5 * S);
+        assert!(disconnects(&conf));
+        let late = t + 90 * S;
+        assert!(b.on(QsyInput::Tick(late), late).is_empty(), "an accept waits for the confirm or the session's end");
+        assert!(b.pending());
+        relay(&conf, &mut b, Gate::Pass, late);
+        assert_eq!(b.view(late).stage, "agreed");
+        let db = b.on(QsyInput::Disconnected { now: late + S, original: original() }, late + S);
+        assert_eq!(db, vec![QsyAction::Retune(target(0))], "the answerer moves with the caller");
+    }
+
+    #[test]
+    fn crossed_proposals_the_callers_wins() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        let pa = propose(&mut a, Gate::Pass, t);
+        let PeerMsg::QsyPropose(a_id, _) = sent(&pa)[0].clone() else { panic!() };
+        let pb = propose(&mut b, Gate::Pass, t);
+        // Each reaches the other while its own is pending.
+        let from_a = relay(&pb, &mut a, Gate::Pass, t);
+        let from_b = relay(&pa, &mut b, Gate::Pass, t);
+        assert!(declined_with(&from_a, REASON_PENDING), "the caller keeps its own: {from_a:?}");
+        assert!(sent(&from_b).is_empty(), "the answerer withdraws its own and takes the offer: {from_b:?}");
+        // The caller's decline of the withdrawn proposal changes nothing.
+        relay(&from_a, &mut b, Gate::Pass, t);
+        assert!(matches!(&a.stage, Stage::Proposed { id, .. } if *id == a_id));
+        assert!(matches!(&b.stage, Stage::Offered { id, .. } if *id == a_id), "{:?}", b.stage);
+        let acc = b.on(QsyInput::AnswerAsked { accept: Some(0), gate: Gate::Pass }, t + S);
+        assert!(disconnects(&relay(&acc, &mut a, Gate::Pass, t + S)));
+    }
+
+    #[test]
+    fn peer_seen_cancels_the_fallback() {
+        let (mut a, mut b) = pair();
+        let t = Instant::now();
+        relay(&propose(&mut a, Gate::Pass, t), &mut b, Gate::Pass, t);
+        let acc = b.on(QsyInput::AnswerAsked { accept: Some(0), gate: Gate::Pass }, t);
+        relay(&acc, &mut a, Gate::Pass, t);
+        a.on(QsyInput::Disconnected { now: t, original: original() }, t);
+        a.on(QsyInput::RigSet { ok: true }, t + S);
+        let end = t + RECALL_WINDOW;
+        assert!(a.on(QsyInput::Tick(end), end).contains(&QsyAction::Fallback(original())));
+        // A re-call already negotiating when the window closed connects.
+        assert_eq!(a.on(QsyInput::PeerSeen, end + S), vec![QsyAction::Done]);
+        assert!(!a.pending(), "a connection beats the timer");
+        assert!(a.on(QsyInput::RigSet { ok: true }, end + 2 * S).is_empty());
     }
 }
