@@ -36,6 +36,8 @@ mod logbook;
 mod macros;
 mod migrate;
 pub use migrate::{Migration, MIGRATIONS};
+mod transfers;
+pub use transfers::{Direction, TransferRow, TransferState};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OutState {

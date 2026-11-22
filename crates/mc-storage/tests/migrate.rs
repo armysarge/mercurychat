@@ -240,3 +240,23 @@ fn migration_8_defaults_quick_off() {
     s.save_macro(&mc_storage::MacroRow { quick: true, ..m }).unwrap();
     assert!(s.macros("p1").unwrap()[0].quick);
 }
+
+/// M4 C5: migration 9 extends M0's transfers table; an old row keeps its
+/// values and reads with wire size = size and a creation time.
+#[test]
+fn migration_9_adds_transfers() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("station.db");
+    {
+        let mut s = Store::open_with_migrations(&path, &MIGRATIONS[..8]).unwrap();
+        s.upsert_transfer("ZS6PEER", "out", &ID, "old.txt", 42, "ab", "delivered").unwrap();
+    }
+    assert_eq!(version(&path), 8);
+    let s = Store::open(&path).unwrap();
+    assert!(version(&path) >= 9);
+    assert!(!backups(dir.path()).is_empty(), "a backup before upgrading");
+    let r = s.transfer(mc_storage::Direction::Out, &ID).unwrap().expect("the old row");
+    assert_eq!((r.original_name.as_str(), r.size, r.wire_size), ("old.txt", 42, 42));
+    assert_eq!(r.state, mc_storage::TransferState::Complete, "M0's delivered is complete");
+    assert_eq!(r.created_utc, r.updated_utc);
+}

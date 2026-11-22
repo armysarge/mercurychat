@@ -25,6 +25,7 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 6, sql: MIGRATION_6 },
     Migration { to: 7, sql: MIGRATION_7 },
     Migration { to: 8, sql: MIGRATION_8 },
+    Migration { to: 9, sql: MIGRATION_9 },
 ];
 
 const MIGRATION_1: &str = r#"
@@ -219,6 +220,19 @@ fn backup_before(conn: &Connection, db_path: &Path, from: i64) -> Result<PathBuf
 /// existing profile starts as "answering calls".
 const MIGRATION_5: &str = r#"
 ALTER TABLE station_profiles ADD COLUMN receive_only INTEGER NOT NULL DEFAULT 0;
+"#;
+
+/// File transfers (M4 C5): M0's table gains the wire size and encoding, the
+/// saved name, the session and a creation time. M0's `delivered` is `complete`.
+const MIGRATION_9: &str = r#"
+ALTER TABLE transfers ADD COLUMN wire_size INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE transfers ADD COLUMN encoding TEXT;
+ALTER TABLE transfers ADD COLUMN saved_name TEXT;
+ALTER TABLE transfers ADD COLUMN session_id INTEGER;
+ALTER TABLE transfers ADD COLUMN created_utc TEXT NOT NULL DEFAULT '';
+UPDATE transfers SET wire_size = size, created_utc = updated_utc;
+UPDATE transfers SET state = 'complete' WHERE state = 'delivered';
+UPDATE transfers SET state = 'sending' WHERE state = 'accepted';
 "#;
 
 /// Quick messages (M3c B8): a macro listed at the top of the composer's menu.
