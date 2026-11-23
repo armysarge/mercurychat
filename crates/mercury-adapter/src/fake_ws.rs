@@ -173,7 +173,12 @@ pub struct FakeWs {
 
 impl FakeWs {
     pub async fn start() -> FakeWs {
-        let listener = TcpListener::bind(("127.0.0.1", 0)).await.expect("bind a loopback port");
+        FakeWs::start_at(0).await.expect("bind a loopback port")
+    }
+
+    /// On a given loopback port (0: any), as Mercury's `-U`.
+    pub async fn start_at(port: u16) -> std::io::Result<FakeWs> {
+        let listener = TcpListener::bind(("127.0.0.1", port)).await?;
         let port = listener.local_addr().expect("a local address").port();
         let shared: Arc<Mutex<Shared>> = Arc::default();
         let (out, _) = broadcast::channel(64);
@@ -190,7 +195,7 @@ impl FakeWs {
                 }
             })
         };
-        FakeWs { url: format!("ws://127.0.0.1:{port}/websocket"), shared, out, accept }
+        Ok(FakeWs { url: format!("ws://127.0.0.1:{port}/websocket"), shared, out, accept })
     }
 
     /// The status repeated every 500 ms (`None`: send none).

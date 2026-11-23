@@ -2382,6 +2382,7 @@ dependencies = [
  "futures",
  "hex",
  "image",
+ "libc",
  "mc-core",
  "mc-storage",
  "mch-protocol",
@@ -2399,6 +2400,7 @@ dependencies = [
  "tracing-subscriber",
  "ts-rs",
  "uuid",
+ "windows-sys 0.59.0",
  "zstd",
 ]
 

@@ -99,9 +99,22 @@ async fn bind_pair() -> (TcpListener, TcpListener, u16) {
 impl FakeNet {
     pub async fn start() -> Arc<FakeNet> {
         let (ac, ad, a_base) = bind_pair().await;
+        let a_bl = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+        FakeNet::start_with(ac, ad, a_base, a_bl).await
+    }
+
+    /// Station A on the given control (and control + 1 data) and broadcast
+    /// ports, as a real Mercury started with `-p`/`-b`; B on ephemeral ports.
+    pub async fn start_at(a_base: u16, a_bcast: u16) -> std::io::Result<Arc<FakeNet>> {
+        let ac = TcpListener::bind(("127.0.0.1", a_base)).await?;
+        let ad = TcpListener::bind(("127.0.0.1", a_base.checked_add(1).unwrap_or(0))).await?;
+        let a_bl = TcpListener::bind(("127.0.0.1", a_bcast)).await?;
+        Ok(FakeNet::start_with(ac, ad, a_base, a_bl).await)
+    }
+
+    async fn start_with(ac: TcpListener, ad: TcpListener, a_base: u16, a_bl: TcpListener) -> Arc<FakeNet> {
         let (bc, bd, b_base) = bind_pair().await;
-        let (a_bl, b_bl) =
-            (TcpListener::bind(("127.0.0.1", 0)).await.unwrap(), TcpListener::bind(("127.0.0.1", 0)).await.unwrap());
+        let b_bl = TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
         let net = Arc::new(FakeNet {
             a_base,
             b_base,

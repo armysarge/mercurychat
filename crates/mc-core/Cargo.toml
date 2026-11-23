@@ -26,13 +26,21 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 mch-protocol = { path = "../mch-protocol" }
 mercury-adapter = { path = "../mercury-adapter", default-features = false }
 mc-storage = { path = "../mc-storage" }
-tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros", "fs"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros", "fs", "process"] }
 thiserror = "2"
 sha2 = "0.10"
 hex = "0.4"
 rand = "0.9"
 zstd = "0.13"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+
+# The built-in modem's children end with the app (M5 §5.4): a job object on
+# Windows, a parent-death signal on Linux.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
 
 [dev-dependencies]
 mc-core = { path = ".", features = ["test-hooks"] }

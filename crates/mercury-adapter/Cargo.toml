@@ -27,6 +27,13 @@ name = "fake-rigctld"
 path = "src/bin/fake_rigctld.rs"
 required-features = ["fake"]
 
+# A stand-in for Mercury behind its flags, for the built-in modem's supervisor
+# tests (M5 Task 4).
+[[bin]]
+name = "fake-mercury"
+path = "src/bin/fake_mercury.rs"
+required-features = ["fake"]
+
 [dev-dependencies]
 tempfile = "3"
 tokio = { version = "1", features = ["full", "test-util"] }
