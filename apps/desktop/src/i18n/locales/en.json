@@ -48,6 +48,7 @@
   },
   "where": {
     "simulator": "Simulator · no radio",
+    "builtIn": "Built-in Mercury",
     "mercury": "Mercury {host}:{port}"
   },
   "banner": {
@@ -182,6 +183,7 @@
     "modem": "Modem",
     "state": "State",
     "simulator": "Simulator (no radio)",
+    "builtIn": "Built-in Mercury",
     "mercuryAt": "Mercury at {host}:{port}",
     "chooseStation": "Choose a station in Settings."
   },
@@ -220,6 +222,7 @@
     "inUse": "in use",
     "noProfile": "No station profile yet.",
     "simulator": "simulator",
+    "builtIn": "built-in Mercury",
     "deleteQuestion": "Delete {callsign}?",
     "deleteInUse": "It is in use: any session ends at once.",
     "deleteKeeps": "Its message history stays on this computer but is no longer shown.",

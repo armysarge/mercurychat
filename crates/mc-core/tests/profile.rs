@@ -1,6 +1,6 @@
 //! SET-01 / SET-03 / RF-02: station profiles validate, normalise and persist.
 
-use mc_core::profile::{from_row, to_row, FieldError, ModemTarget, StationProfile};
+use mc_core::profile::{from_row, to_row, BuiltInPorts, FieldError, ModemTarget, StationProfile};
 use mc_storage::Store;
 
 fn fields(errs: &[FieldError]) -> Vec<&str> {
@@ -12,7 +12,7 @@ fn existing(p: &mut StationProfile) -> (&mut u16, &mut u16, &mut Option<u16>, &m
         ModemTarget::Existing { control_port, data_port, broadcast_port, telemetry_url, .. } => {
             (control_port, data_port, broadcast_port, telemetry_url)
         }
-        ModemTarget::Simulator => panic!("not an existing-modem profile"),
+        _ => panic!("not an existing-modem profile"),
     }
 }
 
@@ -260,4 +260,52 @@ fn station_info_round_trips_through_the_row() {
     p.rig = None;
     store.save_profile(&to_row(&p)).unwrap();
     assert_eq!(from_row(&store.profiles().unwrap()[0]).unwrap().rig, None);
+}
+
+/// M5 §5.1: a built-in profile keeps its four ports through the store.
+#[test]
+fn builtin_profile_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("app.db")).unwrap();
+    let mut p = StationProfile::new_builtin("ZS6ABC");
+    p.modem = ModemTarget::BuiltIn { ports: BuiltInPorts { control: 8400, broadcast: 8200, ui: 10100, rigctld: 4533 } };
+    let p = p.validate().unwrap();
+    store.save_profile(&to_row(&p)).unwrap();
+    let back = from_row(&store.profiles().unwrap()[0]).unwrap();
+    assert_eq!(back, p);
+    assert_eq!(StationProfile::new_builtin("ZS6ABC").modem, ModemTarget::BuiltIn { ports: BuiltInPorts::default() });
+    assert_eq!(BuiltInPorts::default(), BuiltInPorts { control: 8300, broadcast: 8100, ui: 10000, rigctld: 4532 });
+}
+
+/// M5 §5.1: the five ports (data is control + 1) must all differ, and none is 0.
+#[test]
+fn builtin_ports_must_differ() {
+    let with = |ports: BuiltInPorts| {
+        let mut p = StationProfile::new_builtin("ZS6ABC");
+        p.modem = ModemTarget::BuiltIn { ports };
+        p.validate()
+    };
+    let d = BuiltInPorts::default();
+    assert!(with(d).is_ok());
+    let errs = with(BuiltInPorts { broadcast: 8301, ..d }).unwrap_err();
+    assert_eq!(fields(&errs), ["broadcastPort"], "broadcast on the data port");
+    let errs = with(BuiltInPorts { ui: 8300, ..d }).unwrap_err();
+    assert_eq!(fields(&errs), ["uiPort"]);
+    let errs = with(BuiltInPorts { rigctld: 0, ..d }).unwrap_err();
+    assert_eq!(fields(&errs), ["rigctldPort"]);
+    let errs = with(BuiltInPorts { control: 65535, ..d }).unwrap_err();
+    assert_eq!(fields(&errs), ["controlPort"], "no room for the data port");
+}
+
+#[test]
+fn existing_and_simulator_profiles_unchanged() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut store = Store::open(&dir.path().join("app.db")).unwrap();
+    for p in [StationProfile::new_existing("ZS6ABC"), StationProfile::new_simulator("ZS6SIM")] {
+        let p = p.validate().unwrap();
+        store.save_profile(&to_row(&p)).unwrap();
+        let back = store.profiles().unwrap().into_iter().find(|r| r.id == p.id).unwrap();
+        assert_eq!(from_row(&back).unwrap(), p);
+        assert_eq!((back.ui_port, back.rigctld_port), (None, None));
+    }
 }

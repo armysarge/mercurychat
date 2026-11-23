@@ -79,7 +79,12 @@ const remove = (id: string) => {
   confirming.value = null;
   return act(() => call({ type: "deleteProfile", id }));
 };
-const where = (p: StationProfile) => (p.modem.kind === "simulator" ? t("settings.simulator") : `${p.modem.host}:${p.modem.controlPort}`);
+const where = (p: StationProfile) =>
+  p.modem.kind === "simulator"
+    ? t("settings.simulator")
+    : p.modem.kind === "builtIn"
+      ? t("settings.builtIn")
+      : `${p.modem.host}:${p.modem.controlPort}`;
 
 /** Each language in its own name (with "(draft)" while its file is unreviewed); System default in this language. */
 const languages = computed(() =>

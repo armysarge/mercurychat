@@ -49,6 +49,7 @@
   },
   "where": {
     "simulator": "Simulador · sin radio",
+    "builtIn": "Mercury integrado",
     "mercury": "Mercury {host}:{port}"
   },
   "banner": {
@@ -183,6 +184,7 @@
     "modem": "Módem",
     "state": "Estado",
     "simulator": "Simulador (sin radio)",
+    "builtIn": "Mercury integrado",
     "mercuryAt": "Mercury en {host}:{port}",
     "chooseStation": "Elige una estación en Ajustes."
   },
@@ -221,6 +223,7 @@
     "inUse": "en uso",
     "noProfile": "Aún no hay ningún perfil de estación.",
     "simulator": "simulador",
+    "builtIn": "Mercury integrado",
     "deleteQuestion": "¿Eliminar {callsign}?",
     "deleteInUse": "Está en uso: cualquier sesión termina de inmediato.",
     "deleteKeeps": "Su historial de mensajes se queda en este ordenador, pero ya no se muestra.",

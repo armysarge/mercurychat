@@ -584,6 +584,10 @@ async fn run(
             r.state(ModemState::Ready, None).await;
             serve(&mut station, cmds, &r, receive_only, &mut broadcast).await;
         }
+        // Started by the supervisor from M5 Task 5; until then, not available.
+        ModemTarget::BuiltIn { .. } => {
+            r.state(ModemState::Unavailable, Some("the built-in modem is not available in this build".into())).await;
+        }
         ModemTarget::Simulator => {
             let on_air = opts.sim_peer_broadcasts;
             simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air, opts.sim_rig, &opts.files)

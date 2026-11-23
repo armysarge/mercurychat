@@ -26,7 +26,15 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 7, sql: MIGRATION_7 },
     Migration { to: 8, sql: MIGRATION_8 },
     Migration { to: 9, sql: MIGRATION_9 },
+    Migration { to: 10, sql: MIGRATION_10 },
 ];
+
+/// The built-in modem (M5 §5.1): its UI WebSocket and rigctld ports. Control
+/// and broadcast use the existing columns; other kinds leave these NULL.
+const MIGRATION_10: &str = r#"
+ALTER TABLE station_profiles ADD COLUMN ui_port INTEGER;
+ALTER TABLE station_profiles ADD COLUMN rigctld_port INTEGER;
+"#;
 
 const MIGRATION_1: &str = r#"
 CREATE TABLE messages (

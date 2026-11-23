@@ -4,6 +4,7 @@
 mod audio;
 mod beacon;
 mod broadcast;
+pub mod builtin;
 mod chat;
 mod contract;
 mod discovery;

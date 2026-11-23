@@ -58,7 +58,9 @@ const utc = computed(() => now.value.toISOString().slice(11, 19) + " UTC");
 const where = computed(() => {
   const p = activeProfile.value;
   if (!p) return "";
-  return p.modem.kind === "simulator" ? t("where.simulator") : t("where.mercury", { host: p.modem.host, port: p.modem.controlPort });
+  if (p.modem.kind === "simulator") return t("where.simulator");
+  if (p.modem.kind === "builtIn") return t("where.builtIn");
+  return t("where.mercury", { host: p.modem.host, port: p.modem.controlPort });
 });
 
 /** The persistent banner for the modem's state (docs/04 §3 Recover). */

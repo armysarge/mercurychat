@@ -136,6 +136,8 @@ fn profile_row(id: &str) -> mc_storage::ProfileRow {
         antenna: None,
         email: None,
         about: None,
+        ui_port: None,
+        rigctld_port: None,
     }
 }
 
@@ -268,4 +270,27 @@ fn migration_9_adds_transfers() {
     assert_eq!((r.original_name.as_str(), r.size, r.wire_size), ("old.txt", 42, 42));
     assert_eq!(r.state, mc_storage::TransferState::Complete, "M0's delivered is complete");
     assert_eq!(r.created_utc, r.updated_utc);
+}
+
+/// M5 §5.1: migration 10 gives station profiles a built-in modem's UI and
+/// rigctld ports; existing rows keep NULL there.
+#[test]
+fn migration_10_adds_builtin_ports() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("app.db");
+    {
+        let _s = Store::open_with_migrations(&path, &MIGRATIONS[..9]).unwrap();
+        let c = rusqlite::Connection::open(&path).unwrap();
+        c.execute(
+            "INSERT INTO station_profiles (id, callsign, modem_kind, lab, created_utc, updated_utc)
+             VALUES ('p1', 'ZS6ABC', 'existing', 0, 't', 't')",
+            [],
+        )
+        .unwrap();
+    }
+    assert_eq!(version(&path), 9);
+    let s = Store::open(&path).unwrap();
+    assert!(version(&path) >= 10);
+    let r = s.profiles().unwrap().into_iter().find(|r| r.id == "p1").unwrap();
+    assert_eq!((r.ui_port, r.rigctld_port), (None, None));
 }

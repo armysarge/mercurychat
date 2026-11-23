@@ -508,6 +508,9 @@ pub struct ProfileRow {
     pub antenna: Option<String>,
     pub email: Option<String>,
     pub about: Option<String>,
+    /// A built-in modem's UI WebSocket and rigctld ports (M5; migration 10).
+    pub ui_port: Option<u16>,
+    pub rigctld_port: Option<u16>,
 }
 
 impl Store {
@@ -517,15 +520,16 @@ impl Store {
         self.conn.execute(
             "INSERT INTO station_profiles (id, callsign, name, grid, modem_kind, host, control_port, data_port,
                broadcast_port, telemetry_url, lab, receive_only, created_utc, updated_utc,
-               qth, rig, power, antenna, email, about)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16, ?17, ?18, ?19)
+               qth, rig, power, antenna, email, about, ui_port, rigctld_port)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
              ON CONFLICT (id) DO UPDATE SET callsign = excluded.callsign, name = excluded.name,
                grid = excluded.grid, modem_kind = excluded.modem_kind, host = excluded.host,
                control_port = excluded.control_port, data_port = excluded.data_port,
                broadcast_port = excluded.broadcast_port, telemetry_url = excluded.telemetry_url,
                lab = excluded.lab, receive_only = excluded.receive_only, updated_utc = excluded.updated_utc,
                qth = excluded.qth, rig = excluded.rig, power = excluded.power, antenna = excluded.antenna,
-               email = excluded.email, about = excluded.about",
+               email = excluded.email, about = excluded.about,
+               ui_port = excluded.ui_port, rigctld_port = excluded.rigctld_port",
             params![
                 r.id,
                 r.callsign,
@@ -545,7 +549,9 @@ impl Store {
                 r.power,
                 r.antenna,
                 r.email,
-                r.about
+                r.about,
+                r.ui_port,
+                r.rigctld_port
             ],
         )?;
         Ok(())
@@ -555,7 +561,8 @@ impl Store {
     pub fn profiles(&self) -> Result<Vec<ProfileRow>> {
         let mut st = self.conn.prepare(
             "SELECT id, callsign, name, grid, modem_kind, host, control_port, data_port, broadcast_port,
-                    telemetry_url, lab, receive_only, qth, rig, power, antenna, email, about
+                    telemetry_url, lab, receive_only, qth, rig, power, antenna, email, about,
+                    ui_port, rigctld_port
              FROM station_profiles ORDER BY created_utc, rowid",
         )?;
         let rows = st.query_map([], |r| {
@@ -578,6 +585,8 @@ impl Store {
                 antenna: r.get(15)?,
                 email: r.get(16)?,
                 about: r.get(17)?,
+                ui_port: r.get(18)?,
+                rigctld_port: r.get(19)?,
             })
         })?;
         Ok(rows.collect::<rusqlite::Result<_>>()?)

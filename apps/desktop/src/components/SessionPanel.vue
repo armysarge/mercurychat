@@ -22,7 +22,9 @@ const since = (utc: string) => utc.slice(11, 16) + " UTC";
 function where() {
   const p = activeProfile.value;
   if (!p) return "";
-  return p.modem.kind === "simulator" ? t("session.simulator") : t("session.mercuryAt", { host: p.modem.host, port: p.modem.controlPort });
+  if (p.modem.kind === "simulator") return t("session.simulator");
+  if (p.modem.kind === "builtIn") return t("session.builtIn");
+  return t("session.mercuryAt", { host: p.modem.host, port: p.modem.controlPort });
 }
 </script>
 

@@ -58,6 +58,40 @@ pub enum ModemTarget {
     },
     /// The in-process simulator: no audio, no RF (M1).
     Simulator,
+    /// The Mercury and rigctld shipped inside MercuryChat, started and stopped
+    /// by it, on this computer only (M5 §5.1).
+    BuiltIn { ports: BuiltInPorts },
+}
+
+/// A built-in modem's ports on 127.0.0.1 (M5 §5.1). Mercury's data port is
+/// `control + 1`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[ts(export)]
+#[serde(rename_all = "camelCase")]
+pub struct BuiltInPorts {
+    pub control: u16,
+    pub broadcast: u16,
+    pub ui: u16,
+    pub rigctld: u16,
+}
+
+impl Default for BuiltInPorts {
+    fn default() -> Self {
+        BuiltInPorts { control: 8300, broadcast: 8100, ui: 10000, rigctld: 4532 }
+    }
+}
+
+impl BuiltInPorts {
+    /// Every port the built-in modem listens on, with its field name.
+    pub fn all(&self) -> [(&'static str, u16); 5] {
+        [
+            ("controlPort", self.control),
+            ("dataPort", self.control.wrapping_add(1)),
+            ("broadcastPort", self.broadcast),
+            ("uiPort", self.ui),
+            ("rigctldPort", self.rigctld),
+        ]
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
@@ -161,6 +195,11 @@ impl StationProfile {
         StationProfile::new(callsign, ModemTarget::Simulator)
     }
 
+    /// The built-in Mercury on its default ports (M5 §5.1).
+    pub fn new_builtin(callsign: &str) -> StationProfile {
+        StationProfile::new(callsign, ModemTarget::BuiltIn { ports: BuiltInPorts::default() })
+    }
+
     fn new(callsign: &str, modem: ModemTarget) -> StationProfile {
         StationProfile {
             id: uuid::Uuid::new_v4().to_string(),
@@ -234,6 +273,10 @@ impl StationProfile {
             }
         }
 
+        if let ModemTarget::BuiltIn { ports } = &p.modem {
+            builtin_port_errors(ports, &mut errors);
+        }
+
         for (field, value) in [
             ("qth", &mut p.qth),
             ("rig", &mut p.rig),
@@ -255,6 +298,22 @@ impl StationProfile {
     }
 }
 
+/// The five ports must all be 1–65535 and differ (M5 §5.1); the data port is
+/// `control + 1`, so the control port can't be 65535.
+fn builtin_port_errors(ports: &BuiltInPorts, errors: &mut Vec<FieldError>) {
+    if ports.control == 0 || ports.control == u16::MAX {
+        errors.push(err("controlPort", "Port must be 1–65534 (the data port is the next one)"));
+    }
+    let all = ports.all();
+    for (i, (field, port)) in all.iter().enumerate().skip(2) {
+        if *port == 0 {
+            errors.push(err(field, "Port must be 1–65535"));
+        } else if all[..i].iter().any(|(_, q)| q == port) {
+            errors.push(err(field, "Must differ from the other modem ports"));
+        }
+    }
+}
+
 pub fn to_row(p: &StationProfile) -> ProfileRow {
     let (kind, host, control_port, data_port, broadcast_port, telemetry_url) = match &p.modem {
         ModemTarget::Existing { host, control_port, data_port, broadcast_port, telemetry_url } => (
@@ -266,6 +325,14 @@ pub fn to_row(p: &StationProfile) -> ProfileRow {
             telemetry_url.clone(),
         ),
         ModemTarget::Simulator => ("simulator", None, None, None, None, None),
+        ModemTarget::BuiltIn { ports } => (
+            "builtin",
+            Some("127.0.0.1".to_string()),
+            Some(ports.control),
+            Some(ports.control.wrapping_add(1)),
+            Some(ports.broadcast),
+            None,
+        ),
     };
     ProfileRow {
         id: p.id.clone(),
@@ -286,6 +353,14 @@ pub fn to_row(p: &StationProfile) -> ProfileRow {
         antenna: p.antenna.clone(),
         email: p.email.clone(),
         about: p.about.clone(),
+        ui_port: match &p.modem {
+            ModemTarget::BuiltIn { ports } => Some(ports.ui),
+            _ => None,
+        },
+        rigctld_port: match &p.modem {
+            ModemTarget::BuiltIn { ports } => Some(ports.rigctld),
+            _ => None,
+        },
     }
 }
 
@@ -299,6 +374,17 @@ pub fn from_row(r: &ProfileRow) -> Result<StationProfile, FieldError> {
             telemetry_url: r.telemetry_url.clone(),
         },
         "simulator" => ModemTarget::Simulator,
+        "builtin" => {
+            let d = BuiltInPorts::default();
+            ModemTarget::BuiltIn {
+                ports: BuiltInPorts {
+                    control: r.control_port.unwrap_or(d.control),
+                    broadcast: r.broadcast_port.unwrap_or(d.broadcast),
+                    ui: r.ui_port.unwrap_or(d.ui),
+                    rigctld: r.rigctld_port.unwrap_or(d.rigctld),
+                },
+            }
+        }
         other => return Err(err("modemKind", &format!("Unknown modem kind {other:?}"))),
     };
     Ok(StationProfile {
