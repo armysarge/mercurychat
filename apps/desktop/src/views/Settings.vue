@@ -10,6 +10,7 @@ import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { StationProfile } from "../bindings/StationProfile";
 import About from "../components/About.vue";
+import DiagnosticsFile from "../components/DiagnosticsFile.vue";
 import MacroEditor from "../components/MacroEditor.vue";
 import NotificationSettings from "../components/NotificationSettings.vue";
 import ProfileForms from "../components/ProfileForms.vue";
@@ -258,6 +259,7 @@ async function chooseFinalise(on: boolean) {
     </div>
     <div v-show="tab === 'about'" id="panel-about" class="panel" role="tabpanel" aria-labelledby="tab-about">
       <About />
+      <DiagnosticsFile />
     </div>
   </div>
 </template>

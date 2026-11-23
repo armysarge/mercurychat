@@ -412,7 +412,12 @@ fn listening(s: &AppSnapshot) -> bool {
 /// An app with a built-in profile saved (not yet selected). `args` go to
 /// fake-mercury through `fake-mercury.args` in the profile's Mercury folder.
 async fn station(root: &Path, bundle: Bundle, args: &str) -> Station {
-    let o = AppOptions { stations_root: Some(root.join("stations")), bundle: Some(bundle), ..AppOptions::default() };
+    let o = AppOptions {
+        stations_root: Some(root.join("stations")),
+        logs_dir: Some(root.join("logs")),
+        bundle: Some(bundle),
+        ..AppOptions::default()
+    };
     let h = spawn_app(Store::open_in_memory().unwrap(), o);
     let ports = fresh_ports();
     let id = match h.call(AppCommand::SaveProfile { profile: builtin_profile(ports) }).await.unwrap() {
@@ -651,4 +656,41 @@ async fn hamlib_models_come_from_the_bundled_rigctld() {
         }
         other => panic!("{other:?}"),
     }
+}
+
+/// M5 §7: the diagnostics preview lists exactly what the saved zip holds: the
+/// versions, the settings without the email, the app's logs and Mercury's
+/// log tail; never the database.
+#[tokio::test(flavor = "multi_thread")]
+async fn diagnostics_preview_matches_the_saved_zip() {
+    let root = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(root.path().join("logs")).unwrap();
+    std::fs::write(
+        root.path().join("logs").join("mercurychat.log.2026-11-23"),
+        "INFO attached
+",
+    )
+    .unwrap();
+    let st = station(root.path(), test_bundle(root.path()), "").await;
+    st.select().await;
+    snap_until(&st.h, 20, "listening", listening).await;
+    let entries = match st.h.call(AppCommand::DiagnosticsPreview).await.unwrap() {
+        CommandOk::Diagnostics { entries } => entries,
+        other => panic!("{other:?}"),
+    };
+    let names: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
+    assert_eq!(
+        names,
+        ["versions.txt", "profile.json", "logs/mercurychat.log.2026-11-23", "mercury.log", "rigctld.log"]
+    );
+    let zip = root.path().join("diag.zip").to_string_lossy().into_owned();
+    let saved = st.h.call(AppCommand::SaveDiagnostics { path: zip.clone() }).await.unwrap();
+    assert_eq!(saved, CommandOk::Exported { count: entries.len() as u32, path: zip.clone() });
+    let mut z = zip::ZipArchive::new(std::fs::File::open(&zip).unwrap()).unwrap();
+    let written: Vec<String> =
+        (0..z.len()).map(|i| z.by_index(i).unwrap().name().map(|n| n.to_string()).unwrap()).collect();
+    assert_eq!(written, names);
+    let mut versions = String::new();
+    std::io::Read::read_to_string(&mut z.by_name("versions.txt").unwrap(), &mut versions).unwrap();
+    assert!(versions.contains("Mercury 1.9.25") && versions.contains("Hamlib 4.7.2"), "{versions}");
 }

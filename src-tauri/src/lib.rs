@@ -316,6 +316,7 @@ fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
         bundle,
         sim_root: Some(root.clone()),
         stations_root: Some(root.join("stations")),
+        logs_dir: Some(root.join("logs")),
         locks_dir: Some(locks_dir.clone()),
         // The simulator's SIM1 calls CQ and beacons, so Heard has stations without RF.
         sim_peer_broadcasts: true,

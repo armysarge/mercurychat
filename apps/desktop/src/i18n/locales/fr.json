@@ -1260,5 +1260,18 @@
       "updates": "Rechercher des mises à jour",
       "about": "À propos de MercuryChat"
     }
+  },
+  "diagnostics": {
+    "file": {
+      "title": "Fichier de diagnostic",
+      "body": "Un fichier à envoyer à l'équipe MercuryChat en cas de problème : les journaux de l'application, le dernier rapport de plantage, les dernières lignes des journaux de Mercury et de rigctld, les versions et les réglages de cette station.",
+      "prepare": "Préparer un fichier de diagnostic…",
+      "holds": "Il contiendra :",
+      "never": "Jamais vos messages, vos fichiers, votre e-mail ni la base de données.",
+      "save": "Enregistrer…",
+      "saved": "Enregistré dans {path}.",
+      "bytes": "{n} o",
+      "kb": "{n} ko"
+    }
   }
 }

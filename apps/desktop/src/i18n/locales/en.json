@@ -1259,5 +1259,18 @@
       "updates": "Check for updates",
       "about": "About MercuryChat"
     }
+  },
+  "diagnostics": {
+    "file": {
+      "title": "Diagnostics file",
+      "body": "A file to send the MercuryChat team when something goes wrong: the app's logs, the last crash report, Mercury's and rigctld's recent log lines, the versions and this station's settings.",
+      "prepare": "Prepare a diagnostics file…",
+      "holds": "It will hold:",
+      "never": "Never your messages, your files, your email or the database.",
+      "save": "Save…",
+      "saved": "Saved to {path}.",
+      "bytes": "{n} B",
+      "kb": "{n} kB"
+    }
   }
 }

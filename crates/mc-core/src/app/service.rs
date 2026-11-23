@@ -97,6 +97,8 @@ pub struct AppOptions {
     /// The built-in modem's programs (M5): the release build's bundle, or a
     /// lab bundle in development; `None`: no built-in modem in this build.
     pub bundle: Option<crate::bundle::Bundle>,
+    /// The app's log folder (`{data root}/logs`), for the diagnostics file.
+    pub logs_dir: Option<PathBuf>,
 }
 
 impl Default for AppOptions {
@@ -117,6 +119,7 @@ impl Default for AppOptions {
             schedule_tick: None,
             qsy_windows: None,
             bundle: None,
+            logs_dir: None,
         }
     }
 }
@@ -204,6 +207,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         session: None,
         chat: None,
         sim_root: opts.sim_root,
+        logs_dir: opts.logs_dir,
         modem_opts: ModemOptions {
             stations_root,
             locks_dir: opts.locks_dir,
@@ -270,6 +274,14 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                                 }
                                 AppCommand::BuiltInInfo => {
                                     app.builtin_info(reply);
+                                    continue;
+                                }
+                                AppCommand::DiagnosticsPreview => {
+                                    app.diagnostics(None, reply);
+                                    continue;
+                                }
+                                AppCommand::SaveDiagnostics { path } => {
+                                    app.diagnostics(Some(path), reply);
                                     continue;
                                 }
                                 AppCommand::SerialPorts => {
@@ -370,6 +382,7 @@ struct App {
     /// The running built-in Mercury's "sound card chosen" flag, shared with its task.
     builtin_audio: Option<Arc<std::sync::atomic::AtomicBool>>,
     bundle: Option<crate::bundle::Bundle>,
+    logs_dir: Option<PathBuf>,
     /// The negotiated session, as the modem task last reported it.
     session: Option<SessionInfo>,
     /// The selected station's own store (its outbox, history and drafts),
@@ -857,9 +870,11 @@ impl App {
             AppCommand::RigSettings => self.rig_settings(),
             // Answered from the loop (see `test_rig`), never here.
             AppCommand::TestRig { .. } => Err(AppError::Internal { message: "the rig test runs on its own".into() }),
-            AppCommand::BuiltInInfo | AppCommand::CheckEndpoints { .. } | AppCommand::SerialPorts => {
-                Err(AppError::Internal { message: "checked off the actor".into() })
-            }
+            AppCommand::BuiltInInfo
+            | AppCommand::CheckEndpoints { .. }
+            | AppCommand::SerialPorts
+            | AppCommand::DiagnosticsPreview
+            | AppCommand::SaveDiagnostics { .. } => Err(AppError::Internal { message: "checked off the actor".into() }),
             AppCommand::CheckBuiltInPorts { ports } => Ok(match crate::app::builtin::ports::check_free(&ports) {
                 Ok(()) => CommandOk::PortCheck { taken: None, suggestion: None },
                 Err(t) => CommandOk::PortCheck { taken: Some(t.port), suggestion: Some(t.suggestion) },
@@ -923,6 +938,56 @@ impl App {
     }
 
     /// Receive only was just stored as `on`: tell the modem task, and show it.
+    /// M5 §7: the diagnostics file's entries, gathered here and read off the
+    /// actor; listed (`path` none) or written as a zip to `path`.
+    fn diagnostics(&self, path: Option<String>, reply: Reply<CommandOk>) {
+        use super::diagnostics::{self, DiagEntryView, Sources, Versions};
+        if let Some(p) = &path {
+            if p.trim().is_empty() || !std::path::Path::new(p).is_absolute() {
+                let _ = reply
+                    .send(Err(AppError::Validation { errors: chat::field("path", "Choose where to save the file") }));
+                return;
+            }
+        }
+        let profile = self.active_profile();
+        let mercury_log = match (&profile, &self.modem_opts.stations_root) {
+            (Some(p), Some(stations)) if matches!(p.modem, ModemTarget::BuiltIn { .. }) => {
+                Some(stations.join(&p.id).join("mercury").join("mercury.log"))
+            }
+            _ => None,
+        };
+        let rig_log = self.rig_log_lines();
+        let logs_dir = self.logs_dir.clone();
+        let bundle = self.bundle.clone();
+        tokio::spawn(async move {
+            let done = tokio::task::spawn_blocking(move || {
+                let built = bundle.map(|b| b.versions()).unwrap_or_default();
+                let versions = Versions {
+                    app: env!("CARGO_PKG_VERSION").into(),
+                    mercury: built.mercury,
+                    hamlib: built.hamlib,
+                    os: format!("{} {}", std::env::consts::OS, std::env::consts::ARCH),
+                };
+                let entries = diagnostics::collect(&Sources {
+                    logs_dir: logs_dir.as_deref(),
+                    mercury_log: mercury_log.as_deref(),
+                    rig_log: &rig_log,
+                    profile: profile.as_ref(),
+                    versions: &versions,
+                });
+                match path {
+                    None => Ok(CommandOk::Diagnostics { entries: entries.iter().map(DiagEntryView::from).collect() }),
+                    Some(path) => diagnostics::write_zip(&entries, std::path::Path::new(&path))
+                        .map(|()| CommandOk::Exported { count: entries.len() as u32, path: path.clone() })
+                        .map_err(|e| conflict(format!("could not write {path}: {e}"))),
+                }
+            })
+            .await
+            .unwrap_or_else(|e| Err(AppError::Internal { message: e.to_string() }));
+            let _ = reply.send(done);
+        });
+    }
+
     /// M5 §7: the logbook, oldest first, as ADIF or CSV.
     fn export_logbook(
         &mut self,

@@ -5,6 +5,7 @@
 use super::audio::AudioSettingsView;
 use super::beacon::{BeaconContentView, BeaconStatus};
 use super::chat::{ChatMessage, Conversation};
+use super::diagnostics::DiagEntryView;
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::endpoints::EndpointCheck;
 use super::events::{ModemDetail, ModemState, SessionInfo};
@@ -317,6 +318,15 @@ pub enum AppCommand {
         peer: String,
         path: String,
     },
+    /// What a diagnostics file would hold now, listed before anything is
+    /// saved (M5 §7): names and sizes.
+    DiagnosticsPreview,
+    /// Write the diagnostics file (a zip) to `path`, the operator's choice:
+    /// the app's logs, the last crash report, Mercury's and rigctld's log
+    /// tails, the versions and the settings without email or passwords.
+    SaveDiagnostics {
+        path: String,
+    },
     /// The first-run wizard's progress (M5 §6); an install with stations and
     /// no stored progress reads as done.
     GetWizard,
@@ -496,6 +506,9 @@ pub enum CommandOk {
         suggestion: Option<crate::profile::BuiltInPorts>,
     },
     Wizard(WizardState),
+    Diagnostics {
+        entries: Vec<DiagEntryView>,
+    },
     /// An export written: how many records (or messages) and where.
     Exported {
         count: u32,

@@ -33,6 +33,7 @@ hex = "0.4"
 rand = "0.9"
 zstd = "0.13"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
+zip = { version = "9.8.2", default-features = false, features = ["deflate-flate2"] }
 
 # Stopping the built-in Mercury asks it to quit first (SIGTERM, M5 §5.4).
 [target.'cfg(target_os = "linux")'.dependencies]

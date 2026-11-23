@@ -11,6 +11,8 @@
 //   B4 switching to a My own Mercury profile stops the built-in Mercury
 //      (its control port closes)
 //   B5 no console errors from the first screen to the end
+//   B6 Settings → About lists the diagnostics file's entries before saving:
+//      versions, settings and Mercury's log; no database (Task 11)
 // Usage: node lab/windows/m5-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 // Build first (debug: MC_BUNDLE_DIR is read only by debug builds):
 //   cargo build -p mercury-adapter --bins
@@ -165,6 +167,17 @@ try {
   if (!closed) throw new Error(`B4: the built-in Mercury still listens on ${control}`);
   results.push(`PASS B4 my own Mercury: the built-in control port ${control} closed`);
 
+  // ---- B6: the diagnostics file's preview (the save dialog is the system's).
+  await settingsTab("about");
+  await s.eval("document.querySelector('#panel-about button.diag-preview').click()");
+  await until(s, "document.querySelectorAll('#panel-about .diag-entries [data-name]').length >= 3", "the diagnostics preview");
+  const diag = await s.eval("[...document.querySelectorAll('#panel-about .diag-entries [data-name]')].map(e => e.dataset.name)");
+  for (const want of ["versions.txt", "profile.json", "rigctld.log"]) {
+    if (!diag.includes(want)) throw new Error(`B6: the preview lacks ${want}: ${diag.join(", ")}`);
+  }
+  if (diag.some((n) => /\.db$|files\//.test(n))) throw new Error(`B6: the preview lists data: ${diag.join(", ")}`);
+  results.push(`PASS B6 diagnostics preview: ${diag.join(", ")}`);
+
   await sleep(1000);
   await noErrors("the end");
   results.push("PASS B5 console: no errors from the first screen to the end");
@@ -176,4 +189,4 @@ try {
   kill(app);
 }
 for (const r of results) console.log(r);
-process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 5 ? 1 : 0);
+process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 6 ? 1 : 0);

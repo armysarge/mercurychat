@@ -557,9 +557,14 @@ impl App {
 
     /// The CAT log: rigctld's stderr, then MercuryChat's own rig link errors.
     pub(super) fn cat_log(&self) -> Result<CommandOk, AppError> {
+        Ok(CommandOk::CatLog { lines: self.rig_log_lines() })
+    }
+
+    /// MercuryChat's rigctld's output, then the rig link's own errors.
+    pub(super) fn rig_log_lines(&self) -> Vec<String> {
         let mut lines = self.rig.daemon.as_ref().map(|d| d.log()).unwrap_or_default();
         lines.extend(self.rig.cat_log.iter().cloned());
-        Ok(CommandOk::CatLog { lines })
+        lines
     }
 
     /// What MercuryChat's own rigctld is doing.

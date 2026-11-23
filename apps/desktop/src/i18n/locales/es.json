@@ -1260,5 +1260,18 @@
       "updates": "Buscar actualizaciones",
       "about": "Acerca de MercuryChat"
     }
+  },
+  "diagnostics": {
+    "file": {
+      "title": "Archivo de diagnóstico",
+      "body": "Un archivo para enviar al equipo de MercuryChat cuando algo falla: los registros de la aplicación, el último informe de fallo, las líneas recientes de los registros de Mercury y rigctld, las versiones y los ajustes de esta estación.",
+      "prepare": "Preparar un archivo de diagnóstico…",
+      "holds": "Contendrá:",
+      "never": "Nunca tus mensajes, tus archivos, tu correo ni la base de datos.",
+      "save": "Guardar…",
+      "saved": "Guardado en {path}.",
+      "bytes": "{n} B",
+      "kb": "{n} kB"
+    }
   }
 }

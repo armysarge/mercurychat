@@ -7,6 +7,7 @@ mod broadcast;
 pub mod builtin;
 mod chat;
 mod contract;
+pub mod diagnostics;
 mod discovery;
 mod endpoints;
 mod events;
