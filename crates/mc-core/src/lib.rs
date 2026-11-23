@@ -4,6 +4,7 @@
 
 pub mod app;
 pub mod band;
+pub mod bundle;
 pub mod files;
 pub mod lock;
 pub mod logs;

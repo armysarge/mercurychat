@@ -23,6 +23,11 @@ use tokio::sync::broadcast;
 /// The one event channel the UI listens on.
 pub const EVENT_CHANNEL: &str = "mc://event";
 
+/// The built-in modem's manifest and build record, compiled in by build.rs
+/// from `MC_BUNDLE_MANIFEST` (M5 G4); empty in a build without a bundle.
+pub const BUNDLE_MANIFEST: &str = include_str!(concat!(env!("OUT_DIR"), "/bundle-manifest.txt"));
+pub const BUNDLE_BUILD: &str = include_str!(concat!(env!("OUT_DIR"), "/bundle-build.txt"));
+
 static STARTED: OnceLock<Instant> = OnceLock::new();
 
 fn since_start_ms() -> u128 {
@@ -427,3 +432,21 @@ fn shut_down(app: &tauri::AppHandle) {
 
 /// How long exit waits for the core to stop what it started.
 const SHUTDOWN_WITHIN: Duration = Duration::from_secs(3);
+
+#[cfg(test)]
+mod bundle_tests {
+    /// The compiled-in text is exactly the bundle named at build time, or
+    /// empty when none was (M5 G4).
+    #[test]
+    fn bundle_text_matches_the_build_time_files() {
+        match option_env!("MC_BUNDLE_MANIFEST") {
+            Some(p) if !p.is_empty() => {
+                let p = std::path::Path::new(p);
+                assert_eq!(super::BUNDLE_MANIFEST, std::fs::read_to_string(p).unwrap());
+                assert_eq!(super::BUNDLE_BUILD, std::fs::read_to_string(p.with_file_name("BUILD.txt")).unwrap());
+                assert!(!super::BUNDLE_MANIFEST.is_empty());
+            }
+            _ => assert!(super::BUNDLE_MANIFEST.is_empty() && super::BUNDLE_BUILD.is_empty()),
+        }
+    }
+}
