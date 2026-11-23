@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { info } from "../diag";
 import { onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 // The right pane: whether incoming calls are answered (the Receive only switch
@@ -22,7 +23,7 @@ const since = (utc: string) => utc.slice(11, 16) + " UTC";
 function where() {
   const p = activeProfile.value;
   if (!p) return "";
-  if (p.modem.kind === "simulator") return t("session.simulator");
+  if (p.modem.kind === "simulator") return info.value?.simulator === false ? t("profile.simulatorUnavailable") : t("session.simulator");
   if (p.modem.kind === "builtIn") return t("session.builtIn");
   return t("session.mercuryAt", { host: p.modem.host, port: p.modem.controlPort });
 }

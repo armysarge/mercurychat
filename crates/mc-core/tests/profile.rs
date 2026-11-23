@@ -309,3 +309,26 @@ fn existing_and_simulator_profiles_unchanged() {
         assert_eq!((back.ui_port, back.rigctld_port), (None, None));
     }
 }
+
+/// M5 §5.6: a release build has no simulator. A stored simulator profile is
+/// unavailable, said plainly, never a fault. Run by scripts/check.sh with
+/// mc-core built without `sim`.
+#[cfg(not(feature = "sim"))]
+#[tokio::test]
+async fn simulator_profile_without_sim_is_unavailable() {
+    use mc_core::app::{spawn_app, AppCommand, AppOptions, CommandOk, ModemState};
+    let dir = tempfile::tempdir().unwrap();
+    let o = AppOptions { sim_root: Some(dir.path().to_path_buf()), ..AppOptions::default() };
+    let h = spawn_app(Store::open_in_memory().unwrap(), o);
+    let id = match h.call(AppCommand::SaveProfile { profile: StationProfile::new_simulator("ZS6ABC") }).await.unwrap() {
+        CommandOk::Profile(p) => p.id,
+        other => panic!("{other:?}"),
+    };
+    h.call(AppCommand::SelectProfile { id: Some(id) }).await.unwrap();
+    let s = match h.call(AppCommand::Snapshot).await.unwrap() {
+        CommandOk::Snapshot(s) => s,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(s.modem, ModemState::Unavailable);
+    assert_eq!(s.modem_detail.as_deref(), Some("The simulator is not available in this build."));
+}

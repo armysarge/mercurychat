@@ -50,6 +50,9 @@ pub const UI_LANGUAGES: [&str; 5] = ["system", "en", "es", "pt-BR", "fr"];
 /// Longest history search text, in characters.
 const SEARCH_MAX: usize = 128;
 
+/// What a stored simulator profile reads in a build without the simulator.
+pub const SIMULATOR_UNAVAILABLE: &str = "The simulator is not available in this build.";
+
 /// Set once Mercury has accepted a sound card for a built-in profile (M5 §5.5).
 fn audio_chosen_key(profile: &str) -> String {
     format!("builtin.audioChosen:{profile}")
@@ -1257,7 +1260,8 @@ impl App {
         self.open_chat(&p);
         if p.modem == ModemTarget::Simulator {
             if !cfg!(feature = "sim") {
-                return self.set_modem(ModemState::Faulted, Some("the simulator is not part of this build".into()));
+                // A release build (M5 §5.6): said plainly, not a fault.
+                return self.set_modem(ModemState::Unavailable, Some(SIMULATOR_UNAVAILABLE.into()));
             }
             if self.sim_root.is_none() {
                 return self.set_modem(ModemState::Faulted, Some("simulator unavailable: no data directory".into()));

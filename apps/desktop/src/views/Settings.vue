@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { info } from "../diag";
 // Settings (docs/04 §4), in tabs (owner request, 18 Nov): Station (its
 // information, macros and the Logbook preference), Profiles (and new ones from
 // the same forms as first use), Rig (M3b), Notifications, Appearance and
@@ -81,7 +82,9 @@ const remove = (id: string) => {
 };
 const where = (p: StationProfile) =>
   p.modem.kind === "simulator"
-    ? t("settings.simulator")
+    ? info.value?.simulator === false
+      ? t("profile.simulatorUnavailable")
+      : t("settings.simulator")
     : p.modem.kind === "builtIn"
       ? t("settings.builtIn")
       : `${p.modem.host}:${p.modem.controlPort}`;

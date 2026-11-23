@@ -14,6 +14,8 @@ export interface AppInfo {
   locks_dir: string;
   startup_ms: number;
   startup_error: string | null;
+  /** This build has the simulator (development builds only). */
+  simulator: boolean;
 }
 
 export const info = ref<AppInfo | null>(null);

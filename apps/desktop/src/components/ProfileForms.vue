@@ -7,6 +7,7 @@ import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { AppError } from "../bindings/AppError";
 import type { StationProfile } from "../bindings/StationProfile";
+import { info } from "../diag";
 import { snapshot } from "../store";
 
 const { t } = useI18n();
@@ -103,7 +104,7 @@ function useExisting() {
 
 <template>
   <div class="forms">
-    <form class="card stack simulator" @submit.prevent="useSimulator">
+    <form v-if="info?.simulator !== false" class="card stack simulator" @submit.prevent="useSimulator">
       <h2>{{ t("profile.simulatorTitle") }}</h2>
       <p class="muted small">{{ t("profile.simulatorBody") }}</p>
       <label>{{ t("profile.callsign") }} <input v-model="simCall" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>

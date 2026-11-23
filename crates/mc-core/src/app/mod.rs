@@ -52,7 +52,7 @@ pub use rigconfig::{
     READ_EVERY_CHOICES, TUNE_RANGE, TX_GAIN_RANGE,
 };
 pub use schedule::{Schedule, ScheduleNext, ScheduleSlot, MAX_SLOTS};
-pub use service::{spawn_app, AppHandle, AppOptions};
+pub use service::{spawn_app, AppHandle, AppOptions, SIMULATOR_UNAVAILABLE};
 pub use telemetry::{
     AudioView, TelemetryLinkView, TelemetryView, Tuning, CONTROL_SOURCE, EVENT_GAP, FREQ_FRESH_MS, OFFSET_FRESH_MS,
     TELEMETRY_SOURCE,

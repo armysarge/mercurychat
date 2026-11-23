@@ -15,6 +15,10 @@ cargo test --workspace --features mc-core/sim
 # The workspace build turns the simulator on (src-tauri enables it); check the
 # core without it too, so the cfg(not(feature = "sim")) path keeps compiling.
 cargo clippy -p mc-core --all-targets -- -D warnings
+# A release build has no simulator (M5 §5.6): the shell builds without it, and a
+# stored simulator profile reads as unavailable.
+cargo check -p mercurychat --no-default-features
+cargo test -p mc-core --test profile
 node apps/desktop/scripts/check-i18n.mjs
 # Themes: contrast (WCAG AA/AAA), no colour literals outside the theme files, apply.ts unit tests.
 node apps/desktop/scripts/check-contrast.mjs

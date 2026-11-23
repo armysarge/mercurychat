@@ -205,6 +205,7 @@
     "simulatorBody": "A simulated Mercury in this app, with a station SIM1 that answers and echoes. No radio, no audio.",
     "callsign": "Your callsign",
     "useSimulator": "Use simulator",
+    "simulatorUnavailable": "Simulator: not available in this build",
     "existingTitle": "Existing Mercury",
     "existingBody": "A Mercury modem already running, on this computer or one you name. MercuryChat attaches to its control and data ports; it answers incoming calls unless you turn on Receive only.",
     "host": "Host",

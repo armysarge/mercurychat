@@ -206,6 +206,7 @@
     "simulatorBody": "Un Mercury simulado dentro de esta aplicación, con una estación SIM1 que responde y devuelve tus mensajes. Sin radio y sin audio.",
     "callsign": "Tu indicativo",
     "useSimulator": "Usar el simulador",
+    "simulatorUnavailable": "Simulador: no disponible en esta versión",
     "existingTitle": "Mercury existente",
     "existingBody": "Un módem Mercury que ya está en marcha, en este ordenador o en otro que indiques. MercuryChat se conecta a sus puertos de control y de datos; responde a las llamadas entrantes salvo que actives Solo recepción.",
     "host": "Host",

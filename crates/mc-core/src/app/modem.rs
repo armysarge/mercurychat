@@ -880,7 +880,7 @@ async fn simulator(
     _with_rig: bool,
     _files: &FileOptions,
 ) {
-    r.fault("the simulator is not part of this build".into()).await;
+    r.state(ModemState::Unavailable, Some(super::service::SIMULATOR_UNAVAILABLE.into())).await;
 }
 
 /// Turn listening on after attach or recovery (D18). One attempt, never

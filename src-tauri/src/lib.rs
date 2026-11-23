@@ -78,6 +78,8 @@ struct AppInfo {
     startup_ms: u128,
     /// Set when start-up failed; the UI then shows only this.
     startup_error: Option<String>,
+    /// This build has the simulator (development builds; never a release).
+    simulator: bool,
 }
 
 #[tauri::command]
@@ -109,6 +111,7 @@ fn app_info(shell: tauri::State<'_, Shell>) -> AppInfo {
         locks_dir,
         startup_ms: since_start_ms(),
         startup_error,
+        simulator: cfg!(feature = "simulator"),
     }
 }
 
@@ -273,6 +276,26 @@ fn stopped_err() -> AppError {
     AppError::Internal { message: "the application service is not running".into() }
 }
 
+/// The built-in modem's programs (M5 §5.2): beside the app in `modem\` on
+/// Windows, in /usr/lib/mercurychat on Linux, checked against the manifest
+/// compiled in. A debug build without one may use a lab bundle named by
+/// `MC_BUNDLE_DIR` (its own manifest). `None`: no built-in modem.
+fn builtin_bundle() -> Option<mc_core::bundle::Bundle> {
+    let dir = if cfg!(windows) {
+        std::env::current_exe().ok()?.parent()?.join("modem")
+    } else {
+        std::path::PathBuf::from("/usr/lib/mercurychat")
+    };
+    if let Some(b) = mc_core::bundle::Bundle::shipped(dir, BUNDLE_MANIFEST, BUNDLE_BUILD) {
+        return Some(b);
+    }
+    if cfg!(debug_assertions) {
+        let lab = std::env::var_os("MC_BUNDLE_DIR")?;
+        return mc_core::bundle::Bundle::from_dir(lab.into()).map_err(|e| eprintln!("MC_BUNDLE_DIR: {e}")).ok();
+    }
+    None
+}
+
 /// Start-up order (docs/02 §6): data-root lock, logging, log pruning, crash
 /// report, store (all in `startup::prepare`), then the service actor.
 fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
@@ -288,7 +311,9 @@ fn start(app: &tauri::AppHandle) -> Result<Shell, Box<dyn std::error::Error>> {
     let locks_dir = app.path().app_local_data_dir()?.join("locks");
     std::fs::create_dir_all(&locks_dir)?;
     let startup::Prepared { root, db_path, schema, store, log, lock } = p;
+    let bundle = builtin_bundle();
     let opts = AppOptions {
+        bundle,
         sim_root: Some(root.clone()),
         stations_root: Some(root.join("stations")),
         locks_dir: Some(locks_dir.clone()),
