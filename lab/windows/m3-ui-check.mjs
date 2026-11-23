@@ -67,7 +67,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { connect, kill, launch, page, pages, sleep, until } from "./cdp.mjs";
+import { connect, firstUse, kill, launch, page, pages, sleep, until } from "./cdp.mjs";
 import { click, pill, setInput } from "./m2-dom.mjs";
 
 const [exe, dataDir, port = "9335"] = process.argv.slice(2);
@@ -158,7 +158,7 @@ try {
   const moving = await sc.eval("getComputedStyle(document.querySelector('.bar i')).animationName");
   if (still !== "none" || moving === "none") throw new Error(`reduced motion: animation "${still}" when reduced, "${moving}" otherwise`);
   sc.close();
-  s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
+  s = await firstUse(port, "Use simulator");
   const after = await pages(port);
   await until(s, "true", "settle");
   let tries = 0;

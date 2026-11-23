@@ -11,7 +11,7 @@
 import { createHash } from "node:crypto";
 import { execSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { kill, launch, page, sleep, until } from "./cdp.mjs";
+import { firstUse, kill, launch, page, sleep, until } from "./cdp.mjs";
 import { click, compose, mode, pill, setInput, transcript } from "./m2-dom.mjs";
 
 const TEXT = "héllo 👋\r\nline two\n\tשלום";
@@ -51,7 +51,7 @@ export async function existingRun({ exe, dataDir, port, host, controlPort, peer,
   let app, s;
   try {
     app = launch(exe, dataDir, port);
-    s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
+    s = await firstUse(port, "Use simulator");
     // The first-use form for an existing Mercury (the same form is in Settings).
     await s.eval(setInput('form.existing input[name="callsign"]', "ZS6WIN"));
     await s.eval(setInput('form.existing input[name="host"]', host));

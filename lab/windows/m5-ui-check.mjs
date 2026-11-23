@@ -19,7 +19,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSyn
 import { createHash } from "node:crypto";
 import { createServer, connect as tcp } from "node:net";
 import { dirname, join } from "node:path";
-import { kill, launch, page, sleep, until } from "./cdp.mjs";
+import { firstUse, kill, launch, page, sleep, until } from "./cdp.mjs";
 import { click, pill, setInput } from "./m2-dom.mjs";
 
 const [exe, dataDir, port = "9363"] = process.argv.slice(2);
@@ -98,7 +98,7 @@ try {
   process.env.MC_BUNDLE_DIR = bundle;
   app = launch(exe, dataDir, port);
   delete process.env.MC_BUNDLE_DIR;
-  s = await page(port, (t) => t.includes("Built-in Mercury"), "the first-use screen", 40000);
+  s = await firstUse(port, "Built-in Mercury", 40000);
   await s.eval(watchErrors);
 
   // ---- B3 (1): the modem choice names the built-in version.

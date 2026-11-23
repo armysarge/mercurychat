@@ -18,6 +18,7 @@ pub mod flrig;
 pub mod kiss;
 pub mod monitor;
 pub mod rigctl;
+pub mod serial;
 pub mod telemetry;
 
 pub use client::{Ack, AdapterEvent, AttachError, Attachment, CommandError, Endpoint, MercuryClient, Timeouts};

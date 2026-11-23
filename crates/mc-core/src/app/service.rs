@@ -19,6 +19,7 @@ use super::logbook::{self, Qso, Start, FINALISE_SETTING};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use super::notify::{NotifyPrefs, NOTIFY_SETTING};
 use super::telemetry::{Telemetry, Tuning};
+use super::wizard::{WizardState, WIZARD_SETTING};
 use crate::macros::{self, MacroDef};
 use crate::profile::{from_row, to_row, ModemTarget, StationProfile};
 use crate::station::Observation;
@@ -236,6 +237,9 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
     };
     let spectrum = app.modem_opts.spectrum.0.subscribe();
     tokio::spawn(async move {
+        // A station the wizard is still setting up stays in Receive only,
+        // even if the app stopped between saving it and the wizard's progress.
+        app.wizard_hold();
         // The selection survives a restart, so its modem is attached again (attach
         // only: a stored listen preference never arms transmission, RF-02).
         if let Some(p) = app.active_profile() {
@@ -266,6 +270,28 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                                 }
                                 AppCommand::BuiltInInfo => {
                                     app.builtin_info(reply);
+                                    continue;
+                                }
+                                AppCommand::SerialPorts => {
+                                    tokio::spawn(async move {
+                                        let r = tokio::task::spawn_blocking(mercury_adapter::serial::ports)
+                                            .await
+                                            .map(|ports| CommandOk::SerialPorts { ports })
+                                            .map_err(|e| AppError::Internal { message: e.to_string() });
+                                        let _ = reply.send(r);
+                                    });
+                                    continue;
+                                }
+                                AppCommand::CheckEndpoints { modem } => {
+                                    tokio::spawn(async move {
+                                        let r = match super::endpoints::check(&modem).await {
+                                            Some(results) => Ok(CommandOk::Endpoints { results }),
+                                            None => Err(AppError::Validation {
+                                                errors: chat::field("modemKind", "Only My own Mercury is checked this way"),
+                                            }),
+                                        };
+                                        let _ = reply.send(r);
+                                    });
                                     continue;
                                 }
                                 AppCommand::HamlibModels { hamlib_dir } => {
@@ -474,6 +500,13 @@ impl App {
                     return Err(conflict(format!("the modem is {state}: pick a station first")));
                 }
                 let Some(mut p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+                let w = self.wizard();
+                if !on && w.holds_receive_only() && w.draft_profile_id.as_deref() == Some(p.id.as_str()) {
+                    return Err(AppError::Refused {
+                        reason: "wizard.receiveOnly",
+                        message: "Choose how this station operates in the setup first".into(),
+                    });
+                }
                 p.receive_only = on;
                 self.store.save_profile(&to_row(&p)).map_err(storage)?;
                 self.emit(AppEvent::ProfilesChanged);
@@ -814,11 +847,21 @@ impl App {
             AppCommand::RigSettings => self.rig_settings(),
             // Answered from the loop (see `test_rig`), never here.
             AppCommand::TestRig { .. } => Err(AppError::Internal { message: "the rig test runs on its own".into() }),
-            AppCommand::BuiltInInfo => Err(AppError::Internal { message: "checked off the actor".into() }),
+            AppCommand::BuiltInInfo | AppCommand::CheckEndpoints { .. } | AppCommand::SerialPorts => {
+                Err(AppError::Internal { message: "checked off the actor".into() })
+            }
             AppCommand::CheckBuiltInPorts { ports } => Ok(match crate::app::builtin::ports::check_free(&ports) {
                 Ok(()) => CommandOk::PortCheck { taken: None, suggestion: None },
                 Err(t) => CommandOk::PortCheck { taken: Some(t.port), suggestion: Some(t.suggestion) },
             }),
+            AppCommand::GetWizard => Ok(CommandOk::Wizard(self.wizard())),
+            AppCommand::SetWizard { state } => {
+                let state = state.normalised();
+                let json = serde_json::to_string(&state).map_err(|e| AppError::Internal { message: e.to_string() })?;
+                self.store.set_setting(WIZARD_SETTING, &json).map_err(storage)?;
+                self.wizard_hold();
+                Ok(CommandOk::Wizard(state))
+            }
             AppCommand::HamlibModels { .. } => {
                 Err(AppError::Internal { message: "the model list runs on its own".into() })
             }
@@ -866,6 +909,41 @@ impl App {
     }
 
     /// Receive only was just stored as `on`: tell the modem task, and show it.
+    /// The wizard's progress (see `WizardState::from_setting`).
+    fn wizard(&self) -> WizardState {
+        let stored = self.store.setting(WIZARD_SETTING).ok().flatten();
+        let has_profiles = self.store.profiles().map(|p| !p.is_empty()).unwrap_or(false);
+        WizardState::from_setting(stored.as_deref(), has_profiles)
+    }
+
+    /// Put the wizard's draft station in Receive only while the wizard holds
+    /// it (Review Focus 4): it never answers a call before the operator says.
+    fn wizard_hold(&mut self) {
+        let w = self.wizard();
+        let holds = w.holds_receive_only();
+        let Some(id) = w.draft_profile_id.filter(|_| holds) else { return };
+        let Some(mut p) = self
+            .store
+            .profiles()
+            .ok()
+            .and_then(|rows| rows.into_iter().find(|r| r.id == id).and_then(|r| from_row(&r).ok()))
+        else {
+            return;
+        };
+        if p.receive_only {
+            return;
+        }
+        p.receive_only = true;
+        if let Err(e) = self.store.save_profile(&to_row(&p)) {
+            tracing::warn!("could not hold the wizard's station in Receive only: {e}");
+            return;
+        }
+        self.emit(AppEvent::ProfilesChanged);
+        if self.active_profile().is_some_and(|a| a.id == id) {
+            self.receive_only_changed(true);
+        }
+    }
+
     fn receive_only_changed(&mut self, on: bool) {
         if let Some(t) = &self.task {
             t.set_receive_only(on);

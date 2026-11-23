@@ -6,6 +6,7 @@ use super::audio::AudioSettingsView;
 use super::beacon::{BeaconContentView, BeaconStatus};
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
+use super::endpoints::EndpointCheck;
 use super::events::{ModemDetail, ModemState, SessionInfo};
 use super::files::{FileSettings, PreparedView, TransferView};
 use super::frequencies::FrequencyEntry;
@@ -17,6 +18,7 @@ use super::rig::{RigBanner, RigChange, RigTestStep, RigView, TuneView};
 use super::rigconfig::{BandLevels, HamlibModelView, RigConfig};
 use super::schedule::{Schedule, ScheduleNext};
 use super::telemetry::TelemetryView;
+use super::wizard::WizardState;
 use crate::macros::MacroDef;
 use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
@@ -291,6 +293,23 @@ pub enum AppCommand {
     CheckBuiltInPorts {
         ports: crate::profile::BuiltInPorts,
     },
+    /// SET-03, read-only: connect to each of My own Mercury's endpoints and
+    /// close again, nothing sent; each named with what went wrong in words.
+    /// Nothing is saved or selected.
+    CheckEndpoints {
+        modem: crate::profile::ModemTarget,
+    },
+    /// This computer's serial ports for the rig's CAT and PTT, from the
+    /// system's records (none is opened), in natural order.
+    SerialPorts,
+    /// The first-run wizard's progress (M5 §6); an install with stations and
+    /// no stored progress reads as done.
+    GetWizard,
+    /// Keep the wizard's progress. While it has not passed "How you
+    /// operate", its draft station is held in Receive only.
+    SetWizard {
+        state: WizardState,
+    },
     /// Hamlib's rig models, from `rigctld -l` (rigctld on the PATH, else in
     /// `hamlib_dir`); `found: false` when there is no rigctld (M3b.1 §5.3).
     HamlibModels {
@@ -437,6 +456,9 @@ pub enum CommandOk {
     HamlibModels { models: Vec<HamlibModelView>, found: bool },
     BuiltIn(BuiltInView),
     PortCheck { taken: Option<u16>, suggestion: Option<crate::profile::BuiltInPorts> },
+    Wizard(WizardState),
+    SerialPorts { ports: Vec<String> },
+    Endpoints { results: Vec<EndpointCheck> },
     CatLog { lines: Vec<String> },
     Audio(AudioSettingsView),
     BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },

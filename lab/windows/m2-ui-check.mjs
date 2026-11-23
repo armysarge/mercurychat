@@ -16,7 +16,7 @@
 // Usage: node lab/windows/m2-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 //   Against a real Mercury instead (Task 10, see m2-existing.mjs):
 //   ... --existing HOST:PORT --peer SIM2 --peer-log FILE --stop-a CMD --start-a CMD
-import { kill, launch, page, sleep, until } from "./cdp.mjs";
+import { firstUse, kill, launch, page, sleep, until } from "./cdp.mjs";
 import { existingRun } from "./m2-existing.mjs";
 import { button, click, compose, mode, pill, setInput, transcript } from "./m2-dom.mjs";
 
@@ -73,7 +73,7 @@ const results = [];
 let first, second;
 try {
   first = launch(exe, dataDir, port);
-  let s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen");
+  let s = await firstUse(port, "Use simulator");
   await s.eval(setInput('input[name="callsign"]', CALL));
   await s.eval(click("Use simulator"));
   await until(s, `${pill} === 'ready' && document.querySelector('textarea.composer')`, "the workspace, ready");

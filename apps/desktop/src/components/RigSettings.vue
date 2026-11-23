@@ -51,6 +51,17 @@ const catLog = ref<string[]>([]);
 const logOpen = ref(false);
 const copied = ref(false);
 const testHz = ref(14_105_000);
+/** This computer's serial ports, from the system's records (M5 §6); typing any other still works. */
+const serialPorts = ref<string[]>([]);
+async function loadSerialPorts() {
+  try {
+    const r = await call({ type: "serialPorts" });
+    if (r.type === "serialPorts") serialPorts.value = r.ports;
+  } catch {
+    // A convenience: the port can still be typed.
+  }
+}
+void loadSerialPorts();
 const freqResult = ref("");
 
 const boxes = computed(() => visibleBoxes(config.value));
@@ -153,6 +164,18 @@ async function test() {
     testing.value = false;
   }
 }
+/** MercuryChat's own rigctld (M5 W4): save, wait for it to run on the
+ *  settings, then the same read-only test, where it listens. */
+async function saveAndTest() {
+  await save();
+  if (error.value) return;
+  testing.value = true;
+  const end = Date.now() + 15000;
+  // The save restarts it: wait for it to be up again before reading.
+  await new Promise((r) => setTimeout(r, 500));
+  while (rig.value?.daemon !== "running" && Date.now() < end) await new Promise((r) => setTimeout(r, 250));
+  await test();
+}
 async function pttTest(on: boolean) {
   error.value = "";
   try {
@@ -245,6 +268,9 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
 <template>
   <section class="card stack rig-settings span-all" aria-labelledby="h-rig">
     <h2 id="h-rig">{{ t("rigSettings.title") }}</h2>
+    <datalist id="serial-ports">
+      <option v-for="sp in serialPorts" :key="sp" :value="sp" />
+    </datalist>
     <p v-if="!activeProfile" class="muted">{{ t("rigSettings.noStation") }}</p>
     <div v-else class="cols">
       <!-- Left: PTT, then the CAT link of MercuryChat's own rigctld, then the log. -->
@@ -266,7 +292,7 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
             </label>
             <label>
               {{ t("rigSettings.pttPort") }}
-              <input v-model="config.ptt.pttPort" class="rig-ptt-port" spellcheck="false" :placeholder="t('rigSettings.pttPortHint')" />
+              <input v-model="config.ptt.pttPort" class="rig-ptt-port" list="serial-ports" spellcheck="false" :placeholder="t('rigSettings.pttPortHint')" @focus="loadSerialPorts" />
             </label>
             <label class="check"><input v-model="config.ptt.invert" type="checkbox" class="rig-ptt-invert" /> {{ t("rigSettings.invert") }}</label>
           </div>
@@ -309,7 +335,7 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
             </label>
             <label v-if="config.cat.link === 'serial'">
               {{ t("rigSettings.serialPort") }}
-              <input v-model="config.cat.serialPort" class="rig-serial-port" spellcheck="false" :placeholder="t('rigSettings.serialPortExample')" />
+              <input v-model="config.cat.serialPort" class="rig-serial-port" list="serial-ports" spellcheck="false" :placeholder="t('rigSettings.serialPortExample')" @focus="loadSerialPorts" />
             </label>
             <label v-else>
               {{ t("rigSettings.tcpAddr") }}
@@ -361,6 +387,16 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
             </label>
           </div>
           <p v-if="daemonText" class="small" role="status">{{ daemonText }}</p>
+          <div class="buttons">
+            <button class="rig-test-own" :disabled="testing" :title="t('rigSettings.testOwnHint')" @click="saveAndTest">{{ testing ? t("rigSettings.testing") : t("rigSettings.testOwn") }}</button>
+          </div>
+          <ol v-if="steps" class="rig-test-steps small">
+            <li v-for="s in steps" :key="s.name" :class="['step', tone(s.ok)]" :data-step="s.name">
+              <span class="mark" aria-hidden="true">{{ mark(s.ok) }}</span>
+              <b>{{ stepName(s.name) }}</b>
+              <span class="detail">{{ s.detail }}</span>
+            </li>
+          </ol>
         </fieldset>
 
         <details class="box cat-log" @toggle="logOpen = ($event.target as HTMLDetailsElement).open">

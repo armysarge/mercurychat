@@ -23,6 +23,8 @@ import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../
 import { activeProfile, mirror, setFinaliseOnDisconnect, snapshot } from "../store";
 import Switch from "../components/Switch.vue";
 import { builtin, settingsTabRequest } from "../builtin";
+import type { WizardStep } from "../bindings/WizardStep";
+import { restartWizard, wizard } from "../wizardState";
 
 const { t } = useI18n();
 
@@ -113,6 +115,19 @@ async function chooseLanguage(value: string) {
   }
 }
 
+/** Where a skipped wizard step is done instead (M5 §6). */
+const STEP_TAB: Partial<Record<WizardStep, Tab>> = { station: "station", audio: "audio", rig: "rig" };
+const skippedSteps = computed(() => wizard.value?.skipped ?? []);
+const setupError = ref("");
+async function runSetup() {
+  setupError.value = "";
+  try {
+    await restartWizard();
+  } catch (e) {
+    setupError.value = describeError(e);
+  }
+}
+
 const finaliseError = ref("");
 async function chooseFinalise(on: boolean) {
   finaliseError.value = "";
@@ -195,6 +210,19 @@ async function chooseFinalise(on: boolean) {
       <p v-else class="muted">{{ t("settings.noProfile") }}</p>
       <p v-if="error" class="err" role="alert">{{ error }}</p>
     </section>
+    <section class="card stack span-all setup" aria-labelledby="h-setup">
+      <h2 id="h-setup">{{ t("settings.setup.title") }}</h2>
+      <p class="muted small">{{ t("settings.setup.body") }}</p>
+      <div v-if="skippedSteps.length" class="skipped-steps">
+        <span class="small">{{ t("settings.setup.skipped") }}</span>
+        <template v-for="s in skippedSteps" :key="s">
+          <button v-if="STEP_TAB[s]" class="quiet small" :data-step="s" @click="tab = STEP_TAB[s]!">{{ t(`wizard.steps.${s}`) }}</button>
+          <span v-else class="small" :data-step="s">{{ t(`wizard.steps.${s}`) }}</span>
+        </template>
+      </div>
+      <div><button class="run-setup" @click="runSetup">{{ t("settings.setup.run") }}</button></div>
+      <p v-if="setupError" class="err" role="alert">{{ setupError }}</p>
+    </section>
     <h2 class="span-all">{{ t("settings.addStation") }}</h2>
     <ProfileForms class="span-all" />
     </div>
@@ -235,6 +263,7 @@ async function chooseFinalise(on: boolean) {
 </template>
 
 <style scoped>
+.skipped-steps { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .settings { padding: calc(var(--space) * 3); display: grid; gap: calc(var(--space) * 2); overflow-y: auto; overflow-x: hidden; height: 100%; align-content: start; min-width: 0; }
 .tabs { display: flex; flex-wrap: wrap; gap: 2px; border-bottom: 1px solid var(--border); }
 .tab { border: 1px solid transparent; border-bottom: 0; border-radius: var(--radius) var(--radius) 0 0; background: transparent; padding: 4px 12px; color: var(--text-2); }

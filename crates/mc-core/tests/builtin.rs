@@ -615,3 +615,40 @@ async fn changed_bundle_refuses_to_start() {
     assert_eq!(s.builtin_detail, Some(ModemDetail::MercuryStopped { reason: msg.into() }));
     assert!(st.starts().is_empty());
 }
+
+/// M5 W4: the read-only CAT test of a built-in station probes the rigctld
+/// MercuryChat runs for it (127.0.0.1 on the profile's rigctld port), not the
+/// external rigctld box's address.
+#[tokio::test(flavor = "multi_thread")]
+async fn rig_test_probes_our_own_rigctld() {
+    let root = tempfile::tempdir().unwrap();
+    let st = station(root.path(), test_bundle(root.path()), "").await;
+    st.select().await;
+    snap_until(&st.h, 20, "listening", listening).await;
+    assert_eq!(st.h.call(AppCommand::SetRigConfig { config: managed_dummy() }).await.unwrap(), CommandOk::Done);
+    snap_until(&st.h, 20, "our rigctld running", |s| s.rig.daemon.as_deref() == Some("running")).await;
+    let steps = match st.h.call(AppCommand::TestRig { config: managed_dummy() }).await.unwrap() {
+        CommandOk::RigTest { steps } => steps,
+        other => panic!("{other:?}"),
+    };
+    let connect = steps.iter().find(|s| s.name == "connect").expect("a connect step");
+    assert_eq!(connect.ok, Some(true), "{steps:?}");
+    assert!(connect.detail.contains(&st.ports.rigctld.to_string()), "{steps:?}");
+}
+
+/// M5 W4: a built-in station's rig models come from the bundled rigctld's
+/// `-l` (fake-rigctld prints Hamlib's table), not from one on the PATH.
+#[tokio::test(flavor = "multi_thread")]
+async fn hamlib_models_come_from_the_bundled_rigctld() {
+    let root = tempfile::tempdir().unwrap();
+    let st = station(root.path(), test_bundle(root.path()), "").await;
+    st.select().await;
+    match st.h.call(AppCommand::HamlibModels { hamlib_dir: String::new() }).await.unwrap() {
+        CommandOk::HamlibModels { models, found } => {
+            assert!(found);
+            assert!(models.iter().any(|m| m.id == 1 && m.model == "Dummy"), "{models:?}");
+            assert!(models.iter().any(|m| m.id == 3073 && m.model == "IC-7300"), "{models:?}");
+        }
+        other => panic!("{other:?}"),
+    }
+}

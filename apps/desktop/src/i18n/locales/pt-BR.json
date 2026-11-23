@@ -233,7 +233,18 @@
     "portsHint": "Altere-as apenas se outro programa as usar. A porta de dados é a porta de controle + 1.",
     "portTaken": "A porta {port} já está em uso neste computador, talvez por outro Mercury. O MercuryChat nunca usa um modem que não iniciou.",
     "useFreeSet": "Usar as portas livres ({control}, {broadcast}, {ui}, {rigctld})",
-    "useBuiltIn": "Usar Mercury integrado"
+    "useBuiltIn": "Usar Mercury integrado",
+    "asStation": "Estação {callsign}, do passo anterior.",
+    "endpoint": {
+      "control": "Porta de controle",
+      "data": "Porta de dados",
+      "broadcast": "Porta de difusão",
+      "telemetry": "Link do espectro"
+    },
+    "endpointOk": "responde",
+    "check": "Verificar a conexão",
+    "checking": "Verificando…",
+    "checkHint": "Conecta-se uma vez a cada porta e fecha; nada é enviado."
   },
   "settings": {
     "title": "Configurações",
@@ -264,6 +275,12 @@
       "beacon": "Beacon",
       "files": "Arquivos",
       "modem": "Modem"
+    },
+    "setup": {
+      "title": "Configuração guiada",
+      "body": "A configuração guiada: estação, modem, placa de som, rádio e modo de operar. Refazê-la mantém suas estações e seu histórico.",
+      "skipped": "Passos pulados:",
+      "run": "Refazer a configuração"
     }
   },
   "appearance": {
@@ -878,7 +895,9 @@
     "external": "rigctld externo",
     "flrig": "FLRig",
     "flrigHint": "O FLRig só ajusta frequência e modo; escolha um método de PTT separado.",
-    "hamlibBuiltIn": "rigctld: Hamlib {version}, integrado"
+    "hamlibBuiltIn": "rigctld: Hamlib {version}, integrado",
+    "testOwn": "Salvar e testar (somente leitura)",
+    "testOwnHint": "Salva e depois lê o rádio pelo rigctld do próprio MercuryChat. Nada é alterado no rádio."
   },
   "freqList": {
     "title": "Lista de frequências",
@@ -1143,6 +1162,89 @@
       "overPeerLimit": "acima do limite da outra estação",
       "qsy": "não enquanto um QSY está sendo combinado",
       "tooLarge": "o arquivo é grande demais"
+    }
+  },
+  "wizard": {
+    "steps": {
+      "welcome": "Boas-vindas",
+      "station": "Estação",
+      "modem": "Modem",
+      "audio": "Placa de som",
+      "rig": "Rádio e PTT",
+      "operate": "Modo de operar",
+      "tour": "Primeiro contato",
+      "done": "Pronto"
+    },
+    "progressAria": "Passos da configuração",
+    "stepOf": "Passo {n} de {total}",
+    "skippedMark": "pulado",
+    "back": "Voltar",
+    "next": "Avançar",
+    "skip": "Pular este passo",
+    "finish": "Começar a usar o MercuryChat",
+    "leave": "Configurar sem o guia",
+    "welcome": {
+      "title": "Bem-vindo ao MercuryChat",
+      "what": "O MercuryChat é chat por teclado e transferência de arquivos por rádio HF, pelo modem Mercury. As estações chamam umas às outras, conversam e registram o contato.",
+      "need": "Você precisa de:",
+      "needRadio": "Um rádio HF com modo SSB ou de dados",
+      "needAudio": "Uma interface de áudio entre o rádio e este computador, ou um rádio com áudio USB",
+      "needMercury": "O modem Mercury: incluído no MercuryChat, ou o seu",
+      "needMercuryBuiltIn": "O modem Mercury: o Mercury {version} vem incluído, ou use o seu",
+      "legal": "Transmita apenas como sua licença permite. As mensagens saem sem criptografia: criptografar em frequências de radioamador é ilegal na maioria dos países, e só você é responsável pelo que transmite."
+    },
+    "station": {
+      "title": "Sua estação",
+      "body": "Seu indicativo é como as outras estações chegam até você. Seu nome e seu locator preenchem as macros e o livro de registro.",
+      "name": "Seu nome (opcional)",
+      "grid": "Locator (opcional, ex.: KG33xi)",
+      "more": "QTH, rádio, potência e antena podem ser adicionados depois em Configurações → Estação."
+    },
+    "modem": {
+      "title": "Modem",
+      "body": "Escolha o modem Mercury desta estação. A estação começa em Somente recepção e não atende chamadas até você escolher como opera.",
+      "kept": "A estação {callsign} está configurada. Escolha de novo abaixo, ou siga em frente.",
+      "chooseFirst": "Escolha um modem primeiro"
+    },
+    "audio": {
+      "title": "Placa de som",
+      "body": "Escolha a placa de som do rádio para o Mercury: a entrada (vinda do rádio) e a saída (para o rádio). O MercuryChat nunca escolhe o dispositivo padrão por você.",
+      "rxTitle": "Teste de recepção",
+      "rxBody": "Os sinais do rádio aparecem aqui quando a entrada está certa. Uma faixa escura e plana significa que nenhum áudio chega ao Mercury.",
+      "txTitle": "Teste de transmissão",
+      "txBody": "Coloca o rádio em transmissão por 3 segundos com o tom de sintonia do Mercury. Verifique antes a antena e a potência. Nada mais na configuração transmite.",
+      "key": "Transmitir por 3 s",
+      "stop": "Parar",
+      "left": "{n} s"
+    },
+    "rig": {
+      "title": "Rádio e PTT",
+      "body": "Como o MercuryChat lê a frequência do rádio e como o Mercury o coloca em transmissão: seu rádio na lista do Hamlib, sua porta serial e o método de PTT, ou Nenhum se sua interface aciona o rádio sozinha (VOX, SignaLink). O teste apenas lê do rádio."
+    },
+    "operate": {
+      "title": "Modo de operar",
+      "answeringBody": "Outras estações podem chamar você, e o MercuryChat atende sozinho: atender significa transmitir. A escolha comum para uma estação assistida.",
+      "receiveOnlyBody": "O MercuryChat escuta e nunca atende sozinho. Você ainda pode chamar outras estações e mudar quando quiser pelo cabeçalho.",
+      "beacons": "Os beacons (anúncios periódicos) continuam desligados; ligue-os pela faixa quando quiser."
+    },
+    "tour": {
+      "title": "Primeiro contato",
+      "sidebarTitle": "Contatos e Ouvidas",
+      "sidebar": "à esquerda: as estações com quem você conversou e as ouvidas no ar.",
+      "callTitle": "Chamar",
+      "call": "abre uma sessão com uma estação: digite o indicativo em Conversas e pressione Chamar.",
+      "cqTitle": "Chamar CQ",
+      "cq": "na faixa: anuncia que você está no ar e escutando.",
+      "chatTitle": "O chat",
+      "chat": "digite abaixo e pressione Ctrl+Enter. As mensagens saem quando há uma sessão, e cada uma mostra quando foi entregue."
+    },
+    "done": {
+      "title": "Tudo pronto",
+      "body": "Sua estação está pronta. Tudo aqui pode ser alterado depois em Configurações.",
+      "skipped": "Você pulou: {steps}. Eles estão em Configurações quando quiser.",
+      "manual": "Ler o manual e as notas do projeto",
+      "updates": "Procurar atualizações",
+      "about": "Sobre o MercuryChat"
     }
   }
 }

@@ -20,7 +20,7 @@
 import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { kill, launch, page, sleep, until } from "./cdp.mjs";
+import { firstUse, kill, launch, page, sleep, until } from "./cdp.mjs";
 import { click, pill, setInput } from "./m2-dom.mjs";
 
 const [exe, dataDir, port = "9362"] = process.argv.slice(2);
@@ -110,7 +110,7 @@ try {
   writeFileSync(big, noise(60000));
 
   app = await start({ MC_SIM_PEER_OFFERS: "1" });
-  s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen", 40000);
+  s = await firstUse(port, "Use simulator", 40000);
   await s.eval(watchErrors);
   await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
   await s.eval(click("Use simulator"));

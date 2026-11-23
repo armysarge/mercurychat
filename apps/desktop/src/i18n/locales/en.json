@@ -232,7 +232,18 @@
     "portsHint": "Change these only if another program uses them. The data port is the control port + 1.",
     "portTaken": "Port {port} is already in use on this computer, perhaps by another Mercury. MercuryChat never uses a modem it did not start.",
     "useFreeSet": "Use the free set ({control}, {broadcast}, {ui}, {rigctld})",
-    "useBuiltIn": "Use built-in Mercury"
+    "useBuiltIn": "Use built-in Mercury",
+    "asStation": "Station {callsign}, from the previous step.",
+    "endpoint": {
+      "control": "Control port",
+      "data": "Data port",
+      "broadcast": "Broadcast port",
+      "telemetry": "Spectrum link"
+    },
+    "endpointOk": "answers",
+    "check": "Check the connection",
+    "checking": "Checking…",
+    "checkHint": "Connects to each port once and closes again; nothing is sent."
   },
   "settings": {
     "title": "Settings",
@@ -263,6 +274,12 @@
       "beacon": "Beacon",
       "files": "Files",
       "modem": "Modem"
+    },
+    "setup": {
+      "title": "Setup",
+      "body": "The guided setup: station, modem, sound card, rig and how you operate. Running it again keeps your stations and history.",
+      "skipped": "Steps you skipped:",
+      "run": "Run the setup again"
     }
   },
   "appearance": {
@@ -877,7 +894,9 @@
     "external": "External rigctld",
     "flrig": "FLRig",
     "flrigHint": "FLRig sets frequency and mode only; choose a separate PTT method.",
-    "hamlibBuiltIn": "rigctld: Hamlib {version}, built in"
+    "hamlibBuiltIn": "rigctld: Hamlib {version}, built in",
+    "testOwn": "Save and test (read only)",
+    "testOwnHint": "Saves, then reads from the rig through MercuryChat's own rigctld. Nothing on the rig is changed."
   },
   "freqList": {
     "title": "Frequency list",
@@ -1142,6 +1161,89 @@
       "overPeerLimit": "over the other station's limit",
       "qsy": "not while a QSY is being arranged",
       "tooLarge": "the file is too large"
+    }
+  },
+  "wizard": {
+    "steps": {
+      "welcome": "Welcome",
+      "station": "Station",
+      "modem": "Modem",
+      "audio": "Sound card",
+      "rig": "Rig and PTT",
+      "operate": "How you operate",
+      "tour": "First contact",
+      "done": "Done"
+    },
+    "progressAria": "Setup steps",
+    "stepOf": "Step {n} of {total}",
+    "skippedMark": "skipped",
+    "back": "Back",
+    "next": "Next",
+    "skip": "Skip this step",
+    "finish": "Start using MercuryChat",
+    "leave": "Set up without the guide",
+    "welcome": {
+      "title": "Welcome to MercuryChat",
+      "what": "MercuryChat is keyboard chat and file transfer over HF radio, through the Mercury modem. Stations call each other, talk, and log the contact.",
+      "need": "You need:",
+      "needRadio": "An HF radio with an SSB or data mode",
+      "needAudio": "An audio interface between the radio and this computer, or a radio with USB audio",
+      "needMercury": "The Mercury modem: built into MercuryChat, or your own",
+      "needMercuryBuiltIn": "The Mercury modem: Mercury {version} is built in, or use your own",
+      "legal": "Transmit only as your licence allows. Messages go out in the clear: encrypting on amateur frequencies is illegal in most countries, and you alone are responsible for what you transmit."
+    },
+    "station": {
+      "title": "Your station",
+      "body": "Your callsign is how other stations reach you. Your name and locator fill the macros and the logbook.",
+      "name": "Your name (optional)",
+      "grid": "Locator (optional, e.g. KG33xi)",
+      "more": "QTH, rig, power and antenna can be added later in Settings → Station."
+    },
+    "modem": {
+      "title": "Modem",
+      "body": "Choose the Mercury modem this station uses. The station starts in Receive only and does not answer calls until you choose how you operate.",
+      "kept": "Station {callsign} is set up. Choose again below, or go on.",
+      "chooseFirst": "Choose a modem first"
+    },
+    "audio": {
+      "title": "Sound card",
+      "body": "Choose the radio's sound card for Mercury: its input (from the radio) and output (to the radio). MercuryChat never picks the default device for you.",
+      "rxTitle": "Receive check",
+      "rxBody": "Signals from the radio show here once the input is right. A flat, dark band means no audio is reaching Mercury.",
+      "txTitle": "Transmit test",
+      "txBody": "Keys the radio for 3 seconds with Mercury's tuning tone. Check your antenna and power first. Nothing else in the setup transmits.",
+      "key": "Key the radio for 3 s",
+      "stop": "Stop",
+      "left": "{n} s"
+    },
+    "rig": {
+      "title": "Rig and PTT",
+      "body": "How MercuryChat reads the radio's frequency and how Mercury keys it: your radio from Hamlib's list, its serial port and the PTT method, or None if your interface keys the radio itself (VOX, SignaLink). The test only reads from the radio."
+    },
+    "operate": {
+      "title": "How you operate",
+      "answeringBody": "Other stations can call you, and MercuryChat answers by itself: answering means transmitting. The usual choice for an attended station.",
+      "receiveOnlyBody": "MercuryChat listens and never answers by itself. You can still call others, and switch any time from the header.",
+      "beacons": "Beacons (periodic announcements) stay off; turn them on from the strip when you want them."
+    },
+    "tour": {
+      "title": "First contact",
+      "sidebarTitle": "Contacts and Heard",
+      "sidebar": "on the left: the stations you talked with, and those heard on the air.",
+      "callTitle": "Call",
+      "call": "opens a session with a station: type its callsign in Conversations, then press Call.",
+      "cqTitle": "Call CQ",
+      "cq": "in the strip: announces that you are on the air and listening.",
+      "chatTitle": "The chat",
+      "chat": "type below and press Ctrl+Enter. Messages go out once a session is up, and each shows when it was delivered."
+    },
+    "done": {
+      "title": "All set",
+      "body": "Your station is ready. Everything here can be changed later in Settings.",
+      "skipped": "You skipped: {steps}. They are in Settings when you want them.",
+      "manual": "Read the manual and project notes",
+      "updates": "Check for updates",
+      "about": "About MercuryChat"
     }
   }
 }

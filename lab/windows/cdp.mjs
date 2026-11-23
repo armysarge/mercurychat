@@ -103,3 +103,13 @@ export async function until(s, expr, what, ms = 10000) {
   }
   throw new Error(`timed out waiting for ${what}: ${await s.eval("document.body.innerText")}`);
 }
+
+/** The plain first-use screen (M5): a new install opens the setup wizard;
+ *  "Set up without the guide" leads to the screen the older checks drive.
+ *  Waits for `text` on it. */
+export async function firstUse(port, text, ms = 40000) {
+  const s = await page(port, (t) => t.includes(text) || t.includes("Set up without the guide"), "the first-use screen", ms);
+  await s.eval("document.querySelector('button.skip-wizard')?.click()");
+  await until(s, `document.body.innerText.includes(${JSON.stringify(text)})`, "the first-use screen", 15000);
+  return s;
+}

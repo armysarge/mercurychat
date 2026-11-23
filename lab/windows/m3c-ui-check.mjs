@@ -18,7 +18,7 @@
 // Build the app with its assets embedded first:
 //   npm --prefix apps/desktop run build && cargo build -p mercurychat --features tauri/custom-protocol
 import { existsSync, rmSync } from "node:fs";
-import { connect, kill, launch, page, sleep, until } from "./cdp.mjs";
+import { connect, firstUse, kill, launch, page, sleep, until } from "./cdp.mjs";
 import { click, pill, setInput } from "./m2-dom.mjs";
 
 const [exe, dataDir, port = "9361"] = process.argv.slice(2);
@@ -71,7 +71,7 @@ async function errorsSoFar() {
 try {
   if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true });
   let app = await start();
-  s = await page(port, (t) => t.includes("Use simulator"), "the first-use screen", 40000);
+  s = await firstUse(port, "Use simulator", 40000);
   await s.eval(watchErrors);
   await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
   await s.eval(click("Use simulator"));

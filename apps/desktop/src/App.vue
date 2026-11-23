@@ -19,6 +19,7 @@ import Logbook from "./views/Logbook.vue";
 import Operate from "./views/Operate.vue";
 import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
+import Wizard from "./views/Wizard.vue";
 import AppLogo from "./components/AppLogo.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import SendFileDialog from "./components/SendFileDialog.vue";
@@ -28,6 +29,7 @@ import WindowControls from "./components/WindowControls.vue";
 import type { RigBanner } from "./bindings/RigBanner";
 import { dismissRigBanner, rigView } from "./rig";
 import { loadBuiltin } from "./builtin";
+import { loadWizard, wizard, wizardLoaded } from "./wizardState";
 
 const startupError = ref("");
 const now = ref(new Date());
@@ -55,6 +57,10 @@ const rigBanners = computed(() => {
 });
 
 const firstUse = computed(() => snapshot.value !== null && snapshot.value.profiles.length === 0);
+/** The first-run wizard (M5 §6) until it is done, ahead of the plain setup screen. */
+const inWizard = computed(() => snapshot.value !== null && wizard.value !== null && !wizard.value.done);
+/** Setting up: no strip, no sidebar, the rail only. */
+const setup = computed(() => firstUse.value || inWizard.value);
 const utc = computed(() => now.value.toISOString().slice(11, 19) + " UTC");
 const where = computed(() => {
   const p = activeProfile.value;
@@ -159,6 +165,7 @@ onMounted(async () => {
     onAppEvent(notifyOn);
     startNotifier();
     await mirror.start();
+    await loadWizard();
     void loadBuiltin();
     void reloadTransfers();
     void listenForDrops().catch((e) => console.warn("drag and drop unavailable:", e));
@@ -197,12 +204,12 @@ onUnmounted(() => {
         <AppLogo class="mark" :size="28" data-tauri-drag-region />
         <b>MercuryChat</b><span class="alpha small">{{ t("app.alpha") }}</span>
       </div>
-      <button v-if="!firstUse" class="toggle-sidebar quiet" :aria-expanded="app.drawer === 'peers'" @click="app.drawer = app.drawer === 'peers' ? null : 'peers'">{{ t("sidebar.toggle") }}</button>
+      <button v-if="!setup" class="toggle-sidebar quiet" :aria-expanded="app.drawer === 'peers'" @click="app.drawer = app.drawer === 'peers' ? null : 'peers'">{{ t("sidebar.toggle") }}</button>
       <div v-if="activeProfile" class="station" data-tauri-drag-region>
         <b class="mono">{{ activeProfile.callsign }}</b>
         <span class="muted small">{{ where }}</span>
       </div>
-      <span v-if="activeProfile" class="station-mode" role="status" aria-live="polite">
+      <span v-if="activeProfile && !inWizard" class="station-mode" role="status" aria-live="polite">
         <span :class="['mode-word', { rx: receiveOnly }]">{{ t(modeWordKey) }}</span>
         <label class="switch warn" :title="t(switchTitleKey)">
           <input type="checkbox" role="switch" :checked="receiveOnly" :disabled="modemState === 'unavailable'" :aria-label="t('mode.receiveOnly')" @change="toggleReceiveOnly" />
@@ -241,14 +248,14 @@ onUnmounted(() => {
     </p>
 
     <!-- The station strip: full width above the sidebar and the workspace, on Operate only. -->
-    <StationStrip v-if="snapshot && !firstUse" :now="now.getTime()" />
+    <StationStrip v-if="snapshot && !setup" :now="now.getTime()" />
 
-    <div :class="['body', { solo: firstUse || !snapshot }]">
+    <div :class="['body', { solo: setup || !snapshot }]">
       <nav class="rail" :aria-label="t('nav.label')">
         <button
           v-for="r in RAIL"
           :key="r.page"
-          :class="{ selected: app.page === r.page && !firstUse }"
+          :class="{ selected: app.page === r.page && !setup }"
           :aria-current="app.page === r.page ? 'page' : undefined"
           :title="t(r.label)"
           :aria-label="t(r.label)"
@@ -258,10 +265,11 @@ onUnmounted(() => {
           {{ t(r.label) }}
         </button>
       </nav>
-      <Sidebar v-if="snapshot && !firstUse" :class="{ open: app.drawer === 'peers' }" />
+      <Sidebar v-if="snapshot && !setup" :class="{ open: app.drawer === 'peers' }" />
       <div v-if="app.drawer === 'peers'" class="scrim" @click="app.drawer = null"></div>
       <main class="view">
-        <p v-if="!snapshot" class="muted loading">{{ t("app.loading") }}</p>
+        <p v-if="!snapshot || !wizardLoaded" class="muted loading">{{ t("app.loading") }}</p>
+        <Wizard v-else-if="inWizard" />
         <Welcome v-else-if="firstUse" />
         <Operate v-else-if="app.page === 'operate'" />
         <Conversations v-else-if="app.page === 'conversations'" />

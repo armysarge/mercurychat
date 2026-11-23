@@ -233,7 +233,18 @@
     "portsHint": "Ne les changez que si un autre programme les utilise. Le port de données est le port de contrôle + 1.",
     "portTaken": "Le port {port} est déjà utilisé sur cet ordinateur, peut-être par un autre Mercury. MercuryChat n'utilise jamais un modem qu'il n'a pas démarré.",
     "useFreeSet": "Utiliser les ports libres ({control}, {broadcast}, {ui}, {rigctld})",
-    "useBuiltIn": "Utiliser Mercury intégré"
+    "useBuiltIn": "Utiliser Mercury intégré",
+    "asStation": "Station {callsign}, de l'étape précédente.",
+    "endpoint": {
+      "control": "Port de contrôle",
+      "data": "Port de données",
+      "broadcast": "Port de diffusion",
+      "telemetry": "Lien du spectre"
+    },
+    "endpointOk": "répond",
+    "check": "Vérifier la connexion",
+    "checking": "Vérification…",
+    "checkHint": "Se connecte une fois à chaque port puis ferme ; rien n'est envoyé."
   },
   "settings": {
     "title": "Réglages",
@@ -264,6 +275,12 @@
       "beacon": "Balise",
       "files": "Fichiers",
       "modem": "Modem"
+    },
+    "setup": {
+      "title": "Configuration guidée",
+      "body": "La configuration guidée : station, modem, carte son, radio et façon d'opérer. La relancer conserve vos stations et votre historique.",
+      "skipped": "Étapes passées :",
+      "run": "Relancer la configuration"
     }
   },
   "appearance": {
@@ -878,7 +895,9 @@
     "external": "rigctld externe",
     "flrig": "FLRig",
     "flrigHint": "FLRig ne règle que la fréquence et le mode ; choisissez une méthode PTT séparée.",
-    "hamlibBuiltIn": "rigctld : Hamlib {version}, intégré"
+    "hamlibBuiltIn": "rigctld : Hamlib {version}, intégré",
+    "testOwn": "Enregistrer et tester (lecture seule)",
+    "testOwnHint": "Enregistre, puis lit la radio par le rigctld de MercuryChat. Rien n'est modifié sur la radio."
   },
   "freqList": {
     "title": "Liste de fréquences",
@@ -1143,6 +1162,89 @@
       "overPeerLimit": "au-delà de la limite de l'autre station",
       "qsy": "pas pendant qu'un QSY se négocie",
       "tooLarge": "le fichier est trop volumineux"
+    }
+  },
+  "wizard": {
+    "steps": {
+      "welcome": "Bienvenue",
+      "station": "Station",
+      "modem": "Modem",
+      "audio": "Carte son",
+      "rig": "Radio et PTT",
+      "operate": "Façon d'opérer",
+      "tour": "Premier contact",
+      "done": "Terminé"
+    },
+    "progressAria": "Étapes de la configuration",
+    "stepOf": "Étape {n} sur {total}",
+    "skippedMark": "passée",
+    "back": "Retour",
+    "next": "Suivant",
+    "skip": "Passer cette étape",
+    "finish": "Commencer à utiliser MercuryChat",
+    "leave": "Configurer sans le guide",
+    "welcome": {
+      "title": "Bienvenue dans MercuryChat",
+      "what": "MercuryChat, c'est le chat au clavier et le transfert de fichiers par radio HF, avec le modem Mercury. Les stations s'appellent, échangent et consignent le contact.",
+      "need": "Il vous faut :",
+      "needRadio": "Une radio HF avec un mode BLU ou données",
+      "needAudio": "Une interface audio entre la radio et cet ordinateur, ou une radio avec audio USB",
+      "needMercury": "Le modem Mercury : intégré à MercuryChat, ou le vôtre",
+      "needMercuryBuiltIn": "Le modem Mercury : Mercury {version} est intégré, ou utilisez le vôtre",
+      "legal": "N'émettez que dans les limites de votre licence. Les messages partent en clair : chiffrer sur les fréquences amateur est illégal dans la plupart des pays, et vous seul êtes responsable de ce que vous émettez."
+    },
+    "station": {
+      "title": "Votre station",
+      "body": "Votre indicatif permet aux autres stations de vous joindre. Votre nom et votre locator remplissent les macros et le carnet de trafic.",
+      "name": "Votre nom (facultatif)",
+      "grid": "Locator (facultatif, p. ex. KG33xi)",
+      "more": "QTH, radio, puissance et antenne s'ajoutent plus tard dans Réglages → Station."
+    },
+    "modem": {
+      "title": "Modem",
+      "body": "Choisissez le modem Mercury de cette station. La station démarre en Réception seule et ne répond à aucun appel tant que vous n'avez pas choisi votre façon d'opérer.",
+      "kept": "La station {callsign} est configurée. Choisissez à nouveau ci-dessous, ou continuez.",
+      "chooseFirst": "Choisissez d'abord un modem"
+    },
+    "audio": {
+      "title": "Carte son",
+      "body": "Choisissez la carte son de la radio pour Mercury : son entrée (depuis la radio) et sa sortie (vers la radio). MercuryChat ne choisit jamais le périphérique par défaut à votre place.",
+      "rxTitle": "Contrôle de réception",
+      "rxBody": "Les signaux de la radio s'affichent ici quand l'entrée est la bonne. Une bande sombre et plate signifie qu'aucun audio n'arrive à Mercury.",
+      "txTitle": "Test d'émission",
+      "txBody": "Met la radio en émission 3 secondes avec la tonalité d'accord de Mercury. Vérifiez d'abord l'antenne et la puissance. Rien d'autre n'émet pendant la configuration.",
+      "key": "Émettre 3 s",
+      "stop": "Arrêter",
+      "left": "{n} s"
+    },
+    "rig": {
+      "title": "Radio et PTT",
+      "body": "Comment MercuryChat lit la fréquence de la radio et comment Mercury la passe en émission : votre radio dans la liste de Hamlib, son port série et la méthode PTT, ou Aucun si votre interface commute la radio elle-même (VOX, SignaLink). Le test ne fait que lire la radio."
+    },
+    "operate": {
+      "title": "Façon d'opérer",
+      "answeringBody": "Les autres stations peuvent vous appeler, et MercuryChat répond seul : répondre, c'est émettre. Le choix habituel pour une station surveillée.",
+      "receiveOnlyBody": "MercuryChat écoute et ne répond jamais seul. Vous pouvez toujours appeler, et changer à tout moment depuis l'en-tête.",
+      "beacons": "Les balises (annonces périodiques) restent éteintes ; activez-les depuis le bandeau quand vous le souhaitez."
+    },
+    "tour": {
+      "title": "Premier contact",
+      "sidebarTitle": "Contacts et Entendues",
+      "sidebar": "à gauche : les stations avec qui vous avez échangé, et celles entendues sur l'air.",
+      "callTitle": "Appeler",
+      "call": "ouvre une session avec une station : tapez son indicatif dans Conversations, puis Appeler.",
+      "cqTitle": "Appel CQ",
+      "cq": "dans le bandeau : annonce que vous êtes sur l'air et à l'écoute.",
+      "chatTitle": "Le chat",
+      "chat": "tapez en bas et appuyez sur Ctrl+Entrée. Les messages partent une fois la session établie, et chacun indique quand il a été remis."
+    },
+    "done": {
+      "title": "C'est prêt",
+      "body": "Votre station est prête. Tout ceci se modifie plus tard dans Réglages.",
+      "skipped": "Étapes passées : {steps}. Elles sont dans Réglages quand vous le souhaitez.",
+      "manual": "Lire le manuel et les notes du projet",
+      "updates": "Rechercher des mises à jour",
+      "about": "À propos de MercuryChat"
     }
   }
 }

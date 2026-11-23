@@ -37,7 +37,7 @@ required-features = ["fake"]
 # The built-in modem's children end with the app (M5 §5.4, `child`): a job
 # object on Windows, a parent-death signal on Linux.
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Registry", "Win32_System_Threading"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

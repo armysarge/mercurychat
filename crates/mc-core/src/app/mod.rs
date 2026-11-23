@@ -8,6 +8,7 @@ pub mod builtin;
 mod chat;
 mod contract;
 mod discovery;
+mod endpoints;
 mod events;
 pub mod files;
 mod frequencies;
@@ -21,6 +22,7 @@ mod rigconfig;
 pub mod schedule;
 mod service;
 mod telemetry;
+mod wizard;
 
 pub use crate::macros::{expand, Expanded, MacroContext, MacroDef};
 pub use audio::{AudioDeviceView, AudioSettingsView};
@@ -34,6 +36,7 @@ pub use broadcast::{
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, BuiltInView, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
+pub use endpoints::EndpointCheck;
 pub use events::{
     is_current, AppEvent, EventEnvelope, EventLog, ModemDetail, ModemState, SessionDirection, SessionInfo, Since,
 };
@@ -57,6 +60,7 @@ pub use telemetry::{
     AudioView, TelemetryLinkView, TelemetryView, Tuning, CONTROL_SOURCE, EVENT_GAP, FREQ_FRESH_MS, OFFSET_FRESH_MS,
     TELEMETRY_SOURCE,
 };
+pub use wizard::{WizardState, WizardStation, WizardStep, WIZARD_SETTING};
 
 use ts_rs::TS;
 

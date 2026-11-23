@@ -590,7 +590,14 @@ impl App {
     /// The Settings link test: a separate connection that only reads, run in
     /// its own task so the actor never waits on the network; plus whether
     /// Mercury keys through the same rigctld (from its last radio_list).
-    pub(super) fn test_rig(&mut self, config: RigConfig, reply: super::Reply<CommandOk>) {
+    pub(super) fn test_rig(&mut self, mut config: RigConfig, reply: super::Reply<CommandOk>) {
+        // MercuryChat's own rigctld is tested where it runs (M5 W4): a
+        // built-in station's on its own port, else 127.0.0.1:4532.
+        if config.freq_control == FreqControl::ManagedRigctld {
+            let l = self.rig.listen();
+            config.external.host = l.ip().to_string();
+            config.external.port = l.port();
+        }
         let host = config.external.host.trim().to_string();
         if host.is_empty() || host.chars().any(|c| c.is_whitespace() || c.is_control()) || config.external.port == 0 {
             let _ = reply.send(Err(invalid("host", "Enter the rigctld host and port, e.g. 127.0.0.1 and 4532")));

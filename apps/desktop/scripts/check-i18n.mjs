@@ -271,6 +271,9 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "qsy.notify.": () => constOf("components/QsyCard.vue", "noticeKeys"),
     "qso.field.": () => constOf("components/QsoCard.vue", "PEER_FIELDS"),
     // M4: photo sizes and transfer states (the contract), the Files view's lists, and the reason codes transfers.ts maps.
+    // M5: the wizard's steps, and My own Mercury's endpoints (endpoints.rs names them).
+    "wizard.steps.": () => constOf("wizard.ts", "STEPS"),
+    "profile.endpoint.": () => ["control", "data", "broadcast", "telemetry"],
     "files.photo.": () => unionOf("PhotoSize.ts"),
     "files.state.": () => unionOf("TransferState.ts"),
     "files.view.": () => constOf("views/Files.vue", "SECTIONS"),
