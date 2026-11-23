@@ -5,6 +5,7 @@
 // until "How you operate" is answered (the core holds it). Nothing transmits
 // except on "Key the radio for 3 s" (SET-02). The settings it shows are the
 // same components as Settings, so a step revisited later looks the same.
+import { invoke } from "@tauri-apps/api/core";
 import { computed, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
@@ -22,7 +23,6 @@ import { back, canSkip, next, skip, stepsFor, type WizardPath } from "../wizard"
 import { saveWizard, wizard } from "../wizardState";
 
 const { t } = useI18n();
-const PROJECT = "https://github.com/armysarge/mercurychat";
 
 const state = computed<WizardState>(() => wizard.value ?? { step: "welcome", draftProfileId: null, done: false, skipped: [], station: null });
 const draft = computed(() => snapshot.value?.profiles.find((p) => p.id === state.value.draftProfileId) ?? null);
@@ -135,6 +135,15 @@ async function finish(then?: () => void) {
   if (error.value) return;
   app.page = "operate";
   then?.();
+}
+/** The system browser, through the shell's named links (as About): never a URL from the page. */
+async function openLink(link: "project" | "releases") {
+  error.value = "";
+  try {
+    await invoke("open_link", { link });
+  } catch (e) {
+    error.value = describeError(e);
+  }
 }
 const openAbout = () =>
   finish(() => {
@@ -269,8 +278,8 @@ const titleOf = (s: WizardStep) => t(`wizard.steps.${s}`);
         <p class="muted">{{ t("wizard.done.body") }}</p>
         <p v-if="state.skipped.length" class="small">{{ t("wizard.done.skipped", { steps: state.skipped.map(titleOf).join(", ") }) }}</p>
         <ul class="links">
-          <li><a :href="PROJECT" target="_blank" rel="noopener">{{ t("wizard.done.manual") }}</a></li>
-          <li><a :href="`${PROJECT}/releases`" target="_blank" rel="noopener">{{ t("wizard.done.updates") }}</a></li>
+          <li><button class="quiet open-project" @click="openLink('project')">{{ t("wizard.done.manual") }}</button></li>
+          <li><button class="quiet open-releases" @click="openLink('releases')">{{ t("wizard.done.updates") }}</button></li>
           <li><button class="quiet open-about" :disabled="busy" @click="openAbout">{{ t("wizard.done.about") }}</button></li>
         </ul>
       </template>

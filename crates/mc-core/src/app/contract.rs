@@ -8,6 +8,7 @@ use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
 use super::endpoints::EndpointCheck;
 use super::events::{ModemDetail, ModemState, SessionInfo};
+use super::export::ExportFormat;
 use super::files::{FileSettings, PreparedView, TransferView};
 use super::frequencies::FrequencyEntry;
 use super::info::ShareConfig;
@@ -302,6 +303,20 @@ pub enum AppCommand {
     /// This computer's serial ports for the rig's CAT and PTT, from the
     /// system's records (none is opened), in natural order.
     SerialPorts,
+    /// Write the active station's logbook to `path` (the operator's save
+    /// dialog): ADIF 3.1.4 or CSV, all records or only finalised ones,
+    /// oldest first (M5 §7).
+    ExportLogbook {
+        format: ExportFormat,
+        finalised_only: bool,
+        path: String,
+    },
+    /// Write one conversation to `path` as plain UTF-8 text with UTC times;
+    /// files are listed by name, never their contents.
+    ExportConversation {
+        peer: String,
+        path: String,
+    },
     /// The first-run wizard's progress (M5 §6); an install with stations and
     /// no stored progress reads as done.
     GetWizard,
@@ -445,32 +460,78 @@ pub enum CommandOk {
     Snapshot(AppSnapshot),
     Profile(StationProfile),
     Message(ChatMessage),
-    Conversations { conversations: Vec<Conversation> },
-    History { messages: Vec<ChatMessage> },
-    Heard { stations: Vec<HeardStation> },
-    Activity { entries: Vec<ActivityEntry> },
-    Frequencies { entries: Vec<FrequencyEntry> },
-    Restored { added: u32 },
-    RigTest { steps: Vec<RigTestStep> },
-    RigSettings { config: RigConfig, region: u8, schedule: Schedule },
-    HamlibModels { models: Vec<HamlibModelView>, found: bool },
+    Conversations {
+        conversations: Vec<Conversation>,
+    },
+    History {
+        messages: Vec<ChatMessage>,
+    },
+    Heard {
+        stations: Vec<HeardStation>,
+    },
+    Activity {
+        entries: Vec<ActivityEntry>,
+    },
+    Frequencies {
+        entries: Vec<FrequencyEntry>,
+    },
+    Restored {
+        added: u32,
+    },
+    RigTest {
+        steps: Vec<RigTestStep>,
+    },
+    RigSettings {
+        config: RigConfig,
+        region: u8,
+        schedule: Schedule,
+    },
+    HamlibModels {
+        models: Vec<HamlibModelView>,
+        found: bool,
+    },
     BuiltIn(BuiltInView),
-    PortCheck { taken: Option<u16>, suggestion: Option<crate::profile::BuiltInPorts> },
+    PortCheck {
+        taken: Option<u16>,
+        suggestion: Option<crate::profile::BuiltInPorts>,
+    },
     Wizard(WizardState),
-    SerialPorts { ports: Vec<String> },
-    Endpoints { results: Vec<EndpointCheck> },
-    CatLog { lines: Vec<String> },
+    /// An export written: how many records (or messages) and where.
+    Exported {
+        count: u32,
+        path: String,
+    },
+    SerialPorts {
+        ports: Vec<String>,
+    },
+    Endpoints {
+        results: Vec<EndpointCheck>,
+    },
+    CatLog {
+        lines: Vec<String>,
+    },
     Audio(AudioSettingsView),
-    BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },
-    Qsos { qsos: Vec<Qso> },
+    BandLevels {
+        levels: std::collections::BTreeMap<String, BandLevels>,
+    },
+    Qsos {
+        qsos: Vec<Qso>,
+    },
     Qso(Qso),
-    Macros { macros: Vec<MacroDef> },
+    Macros {
+        macros: Vec<MacroDef>,
+    },
     Macro(MacroDef),
-    Expanded { text: String, missing: Vec<String> },
+    Expanded {
+        text: String,
+        missing: Vec<String>,
+    },
     Share(ShareConfig),
     BeaconContent(BeaconContentView),
     Prepared(PreparedView),
-    Transfers { transfers: Vec<TransferView> },
+    Transfers {
+        transfers: Vec<TransferView>,
+    },
     FileSettings(FileSettings),
     Done,
 }

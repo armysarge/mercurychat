@@ -3,9 +3,11 @@
 // pane (the conversation list is the app's sidebar, App.vue). At ≤1439 px the
 // session pane is a drawer. The peer, the mode and Disconnect / Abort stay in
 // the conversation header so they are always reachable (docs/04 §7).
-import { computed } from "vue";
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { describeError } from "../api";
 import Composer from "../components/Composer.vue";
+import { exportConversation } from "../exports";
 import SessionPanel from "../components/SessionPanel.vue";
 import Transcript from "../components/Transcript.vue";
 import {
@@ -14,6 +16,27 @@ import {
 
 const { t } = useI18n();
 const toggleSession = () => (app.drawer = app.drawer === "session" ? null : "session");
+
+/** M5 §7: this conversation as text, saved where the operator chooses. */
+const exporting = ref(false);
+const exportNote = ref("");
+const exportFailed = ref(false);
+async function exportChat() {
+  const peer = chat.open;
+  if (!peer) return;
+  exporting.value = true;
+  exportNote.value = "";
+  exportFailed.value = false;
+  try {
+    const n = await exportConversation(peer);
+    if (n !== null) exportNote.value = t("operate.exported", { n, peer }, n);
+  } catch (e) {
+    exportFailed.value = true;
+    exportNote.value = describeError(e);
+  } finally {
+    exporting.value = false;
+  }
+}
 
 const STEPS = ["calling", "negotiating", "connected"] as const;
 const progress = computed(() =>
@@ -51,8 +74,10 @@ const subtitle = computed(() => {
           <button class="disconnect" :disabled="!inSession" @click="disconnect">{{ t("operate.disconnect") }}</button>
           <button class="abort danger" :disabled="!canAbort" @click="abort">{{ t("operate.abort") }}</button>
           <button class="toggle-session quiet" :aria-expanded="app.drawer === 'session'" @click="toggleSession">{{ t("operate.session") }}</button>
+          <button class="export-conversation quiet" :disabled="!chat.open || exporting" :title="t('operate.exportHint')" @click="exportChat">{{ t("operate.export") }}</button>
         </div>
       </div>
+      <p v-if="exportNote" :class="['export-note', 'small', exportFailed ? 'err' : 'ok']" :role="exportFailed ? 'alert' : 'status'">{{ exportNote }}</p>
       <ol v-if="progress" class="progress small" :aria-label="t('operate.progressAria')">
         <li v-for="s in STEPS" :key="s" :class="{ done: reached(s), now: s === progress }">
           {{ t(STEP_LABEL[s]) }}
@@ -86,6 +111,7 @@ const subtitle = computed(() => {
 .peer-header h1 { font-size: calc(20px * var(--font-scale)); font-weight: 600; overflow-wrap: anywhere; }
 .actions { justify-content: flex-end; flex-wrap: wrap; }
 .toggle-session { display: none; }
+.export-note { margin: 0; padding: 4px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
 .progress { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space); margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
 .progress li { color: var(--text-2); }
 .progress li + li::before { content: "→ "; color: var(--text-2); }

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Main window: only MercuryChat's own commands plus its own title bar (drag, minimise, maximise, close); no shell, fs or http plugins. About opens four named pages in the system browser (open_link), never a URL from the page. Desktop notifications: send, check and request permission only. Send file (M4): the system file picker only (dialog open; no save, message or fs access).",
+  "description": "Main window: only MercuryChat's own commands plus its own title bar (drag, minimise, maximise, close); no shell, fs or http plugins. About opens four named pages in the system browser (open_link), never a URL from the page. Desktop notifications: send, check and request permission only. Send file (M4): the system file picker (dialog open). Exports (M5): the system save dialog (dialog save); the core writes the file there. No message or fs access.",
   "windows": ["main"],
   "permissions": [
     "core:default",
@@ -21,6 +21,7 @@
     "notification:allow-is-permission-granted",
     "notification:allow-request-permission",
     "dialog:allow-open",
+    "dialog:allow-save",
     "allow-modem-probe",
     "allow-appearance-load",
     "allow-appearance-save"

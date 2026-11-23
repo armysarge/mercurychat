@@ -108,7 +108,10 @@
       "negotiating": "Negotiating",
       "connected": "Connected"
     },
-    "otherSession": "Session with {peer} in progress."
+    "otherSession": "Session with {peer} in progress.",
+    "export": "Export",
+    "exportHint": "Save this conversation as a text file, with UTC times. Files are listed by name, not included.",
+    "exported": "Exported {n} message with {peer}. | Exported {n} messages with {peer}."
   },
   "composer": {
     "placeholder": "Message to {peer}",
@@ -614,7 +617,18 @@
       "state": "State"
     },
     "finaliseOnDisconnect": "Finalise a session's record when it ends",
-    "finaliseNote": "Off: records stay drafts until you finalise them."
+    "finaliseNote": "Off: records stay drafts until you finalise them.",
+    "export": {
+      "aria": "Export the logbook",
+      "format": "Format",
+      "formatOpt": {
+        "adif": "ADIF (for a logger)",
+        "csv": "CSV (for a spreadsheet)"
+      },
+      "finalisedOnly": "Finalised records only",
+      "button": "Export…",
+      "done": "Exported {n} record. | Exported {n} records."
+    }
   },
   "macros": {
     "button": "Macros",

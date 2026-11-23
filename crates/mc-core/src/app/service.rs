@@ -419,6 +419,16 @@ fn parse_peer(peer: &str) -> Result<String, AppError> {
         .map_err(|e| AppError::Validation { errors: chat::field("peer", e.to_string()) })
 }
 
+/// Write an export where the operator's save dialog pointed: a whole path,
+/// replaced if it exists.
+fn write_export(path: &str, text: &str) -> Result<(), AppError> {
+    let p = std::path::Path::new(path);
+    if path.trim().is_empty() || !p.is_absolute() {
+        return Err(AppError::Validation { errors: chat::field("path", "Choose where to save the file") });
+    }
+    std::fs::write(p, text).map_err(|e| conflict(format!("could not write {path}: {e}")))
+}
+
 fn conflict(message: String) -> AppError {
     AppError::Conflict { message }
 }
@@ -855,6 +865,10 @@ impl App {
                 Err(t) => CommandOk::PortCheck { taken: Some(t.port), suggestion: Some(t.suggestion) },
             }),
             AppCommand::GetWizard => Ok(CommandOk::Wizard(self.wizard())),
+            AppCommand::ExportLogbook { format, finalised_only, path } => {
+                self.export_logbook(format, finalised_only, path)
+            }
+            AppCommand::ExportConversation { peer, path } => self.export_conversation(peer, path),
             AppCommand::SetWizard { state } => {
                 let state = state.normalised();
                 let json = serde_json::to_string(&state).map_err(|e| AppError::Internal { message: e.to_string() })?;
@@ -909,6 +923,59 @@ impl App {
     }
 
     /// Receive only was just stored as `on`: tell the modem task, and show it.
+    /// M5 §7: the logbook, oldest first, as ADIF or CSV.
+    fn export_logbook(
+        &mut self,
+        format: super::export::ExportFormat,
+        finalised_only: bool,
+        path: String,
+    ) -> Result<CommandOk, AppError> {
+        use super::export::{self, ExportFormat};
+        let rows = self.chat_store()?.qsos(u32::MAX).map_err(storage)?;
+        let mut qsos: Vec<Qso> = rows.iter().map(Qso::from).collect();
+        qsos.reverse();
+        let qsos = export::select(qsos, finalised_only);
+        let text = match format {
+            ExportFormat::Adif => export::adif(&qsos, env!("CARGO_PKG_VERSION")),
+            ExportFormat::Csv => export::csv(&qsos),
+        };
+        write_export(&path, &text)?;
+        Ok(CommandOk::Exported { count: qsos.len() as u32, path })
+    }
+
+    /// M5 §7: one conversation as text; its files listed, not their contents.
+    fn export_conversation(&mut self, peer: String, path: String) -> Result<CommandOk, AppError> {
+        use super::export::{self, ChatRow};
+        let peer = Callsign::parse(&peer)
+            .map_err(|e| AppError::Validation { errors: chat::field("peer", e.to_string()) })?
+            .as_str()
+            .to_string();
+        let store = self.chat_store()?;
+        let messages = store.messages(&peer).map_err(storage)?;
+        let files = store.transfers(u32::MAX).map_err(storage)?;
+        let mut rows: Vec<ChatRow> = messages
+            .iter()
+            .map(|m| {
+                let outgoing = m.direction == "out";
+                let utc = if outgoing {
+                    m.created_utc.clone()
+                } else {
+                    m.received_utc.clone().unwrap_or_else(|| m.created_utc.clone())
+                };
+                ChatRow::Message { utc, outgoing, body: m.body.clone(), state: m.state.clone() }
+            })
+            .collect();
+        rows.extend(files.iter().filter(|f| f.peer == peer).map(|f| ChatRow::File {
+            utc: f.created_utc.clone(),
+            outgoing: f.direction == mc_storage::Direction::Out,
+            name: f.saved_name.clone().unwrap_or_else(|| f.original_name.clone()),
+            size: f.size,
+            state: f.state.as_str().to_string(),
+        }));
+        write_export(&path, &export::conversation_text(&peer, &rows))?;
+        Ok(CommandOk::Exported { count: messages.len() as u32, path })
+    }
+
     /// The wizard's progress (see `WizardState::from_setting`).
     fn wizard(&self) -> WizardState {
         let stored = self.store.setting(WIZARD_SETTING).ok().flatten();

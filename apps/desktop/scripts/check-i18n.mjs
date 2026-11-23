@@ -273,6 +273,7 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     // M4: photo sizes and transfer states (the contract), the Files view's lists, and the reason codes transfers.ts maps.
     // M5: the wizard's steps, and My own Mercury's endpoints (endpoints.rs names them).
     "wizard.steps.": () => constOf("wizard.ts", "STEPS"),
+    "logbook.export.formatOpt.": () => unionOf("ExportFormat.ts"),
     "profile.endpoint.": () => ["control", "data", "broadcast", "telemetry"],
     "files.photo.": () => unionOf("PhotoSize.ts"),
     "files.state.": () => unionOf("TransferState.ts"),

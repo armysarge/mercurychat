@@ -2,12 +2,16 @@
 // The Logbook (LOG-01; docs/04 §2 rail): every QSO record of this station,
 // drafts and finalised ones, in a table that sorts by any column. Choosing a
 // record opens the same form as the QSO card; a finalised record is
-// read-only. Export (ADIF/CSV) is M5.
+// read-only. Export (M5 §7): ADIF for a logger such as Log4OM, or CSV, all
+// records or the finalised ones, saved where the operator chooses.
 import { computed, onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
+import { describeError } from "../api";
+import type { ExportFormat } from "../bindings/ExportFormat";
 import type { Qso } from "../bindings/Qso";
+import { exportLogbook } from "../exports";
 import QsoForm from "../components/QsoForm.vue";
-import { logbook, reloadLogbook } from "../store";
+import { activeProfile, logbook, reloadLogbook } from "../store";
 
 const { t } = useI18n();
 onMounted(() => void reloadLogbook());
@@ -49,6 +53,26 @@ function sort(c: Column) {
 const ariaSort = (c: Column) => (sortBy.value !== c ? "none" : ascending.value ? "ascending" : "descending");
 const when = (utc: string) => utc.slice(0, 10) + " " + utc.slice(11, 16);
 const mhz = (q: Qso) => (q.freq ? (q.freq.value / 1e6).toFixed(3) : "");
+
+const FORMATS: ExportFormat[] = ["adif", "csv"];
+const format = ref<ExportFormat>("adif");
+const finalisedOnly = ref(false);
+const exporting = ref(false);
+const exportNote = ref("");
+const exportError = ref("");
+async function exportNow() {
+  exporting.value = true;
+  exportNote.value = "";
+  exportError.value = "";
+  try {
+    const n = await exportLogbook(format.value, finalisedOnly.value, activeProfile.value?.callsign ?? "logbook");
+    if (n !== null) exportNote.value = t("logbook.export.done", { n }, n);
+  } catch (e) {
+    exportError.value = describeError(e);
+  } finally {
+    exporting.value = false;
+  }
+}
 </script>
 
 <template>
@@ -56,6 +80,18 @@ const mhz = (q: Qso) => (q.freq ? (q.freq.value / 1e6).toFixed(3) : "");
     <h1>{{ t("logbook.title") }}</h1>
     <p class="muted small">{{ t("logbook.intro") }}</p>
     <p v-if="logbook.error" class="err" role="alert">{{ logbook.error }}</p>
+    <div class="export-bar" role="group" :aria-label="t('logbook.export.aria')">
+      <label>
+        {{ t("logbook.export.format") }}
+        <select v-model="format" class="export-format">
+          <option v-for="f in FORMATS" :key="f" :value="f">{{ t(`logbook.export.formatOpt.${f}`) }}</option>
+        </select>
+      </label>
+      <label class="check"><input v-model="finalisedOnly" type="checkbox" class="export-final" /> {{ t("logbook.export.finalisedOnly") }}</label>
+      <button class="export-logbook" :disabled="exporting || !logbook.qsos.length" @click="exportNow">{{ t("logbook.export.button") }}</button>
+      <span v-if="exportNote" class="ok small" role="status">{{ exportNote }}</span>
+      <span v-if="exportError" class="err small" role="alert">{{ exportError }}</span>
+    </div>
     <div v-if="rows.length" class="layout">
       <div class="table-wrap">
         <table class="qsos">
@@ -110,6 +146,8 @@ td { padding: 5px 6px; border-bottom: 1px solid var(--border); white-space: nowr
 tbody tr { cursor: pointer; }
 tbody tr:hover, tbody tr.chosen { background: var(--raised); }
 tr[data-state="final"] .state { color: var(--text-2); }
+.export-bar { display: flex; flex-wrap: wrap; gap: var(--space); align-items: center; }
+.export-bar label { display: inline-flex; gap: 6px; align-items: center; }
 .link { min-height: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--accent); }
 @media (max-width: 1099px) {
   .layout { grid-template-columns: minmax(0, 1fr); }

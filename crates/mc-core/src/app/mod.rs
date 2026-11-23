@@ -10,6 +10,7 @@ mod contract;
 mod discovery;
 mod endpoints;
 mod events;
+pub mod export;
 pub mod files;
 mod frequencies;
 pub mod info;

@@ -109,7 +109,10 @@
       "negotiating": "Négociation",
       "connected": "Connecté"
     },
-    "otherSession": "Session avec {peer} en cours."
+    "otherSession": "Session avec {peer} en cours.",
+    "export": "Exporter",
+    "exportHint": "Enregistre cette conversation en fichier texte, heures en UTC. Les fichiers sont listés par nom, pas inclus.",
+    "exported": "{n} message exporté avec {peer}. | {n} messages exportés avec {peer}."
   },
   "composer": {
     "placeholder": "Message à {peer}",
@@ -615,7 +618,18 @@
       "state": "État"
     },
     "finaliseOnDisconnect": "Finaliser la fiche d'une session à sa fin",
-    "finaliseNote": "Désactivé : les fiches restent des brouillons jusqu'à ce que vous les finalisiez."
+    "finaliseNote": "Désactivé : les fiches restent des brouillons jusqu'à ce que vous les finalisiez.",
+    "export": {
+      "aria": "Exporter le carnet de trafic",
+      "format": "Format",
+      "formatOpt": {
+        "adif": "ADIF (pour un logiciel de log)",
+        "csv": "CSV (pour un tableur)"
+      },
+      "finalisedOnly": "Fiches finalisées seulement",
+      "button": "Exporter…",
+      "done": "{n} fiche exportée. | {n} fiches exportées."
+    }
   },
   "macros": {
     "button": "Macros",

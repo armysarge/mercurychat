@@ -315,3 +315,44 @@ async fn operator_frequency_is_marked_operator() {
     let err = h.call(AppCommand::UpdateQso { id: q.id, edit: Box::new(bad) }).await.unwrap_err();
     assert!(matches!(err, AppError::Validation { .. }), "{err:?}");
 }
+
+/// M5 §7: the logbook and a conversation are written where the operator
+/// chose; "finalised only" leaves the draft out.
+#[tokio::test(flavor = "multi_thread")]
+async fn exports_write_the_logbook_and_the_conversation() {
+    use mc_core::app::export::ExportFormat;
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let _peer = spawn_peer(&net, &dir.path().join("peer"));
+    let (h, mut rx) = start(dir.path(), existing(&net, None)).await;
+    call(&h, &mut rx).await;
+    h.call(AppCommand::SendChat { peer: PEER.into(), text: "hello, José".into() }).await.unwrap();
+    wait_for(&mut rx, 20, |e| match e {
+        AppEvent::MessageChanged { message } if message.state == "delivered" => Some(()),
+        _ => None,
+    })
+    .await;
+
+    let export = |format, finalised_only, name: &str| {
+        let path = dir.path().join(name).to_string_lossy().into_owned();
+        (AppCommand::ExportLogbook { format, finalised_only, path: path.clone() }, path)
+    };
+    let (cmd, path) = export(ExportFormat::Adif, false, "log.adi");
+    assert_eq!(h.call(cmd).await.unwrap(), CommandOk::Exported { count: 1, path: path.clone() });
+    let adi = std::fs::read_to_string(&path).unwrap();
+    assert!(adi.contains("<CALL:4>SIM1") && adi.contains("<EOR>"), "{adi}");
+
+    let (cmd, path) = export(ExportFormat::Adif, true, "final.adi");
+    assert_eq!(h.call(cmd).await.unwrap(), CommandOk::Exported { count: 0, path: path.clone() });
+    assert!(!std::fs::read_to_string(&path).unwrap().contains("<EOR>"), "the draft is not finalised");
+
+    let (cmd, path) = export(ExportFormat::Csv, false, "log.csv");
+    assert_eq!(h.call(cmd).await.unwrap(), CommandOk::Exported { count: 1, path: path.clone() });
+    assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 2, "a header and one row");
+
+    let path = dir.path().join("chat.txt").to_string_lossy().into_owned();
+    let r = h.call(AppCommand::ExportConversation { peer: PEER.into(), path: path.clone() }).await.unwrap();
+    assert_eq!(r, CommandOk::Exported { count: 1, path: path.clone() });
+    let text = std::fs::read_to_string(&path).unwrap();
+    assert!(text.starts_with("MercuryChat conversation with SIM1") && text.contains("hello, José"), "{text}");
+}

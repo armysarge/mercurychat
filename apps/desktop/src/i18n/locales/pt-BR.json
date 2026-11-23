@@ -109,7 +109,10 @@
       "negotiating": "Negociando",
       "connected": "Conectado"
     },
-    "otherSession": "Sessão com {peer} em andamento."
+    "otherSession": "Sessão com {peer} em andamento.",
+    "export": "Exportar",
+    "exportHint": "Salva esta conversa como arquivo de texto, com horários UTC. Os arquivos são listados pelo nome, não incluídos.",
+    "exported": "{n} mensagem exportada com {peer}. | {n} mensagens exportadas com {peer}."
   },
   "composer": {
     "placeholder": "Mensagem para {peer}",
@@ -615,7 +618,18 @@
       "state": "Estado"
     },
     "finaliseOnDisconnect": "Finalizar o registro de uma sessão quando ela terminar",
-    "finaliseNote": "Desligado: os registros ficam como rascunho até você finalizá-los."
+    "finaliseNote": "Desligado: os registros ficam como rascunho até você finalizá-los.",
+    "export": {
+      "aria": "Exportar o livro de registro",
+      "format": "Formato",
+      "formatOpt": {
+        "adif": "ADIF (para um programa de log)",
+        "csv": "CSV (para uma planilha)"
+      },
+      "finalisedOnly": "Somente registros finalizados",
+      "button": "Exportar…",
+      "done": "{n} registro exportado. | {n} registros exportados."
+    }
   },
   "macros": {
     "button": "Macros",
