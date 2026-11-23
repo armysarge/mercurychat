@@ -6,6 +6,7 @@
 
 mod attach;
 mod broadcast;
+mod builtin;
 mod busy;
 mod data;
 mod files;

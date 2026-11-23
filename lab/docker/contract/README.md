@@ -38,6 +38,12 @@ byte-exact with its receipt; `chat_during_file_at_bw500` sends a 4 KiB incompres
 chat after its first chunk, which must be receipted within 30 s on real Mercury (on the fake, with a 200 B/s
 drain, the chat must arrive before the file ends).
 
+The built-in contracts (M5, `tests/contracts/builtin.rs`, real target only) start a third Mercury
+themselves through MercuryChat's own supervisor and generated ini, on TNC 8500/8501, broadcast 8600 and
+WebSocket 10200, with `null` audio unless the contract says otherwise. `run-contracts.sh` sets
+`MC_MERCURY_BIN` (the Mercury under test) and `MC_LAB_IP` (the container's own address, probed to show
+the generated ini listens on 127.0.0.1 only). The two-station built-in lab is `../rig/M5-checks.md`.
+
 ## Output
 
 In `E:/mc-lab-out/m4/contracts-<sha7>[-latest]/`:

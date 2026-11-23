@@ -71,6 +71,9 @@ export MC_A_WS=ws://127.0.0.1:10000/websocket MC_B_WS=ws://127.0.0.1:10100/webso
 export MC_A_CALL=N0CTA MC_B_CALL=N0CTB
 export MC_A_RIGCTLD=127.0.0.1:4532 MC_A_INI="$OUT/a/mercury.ini"
 export MC_DIVERGENCES=/scripts/divergences.txt
+# The built-in contracts (M5 Task 6) start their own Mercury from MercuryChat's
+# generated ini on 8500/8600/10200, and probe it on the container's own address.
+export MC_MERCURY_BIN="$BIN" MC_LAB_IP=$(hostname -I | awk '{print $1}')
 
 set +e
 /contracts/contracts --test-threads=1 --nocapture > "$OUT/contracts.log" 2>&1
