@@ -11,7 +11,7 @@ import type { RigBanner } from "./bindings/RigBanner";
 import type { RigChange } from "./bindings/RigChange";
 import { bandFor } from "./components/freqStep";
 import { t } from "./i18n";
-import { activeProfile, modemState, onAppEvent, snapshot } from "./store";
+import { activeProfile, modemState, onAppEvent, session, snapshot } from "./store";
 
 export const rigView = computed(() => snapshot.value?.rig ?? null);
 export const tuneView = computed(() => snapshot.value?.tune ?? null);
@@ -143,3 +143,12 @@ export const shownFreq = computed(() => {
 
 /** The band the station is on, from the frequency shown. */
 export const currentBand = computed(() => bandFor(shownFreq.value?.hz));
+
+/** The mode shown: the rig's while its link is up, else Mercury's (transmit, then receive). */
+export const shownMode = computed(() => {
+  const tel = snapshot.value?.telemetry;
+  return (rigUp.value ? rigView.value?.mode : null) ?? tel?.txMode ?? tel?.rxMode ?? null;
+});
+
+/** The session's bandwidth, else Mercury's default one. */
+export const shownBandwidth = computed(() => (session.value?.bandwidth ? `BW${session.value.bandwidth}` : "BW2300"));

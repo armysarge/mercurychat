@@ -74,7 +74,7 @@ let first, second;
 try {
   first = launch(exe, dataDir, port);
   let s = await firstUse(port, "Use simulator");
-  await s.eval(setInput('input[name="callsign"]', CALL));
+  await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
   await s.eval(click("Use simulator"));
   await until(s, `${pill} === 'ready' && document.querySelector('textarea.composer')`, "the workspace, ready");
   if (await s.eval("document.querySelector('input.listen').checked")) throw new Error("listening was on by itself");

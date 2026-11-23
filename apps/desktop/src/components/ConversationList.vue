@@ -7,6 +7,7 @@ import { useI18n } from "vue-i18n";
 import { describeError } from "../api";
 import type { ChatMessage } from "../bindings/ChatMessage";
 import { activeProfile, chat, linkPeer, openPeer, searchHistory } from "../store";
+import Avatar from "./Avatar.vue";
 
 const { t } = useI18n();
 const emit = defineEmits<{ opened: [peer: string] }>();
@@ -81,7 +82,8 @@ function openEntry() {
     <input v-model="query" class="search" type="search" :aria-label="t('conversations.searchAria')" :placeholder="t('conversations.searchPlaceholder')" />
     <ul class="list" :aria-label="t('conversations.listAria')">
       <li v-for="c in shown" :key="c.peer">
-        <button :class="['item', { active: c.peer === chat.open }]" :aria-current="c.peer === chat.open ? 'true' : undefined" @click="open(c.peer)">
+        <button :class="['item', 'with-avatar', { active: c.peer === chat.open }]" :aria-current="c.peer === chat.open ? 'true' : undefined" @click="open(c.peer)">
+          <Avatar :callsign="c.peer" :live="c.peer === linkPeer" :size="32" />
           <span class="row top">
             <b class="mono">{{ c.peer }}</b>
             <span v-if="c.peer === linkPeer" class="small ok">{{ t("conversations.onLink") }}</span>
@@ -122,6 +124,10 @@ function openEntry() {
 .search { width: 100%; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
 .item { width: 100%; text-align: left; display: grid; gap: 4px; padding: 8px 10px; border-color: transparent; background: transparent; }
+.item.with-avatar { grid-template-columns: auto minmax(0, 1fr); column-gap: 10px; }
+.with-avatar > .avatar { grid-row: 1 / span 2; align-self: center; }
+.with-avatar > .row, .with-avatar > .meta { grid-column: 2; }
+.item { border-radius: 10px; }
 .item.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: var(--raised); }
 .top { justify-content: space-between; }
 .meta { display: flex; flex-wrap: wrap; gap: 2px 8px; }

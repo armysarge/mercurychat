@@ -7,10 +7,10 @@
 // it, hiding the window or losing telemetry stops forwarding and drawing. With
 // no telemetry it shows the link's state and draws nothing: there is never
 // synthetic data. Under reduced motion it redraws at most once a second.
-import { invoke } from "@tauri-apps/api/core";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, useId, watch } from "vue";
 import { useI18n } from "vue-i18n";
+import { claimSpectrum } from "../spectrumDemand";
 import { snapshot } from "../store";
 
 const props = defineProps<{ shown: boolean }>();
@@ -54,6 +54,8 @@ const drawing = ref(false);
 let lastDraw = 0;
 let unlisten: UnlistenFn | null = null;
 const error = ref("");
+/** Unique per spectrum: the strip and the station home can both show one. */
+const bodyId = useId();
 
 /** A theme token's value, as CSS gives it. */
 const token = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(`--${name}`).trim();
@@ -151,13 +153,10 @@ function clear() {
   for (const c of [spectrumCanvas.value, waterfallCanvas.value]) c?.getContext("2d")?.clearRect(0, 0, c.width, c.height);
 }
 
+/** This spectrum's claim on the core's forwarding (spectrumDemand.ts). */
+const me = Symbol("spectrum");
 async function setForwarding(on: boolean) {
-  try {
-    await invoke("set_waterfall_visible", { visible: on });
-    error.value = "";
-  } catch (e) {
-    error.value = String(e);
-  }
+  error.value = await claimSpectrum(me, on);
 }
 
 watch(active, async (on) => {
@@ -195,11 +194,11 @@ const AXIS_DB = [-20, -70, -120];
   <div :class="['waterfall', { open }]">
     <div class="head">
       <span class="label">{{ t("strip.spectrum") }}</span>
-      <button class="quiet wf-toggle small" :aria-expanded="open" aria-controls="wf-body" @click="open = !open">
+      <button class="quiet wf-toggle small" :aria-expanded="open" :aria-controls="bodyId" @click="open = !open">
         {{ t(open ? "waterfall.hide" : "waterfall.show") }}
       </button>
     </div>
-    <div v-if="open" id="wf-body" class="body">
+    <div v-if="open" :id="bodyId" class="body">
       <p v-if="!up" class="muted small wf-status" role="status">{{ t("waterfall.unavailable", { link: t(`telemetry.link.${link}`) }) }}</p>
       <p v-if="!up" class="muted small wf-how">{{ t(link === "unconfigured" ? "waterfall.howUnconfigured" : "waterfall.howLost") }}</p>
       <div v-else class="panels" :data-drawing="String(drawing)">

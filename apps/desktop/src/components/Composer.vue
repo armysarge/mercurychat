@@ -105,9 +105,10 @@ async function submit() {
 <style scoped>
 .row { flex-wrap: wrap; }
 .composer-box {
-  margin: 0 calc(var(--space) * 2) calc(var(--space) * 2); padding: var(--space) calc(var(--space) * 1.5);
-  border: 1px solid var(--border-strong); border-radius: 13px; background: var(--surface); display: grid; gap: 6px;
+  margin: 0 max(calc(var(--space) * 2), calc((100% - 760px) / 2)) calc(var(--space) * 2); padding: var(--space) calc(var(--space) * 1.5);
+  border: 1px solid var(--border-strong); border-radius: 18px; background: var(--surface); display: grid; gap: 6px;
 }
+.composer-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong)); }
 .composer { width: 100%; border: 0; background: transparent; resize: none; padding: 4px; line-height: 1.4; overflow-y: hidden; }
 @media (max-height: 560px) {
   .hint { display: none; }

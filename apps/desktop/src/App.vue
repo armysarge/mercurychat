@@ -27,8 +27,10 @@ import Sidebar from "./components/Sidebar.vue";
 import StationStrip from "./components/StationStrip.vue";
 import WindowControls from "./components/WindowControls.vue";
 import type { RigBanner } from "./bindings/RigBanner";
-import { dismissRigBanner, rigView } from "./rig";
-import { loadBuiltin } from "./builtin";
+import { currentBand, dismissRigBanner, rigView, shownBandwidth, shownFreq, shownMode } from "./rig";
+import { builtin, loadBuiltin } from "./builtin";
+import { formatDigits } from "./components/freqStep";
+import { stripOpen } from "./stripState";
 import { loadWizard, wizard, wizardLoaded } from "./wizardState";
 
 const startupError = ref("");
@@ -66,9 +68,12 @@ const where = computed(() => {
   const p = activeProfile.value;
   if (!p) return "";
   if (p.modem.kind === "simulator") return info.value?.simulator === false ? t("profile.simulatorUnavailable") : t("where.simulator");
-  if (p.modem.kind === "builtIn") return t("where.builtIn");
+  if (p.modem.kind === "builtIn") return builtin.value?.mercury ? t("where.builtInVersion", { version: builtin.value.mercury }) : t("where.builtIn");
   return t("where.mercury", { host: p.modem.host, port: p.modem.controlPort });
 });
+
+/** The header's station pill (the design canvas): the dial frequency as the strip shows it. */
+const pillFreq = computed(() => formatDigits(shownFreq.value?.hz));
 
 /** The persistent banner for the modem's state (docs/04 §3 Recover). */
 const banner = computed(() => {
@@ -98,7 +103,7 @@ const switchTitleKey = computed(() =>
   receiveOnlyPending.value ? "mode.receiveOnlyPendingTitle" : receiveOnly.value ? "mode.receiveOnlyTitle" : "mode.answeringTitle",
 );
 /** The full status for the header's tooltip: the state, its detail and what it means. */
-const stateTitle = computed(() => [...new Set([modemLabel.value, detail.value, modeWord.value].filter((x): x is string => !!x))].join(" · "));
+const stateTitle = computed(() => [...new Set([modemLabel.value, where.value, detail.value, modeWord.value].filter((x): x is string => !!x))].join(" · "));
 const rxError = ref("");
 
 /** Ask the core to switch; the switch itself only follows the snapshot, so a refused command leaves it as it was. */
@@ -123,8 +128,12 @@ function go(page: ViewName) {
 }
 function onKey(e: KeyboardEvent) {
   // Escape closes a drawer; it never aborts a session (docs/04 §5).
+  // A drawer is on top, so it closes first; then the station panel.
   if (e.key === "Escape" && app.drawer) {
     app.drawer = null;
+    e.preventDefault();
+  } else if (e.key === "Escape" && stripOpen.value) {
+    stripOpen.value = false;
     e.preventDefault();
   }
 }
@@ -205,10 +214,26 @@ onUnmounted(() => {
         <b>MercuryChat</b><span class="alpha small">{{ t("app.alpha") }}</span>
       </div>
       <button v-if="!setup" class="toggle-sidebar quiet" :aria-expanded="app.drawer === 'peers'" @click="app.drawer = app.drawer === 'peers' ? null : 'peers'">{{ t("sidebar.toggle") }}</button>
-      <div v-if="activeProfile" class="station" data-tauri-drag-region>
-        <b class="mono">{{ activeProfile.callsign }}</b>
-        <span class="muted small">{{ where }}</span>
-      </div>
+      <!-- The station pill (design canvas): callsign, dial frequency and the strip's chips; it opens and closes the station strip. -->
+      <button
+        v-if="activeProfile"
+        class="station station-pill"
+        :aria-expanded="setup ? undefined : stripOpen"
+        :aria-controls="setup ? undefined : 'station-panel'"
+        :disabled="setup"
+        :title="setup ? where : t(stripOpen ? 'strip.collapse' : 'strip.expand')"
+        @click="stripOpen = !stripOpen"
+      >
+        <b class="mono call">{{ activeProfile.callsign }}</b>
+        <span class="divider" aria-hidden="true"></span>
+        <span class="freq-digits pill-freq">{{ pillFreq }}</span>
+        <span class="chips small">
+          <span class="chip mono">{{ currentBand ?? t("strip.noBand") }}</span>
+          <span class="chip mono">{{ shownMode ?? t("strip.noMode") }}</span>
+          <span class="chip mono">{{ shownBandwidth }}</span>
+        </span>
+        <span v-if="!setup" class="chevron" aria-hidden="true">{{ stripOpen ? "▴" : "▾" }}</span>
+      </button>
       <span v-if="activeProfile && !inWizard" class="station-mode" role="status" aria-live="polite">
         <span :class="['mode-word', { rx: receiveOnly }]">{{ t(modeWordKey) }}</span>
         <label class="switch warn" :title="t(switchTitleKey)">
@@ -219,12 +244,16 @@ onUnmounted(() => {
       <span class="grow" data-tauri-drag-region></span>
       <!-- The modem's state, the one place it is said (owner, 17 Nov): a long detail is cut with an ellipsis; hover shows it all. -->
       <span class="state" role="status" aria-live="polite" :title="stateTitle" data-tauri-drag-region>
-        <span :class="['pill', modemState]">{{ modemLabel }}</span>
+        <span :class="['pill', modemState]"><span class="dot" aria-hidden="true"></span>{{ modemLabel }}</span>
+        <span v-if="where" class="where small">{{ where }}</span>
         <span v-if="detail" class="detail muted small">{{ detail }}</span>
       </span>
       <span class="utc mono small muted" :aria-label="t('app.utcAria')" data-tauri-drag-region>{{ utc }}</span>
       <WindowControls />
     </header>
+
+    <!-- The station panel drops from the header's station pill; closed, it shows only what needs attention. -->
+    <StationStrip v-if="snapshot && !setup" :now="now.getTime()" />
 
     <p v-if="rxError" class="banner err" role="alert">
       {{ t("banner.receiveOnlyFailed", { reason: rxError }) }}
@@ -247,8 +276,6 @@ onUnmounted(() => {
       <button class="quiet" @click="openPeer(otherSession.peer)">{{ t("banner.open") }}</button>
     </p>
 
-    <!-- The station strip: full width above the sidebar and the workspace, on Operate only. -->
-    <StationStrip v-if="snapshot && !setup" :now="now.getTime()" />
 
     <div :class="['body', { solo: setup || !snapshot }]">
       <nav class="rail" :aria-label="t('nav.label')">
@@ -303,7 +330,19 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .brand { display: flex; align-items: center; gap: var(--space); font-weight: 650; }
 .mark { display: block; -webkit-user-drag: none; }
 .alpha { color: var(--warning); border: 1px solid currentColor; border-radius: 999px; padding: 0 8px; }
-.station { display: flex; flex-direction: column; line-height: 1.2; border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
+.station-pill {
+  display: inline-flex; align-items: center; gap: 10px; min-width: 0; height: 34px; padding: 0 12px 0 14px;
+  border-radius: 999px; border: 1px solid var(--border); background: var(--raised); color: var(--text); font: inherit;
+}
+.station-pill:disabled { opacity: 1; cursor: default; }
+.station-pill .divider { width: 1px; align-self: stretch; margin: 8px 0; background: var(--border-strong); }
+.pill-freq { font-size: calc(16px * var(--font-scale)); }
+.station-pill .chips { display: inline-flex; gap: 4px; }
+.station-pill .chip { padding: 0 7px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-2); line-height: 1.5; white-space: nowrap; }
+.chevron { color: var(--text-2); }
+.state .pill { display: inline-flex; align-items: center; gap: 6px; }
+.state .pill .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.state .where { color: var(--text-2); min-width: 0; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .station-mode { display: inline-flex; align-items: center; gap: var(--space); }
 .mode-word { font-weight: 600; color: var(--success); }
 .mode-word.rx { color: var(--warning); }
@@ -323,20 +362,24 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .body.solo { grid-template-columns: minmax(84px, 112px) minmax(0, 1fr); }
 .rail { display: flex; flex-direction: column; gap: 6px; padding: var(--space) 6px; border-right: 1px solid var(--border); background: var(--surface); }
 .rail button {
-  display: grid; justify-items: center; gap: 2px; padding: 8px 2px; font-size: calc(11px * var(--font-scale));
-  border-color: transparent; background: transparent; color: var(--text-2);
+  display: grid; justify-items: center; gap: 3px; padding: 9px 2px; font-size: calc(11px * var(--font-scale));
+  border-color: transparent; background: transparent; color: var(--text-2); border-radius: 12px;
   overflow-wrap: anywhere; hyphens: auto; text-align: center;
 }
 .rail svg {
-  width: 18px; height: 18px; fill: none; stroke: currentColor;
+  width: 20px; height: 20px; fill: none; stroke: currentColor;
   stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round;
 }
+.rail button:hover { color: var(--text); }
 .rail button.selected { background: var(--raised); color: var(--accent); }
 .rail button:nth-child(4) { margin-top: auto; }
 .view { min-height: 0; min-width: 0; overflow: hidden; }
 .loading { padding: calc(var(--space) * 3); }
+@media (max-width: 1279px) {
+  .station-pill .chips { display: none; }
+}
 @media (max-width: 1099px) {
-  .detail, .station .muted { display: none; }
+  .detail, .state .where { display: none; }
   header { gap: var(--space); }
 }
 /* Up to 960 px the sidebar is a drawer (Sidebar.vue): the grid loses its column. */
@@ -349,5 +392,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   .body, .body.solo { grid-template-columns: minmax(64px, 84px) minmax(0, 1fr); }
   .rail button { font-size: calc(9px * var(--font-scale)); }
   .alpha, .utc { display: none; }
+  /* The strip right below shows the frequency: the pill keeps the callsign only. */
+  .station-pill .divider, .pill-freq { display: none; }
 }
 </style>

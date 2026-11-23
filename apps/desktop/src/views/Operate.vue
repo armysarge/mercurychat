@@ -1,14 +1,17 @@
 <script setup lang="ts">
 // The main workspace (docs/04 §2, M2 parts): the conversation and the session
 // pane (the conversation list is the app's sidebar, App.vue). At ≤1439 px the
-// session pane is a drawer. The peer, the mode and Disconnect / Abort stay in
+// session pane is a drawer. With no conversation open, the station home
+// (M5 Task 11b) stands where the transcript would be. The peer, the mode and Disconnect / Abort stay in
 // the conversation header so they are always reachable (docs/04 §7).
 import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { describeError } from "../api";
+import Avatar from "../components/Avatar.vue";
 import Composer from "../components/Composer.vue";
 import { exportConversation } from "../exports";
 import SessionPanel from "../components/SessionPanel.vue";
+import StationHome from "../components/StationHome.vue";
 import Transcript from "../components/Transcript.vue";
 import {
   abort, app, cancelCall, canAbort, canCall, chat, disconnect, inSession, linkPeer, modemState, placeCall, session,
@@ -49,6 +52,9 @@ const STEP_LABEL = {
 } as const;
 const reached = (step: string) => progress.value !== null && STEPS.indexOf(step as never) <= STEPS.indexOf(progress.value as never);
 
+/** A link is up with the open conversation's station. */
+const live = computed(() => !!session.value && session.value.peer === chat.open);
+
 const subtitle = computed(() => {
   const s = session.value;
   if (s && s.peer === chat.open) {
@@ -64,9 +70,10 @@ const subtitle = computed(() => {
   <div class="operate">
     <section class="chat-pane" :aria-label="t('operate.conversationAria')">
       <div class="peer-header">
+        <Avatar v-if="chat.open" :callsign="chat.open" :live="live" :size="40" />
         <div class="who">
           <h1 class="mono">{{ chat.open || t("operate.noConversation") }}</h1>
-          <p class="muted small">{{ chat.open ? subtitle : t("operate.typeCallsign") }}</p>
+          <p class="muted small"><span v-if="live" class="live-dot" aria-hidden="true"></span>{{ chat.open ? subtitle : t("operate.typeCallsign") }}</p>
         </div>
         <div class="actions row">
           <button v-if="modemState === 'calling'" class="quiet" @click="cancelCall">{{ t("operate.cancel") }}</button>
@@ -88,7 +95,8 @@ const subtitle = computed(() => {
           <template #peer><b class="mono">{{ session.peer }}</b></template>
         </i18n-t>
       </p>
-      <Transcript class="grow-area" />
+      <Transcript v-if="chat.open" class="grow-area" />
+      <StationHome v-else />
       <p v-if="chat.error" class="err small errline" role="alert">{{ chat.error }}</p>
       <Composer />
     </section>
@@ -105,11 +113,14 @@ const subtitle = computed(() => {
 .session-pane { border-left: 1px solid var(--border); min-height: 0; background: var(--canvas); }
 .chat-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: linear-gradient(180deg, var(--surface), var(--canvas) 45%); }
 .peer-header {
-  display: flex; flex-wrap: wrap; gap: var(--space); align-items: center; justify-content: space-between;
+  display: flex; flex-wrap: wrap; gap: var(--space) calc(var(--space) * 1.5); align-items: center;
   padding: calc(var(--space) * 1.5) calc(var(--space) * 2); border-bottom: 1px solid var(--border);
+  background: var(--surface);
 }
-.peer-header h1 { font-size: calc(20px * var(--font-scale)); font-weight: 600; overflow-wrap: anywhere; }
-.actions { justify-content: flex-end; flex-wrap: wrap; }
+.peer-header .who { flex: 1 1 18ch; min-width: 0; }
+.live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-right: 6px; vertical-align: 1px; }
+.peer-header h1 { font-size: calc(20px * var(--font-scale)); font-weight: 600; overflow-wrap: break-word; }
+.actions { justify-content: flex-end; flex-wrap: wrap; margin-left: auto; }
 .toggle-session { display: none; }
 .export-note { margin: 0; padding: 4px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
 .progress { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space); margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }

@@ -14,19 +14,19 @@
 // Collapsible as one unit; the choice is remembered. Shown on every page, as
 // one row no taller than 80 px (owner, 20 Nov); at 1100 px or less only the
 // station and the actions show.
-import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import type { BroadcastOutcome } from "../bindings/BroadcastOutcome";
 import {
-  activeProfile, app, discovery, discoveryError, inSession, modemState, selectProfile, sendBeaconNow, sendCq, session, snapshot,
+  activeProfile, app, discovery, discoveryError, inSession, modemState, selectProfile, sendBeaconNow, sendCq, snapshot,
 } from "../store";
 import type { FrequencyEntry } from "../bindings/FrequencyEntry";
+import { stripOpen } from "../stripState";
 import {
-  currentBand, refusalText, rigRefusal, rigSet, rigUi, rigUp, rigView, setTune, shownFreq, tuneToEntry, tuneView,
+  currentBand, refusalText, rigRefusal, rigSet, rigUi, rigUp, rigView, setTune, shownBandwidth, shownFreq, shownMode, tuneToEntry, tuneView,
 } from "../rig";
 import { countdown } from "./countdown";
 import FreqDigits from "./FreqDigits.vue";
-import { formatDigits } from "./freqStep";
 import Popover from "./Popover.vue";
 import RigPopover from "./RigPopover.vue";
 import Waterfall from "./Waterfall.vue";
@@ -35,23 +35,8 @@ import { settingsTabRequest } from "../builtin";
 const { t } = useI18n();
 const props = defineProps<{ now: number }>();
 
-const KEY = "mc.stripOpen";
-const open = ref((() => {
-  try {
-    return localStorage.getItem(KEY) !== "0";
-  } catch {
-    return true;
-  }
-})());
-watch(open, (v) => {
-  try {
-    localStorage.setItem(KEY, v ? "1" : "0");
-  } catch {
-    // Storage may be unavailable: the choice then lasts for this run only.
-  }
-});
+const open = stripOpen;
 
-const tel = computed(() => snapshot.value?.telemetry ?? null);
 // The built-in modem's own state (M5): a sound card to choose, starting, stopped.
 const builtinDetail = computed(() => snapshot.value?.builtinDetail ?? null);
 const lastLine = (s: string) => {
@@ -65,13 +50,12 @@ function openAudio() {
 const beacon = computed(() => snapshot.value?.beacon ?? null);
 const idle = computed(() => modemState.value === "ready" || modemState.value === "listening");
 /** "7.105.000": the rig's frequency while its link is up, else Mercury's; dashes for none. */
-const digits = computed(() => formatDigits(shownFreq.value?.hz));
 const freqAge = computed(() => {
   const a = shownFreq.value?.ageMs;
   return a === undefined || a === null ? null : (a / 1000).toFixed(1);
 });
-const bandwidth = computed(() => (session.value?.bandwidth ? `BW${session.value.bandwidth}` : "BW2300"));
-const mode = computed(() => (rigUp.value ? rigView.value?.mode : null) ?? tel.value?.txMode ?? tel.value?.rxMode ?? null);
+const bandwidth = shownBandwidth;
+const mode = shownMode;
 
 // ---- the rig (M3b)
 const rigConfigured = computed(() => !!rigView.value && rigView.value.link.type !== "unconfigured");
@@ -131,6 +115,10 @@ function confirmTune() {
 }
 const nextQsy = computed(() => snapshot.value?.scheduleNext ?? null);
 const fault = computed(() => rigView.value?.fault ?? null);
+/** Something the operator must see even with the panel closed. */
+const alerting = computed(
+  () => builtinDetail.value?.kind === "chooseSoundCard" || builtinDetail.value?.kind === "mercuryStopped" || !!fault.value || !!rigUi.error,
+);
 const checkOff = computed(() => !!rigView.value?.pttCheckOff);
 const next = computed(() => (beacon.value?.active && beacon.value.nextDueUtc ? countdown(beacon.value.nextDueUtc, props.now) : null));
 
@@ -154,8 +142,10 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
 </script>
 
 <template>
-  <section :class="['strip', { closed: !open }]" :aria-label="t('strip.aria')">
-    <div v-show="open" id="strip-body" class="groups">
+  <div class="strip-host">
+  <!-- The station panel (owner, 23 Nov: no permanent bar): it drops from the header's station pill, which opens and closes it. -->
+  <section v-show="open" id="station-panel" class="strip" :aria-label="t('strip.aria')">
+    <div class="groups">
       <div class="group station">
         <div class="freq">
           <FreqDigits :hz="shownFreq?.hz ?? null" :age-ms="shownFreq?.ageMs ?? null" :editable="rigUp" :refusal="freqRefusal" @tune="tuneFreq" />
@@ -206,10 +196,6 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
         <Waterfall :shown="open && !narrow" />
       </div>
     </div>
-    <p v-show="!open" class="closed-line small">
-      <span class="freq-digits">{{ digits }}</span>
-      <span v-if="next" class="mono muted">{{ t("strip.nextBeacon", { time: next }) }}</span>
-    </p>
     <Popover :open="bandOpen" :anchor="bandBtn" :label="t('strip.bandMenu', { band: bandName })" @close="bandOpen = false">
       <button v-for="e in bandEntries" :key="e.id" class="quiet small menu-item" :disabled="!!freqRefusal" :title="freqRefusal" @click="pickEntry(e.id)">{{ entryLabel(e) }}</button>
       <p v-if="!bandEntries.length" class="muted menu-empty">{{ t("strip.bandEmpty") }}</p>
@@ -225,23 +211,38 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
       </div>
     </Popover>
     <RigPopover :open="moreOpen" :anchor="moreBtn" @close="moreOpen = false" />
-    <button class="collapse quiet small" :aria-expanded="open" aria-controls="strip-body" :title="t(open ? 'strip.collapse' : 'strip.expand')" @click="open = !open">
-      <span aria-hidden="true">{{ open ? "▴" : "▾" }}</span><span class="sr-only">{{ t(open ? "strip.collapse" : "strip.expand") }}</span>
+    <button class="collapse quiet small" :title="t('strip.collapse')" @click="open = false">
+      <span aria-hidden="true">▴</span><span class="sr-only">{{ t("strip.collapse") }}</span>
     </button>
   </section>
+  <!-- With the panel closed, what needs the operator's eye still shows: a sound card to choose, Mercury stopped, a PTT fault, a refused rig command. -->
+  <p v-if="!open && alerting" class="strip-alerts small">
+    <button v-if="builtinDetail?.kind === 'chooseSoundCard'" type="button" class="link warn alert-sound-card" @click="openAudio">{{ t("strip.chooseSoundCard") }}</button>
+    <span v-else-if="builtinDetail?.kind === 'mercuryStopped'" class="err line alert-mercury-stopped" role="alert" :title="builtinDetail.reason">{{ t("strip.mercuryStopped", { reason: lastLine(builtinDetail.reason) }) }}</span>
+    <span v-if="fault" class="chip ptt-fault alert-ptt-fault" role="alert" :title="t('strip.pttFaultTitle')">{{ t("strip.pttFault") }}</span>
+    <span v-if="rigUi.error" class="warn line alert-rig-error" role="alert" :title="rigUi.error">{{ rigUi.error }}</span>
+  </p>
+  </div>
 </template>
 
 <style scoped>
-/* One row, never taller than 80 px (owner, 20 Nov; was 60 px): station, actions, then
-   the spectrum at the right edge. Long status text is cut with an ellipsis
-   and shown in full on hover. */
+/* A panel over the workspace, never a bar in the layout (owner, 23 Nov): one row,
+   never taller than 80 px: station, actions, then the spectrum at the right
+   edge. Long status text is cut with an ellipsis and shown in full on hover. */
+.strip-host { position: relative; flex: none; z-index: 25; }
 .strip {
-  display: flex; align-items: center; gap: var(--space); flex: none;
+  position: absolute; top: 0; left: calc(var(--space) * 2); right: calc(var(--space) * 2);
+  display: flex; align-items: center; gap: var(--space);
   box-sizing: border-box; height: 80px; max-height: 80px; overflow: hidden;
   padding: 6px var(--space) 6px calc(var(--space) * 2);
-  background: var(--surface); border-bottom: 1px solid var(--border);
+  background: var(--surface); border: 1px solid var(--border); border-top: 0;
+  border-radius: 0 0 12px 12px; box-shadow: 0 10px 24px var(--shadow);
 }
-.strip.closed { height: 32px; }
+.strip-alerts {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0;
+  padding: 4px calc(var(--space) * 2); background: var(--raised); border-bottom: 1px solid var(--border);
+}
+.link { min-height: 0; padding: 0; border: 0; background: transparent; font: inherit; color: var(--warning); }
 .groups { flex: 1; min-width: 0; height: 100%; display: flex; align-items: center; gap: calc(var(--space) * 2); }
 .group { display: flex; flex-direction: column; justify-content: center; gap: 6px; min-width: 0; height: 100%; }
 .group + .group { border-left: 1px solid var(--border); padding-left: calc(var(--space) * 2); }
@@ -269,5 +270,4 @@ button.tag:disabled { cursor: not-allowed; }
 .menu-item.current { color: var(--accent); }
 .menu-empty { margin: 0; }
 .confirm-buttons { display: flex; gap: 8px; justify-content: flex-end; }
-.closed-line { flex: 1; display: flex; align-items: center; gap: calc(var(--space) * 2); margin: 0; }
 </style>

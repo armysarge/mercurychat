@@ -56,7 +56,8 @@
   "where": {
     "simulator": "Simulateur · sans radio",
     "builtIn": "Mercury intégré",
-    "mercury": "Mercury {host}:{port}"
+    "mercury": "Mercury {host}:{port}",
+    "builtInVersion": "Mercury intégré {version}"
   },
   "banner": {
     "recovering": "Reconnexion au modem après une perte de connexion. Rien n'est renvoyé automatiquement.",
@@ -1273,5 +1274,19 @@
       "bytes": "{n} o",
       "kb": "{n} ko"
     }
+  },
+  "home": {
+    "aria": "Accueil de la station",
+    "dial": "Cadran",
+    "sourceRig": "Du poste",
+    "sourceMercury": "De Mercury",
+    "sourceNone": "Pas encore de fréquence",
+    "bands": "Bandes",
+    "tuneBand": "Accorder sur la première fréquence enregistrée en {band}",
+    "noBands": "Aucune fréquence enregistrée.",
+    "savedFrequencies": "Fréquences enregistrées…",
+    "cqTitle": "Appel CQ",
+    "cqBody": "Demande à toute station à l’écoute de répondre. Le CQ ne part que lorsque le modem est au repos.",
+    "cqNow": "Lancer CQ"
   }
 }

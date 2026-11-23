@@ -212,6 +212,9 @@ try {
   await s.eval(`${heardRow}.querySelector('.star').click()`);
   await until(s, `${heardRow}.querySelector('.star').getAttribute('aria-pressed') === 'true'`, "SIM1 starred");
 
+  // The strip is the station panel now (M5 Task 11b): it drops from the header's station pill.
+  await s.eval("(() => { const b = document.querySelector('header .station-pill'); if (b.getAttribute('aria-expanded') !== 'true') b.click(); })()");
+  await until(s, "getComputedStyle(document.querySelector('section.strip')).display !== 'none'", "the station panel open");
   // ---- T10c. CQ shows "transmitted"; telemetry reads unavailable; the strip shows the sim rig's frequency
   await s.eval(click("Call CQ"));
   await until(s, "/CQ: transmitted/.test(document.querySelector('.strip .cq-outcome')?.textContent ?? '')", "CQ transmitted", 10000);

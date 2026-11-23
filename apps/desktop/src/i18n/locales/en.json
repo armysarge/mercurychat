@@ -55,7 +55,8 @@
   "where": {
     "simulator": "Simulator · no radio",
     "builtIn": "Built-in Mercury",
-    "mercury": "Mercury {host}:{port}"
+    "mercury": "Mercury {host}:{port}",
+    "builtInVersion": "Built-in Mercury {version}"
   },
   "banner": {
     "recovering": "Reconnecting to the modem after the connection was lost. Nothing is resent automatically.",
@@ -1272,5 +1273,19 @@
       "bytes": "{n} B",
       "kb": "{n} kB"
     }
+  },
+  "home": {
+    "aria": "Station home",
+    "dial": "Dial",
+    "sourceRig": "From the rig",
+    "sourceMercury": "From Mercury",
+    "sourceNone": "No frequency yet",
+    "bands": "Bands",
+    "tuneBand": "Tune to the first saved frequency on {band}",
+    "noBands": "No saved frequencies yet.",
+    "savedFrequencies": "Saved frequencies…",
+    "cqTitle": "Call CQ",
+    "cqBody": "Ask any station listening to answer. CQ goes out only while the modem is idle.",
+    "cqNow": "Call CQ now"
   }
 }

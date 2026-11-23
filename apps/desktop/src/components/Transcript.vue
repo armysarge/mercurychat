@@ -190,7 +190,8 @@ watch(
 .scroller { overflow-y: auto; min-height: 0; padding: calc(var(--space) * 2) calc(var(--space) * 3); }
 .older { text-align: center; margin-bottom: var(--space); }
 .empty { text-align: center; margin-top: calc(var(--space) * 4); }
-.transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: calc(var(--space) * 1.5); }
+/* A messenger column (design canvas): at most 760 px wide, centred. */
+.transcript { list-style: none; margin: 0 auto; padding: 0; display: grid; gap: calc(var(--space) * 1.5); max-width: 760px; }
 .msg { max-width: 82%; }
 .msg.out { margin-left: auto; text-align: right; }
 .day { text-align: center; margin: var(--space) 0; }
@@ -198,13 +199,13 @@ watch(
 .who { color: var(--text-2); margin-bottom: 4px; }
 .body {
   display: inline-block; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere;
-  background: var(--bubble-in); padding: 10px 14px; border-radius: 3px 13px 13px 13px; line-height: 1.6;
+  background: var(--bubble-in); padding: 10px 14px; border-radius: 18px 18px 18px 6px; line-height: 1.6;
 }
-.msg.out .body { background: var(--bubble-out); border-radius: 13px 3px 13px 13px; }
+.msg.out .body { background: var(--bubble-out); border-radius: 18px 18px 6px 18px; }
 .status { font-size: calc(12px * var(--font-scale)); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
 .retry { padding: 2px 10px; font-size: calc(12px * var(--font-scale)); }
 .why { margin-top: 4px; text-align: left; max-width: 46ch; margin-left: auto; }
 .why summary { cursor: pointer; }
 .sys { text-align: center; }
-.sys-line { display: inline-block; padding: 2px 12px; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.sys-line { display: inline-block; padding: 2px 12px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); }
 </style>

@@ -5,7 +5,7 @@
 // shown but never applied by itself: after a restart or a recovery the
 // operator turns beacons on again. The channel is always shown, and Unknown
 // says so in words.
-import { computed } from "vue";
+import { computed, useId } from "vue";
 import { useI18n } from "vue-i18n";
 import { activeProfile, discoveryError, modemState, setBeacon, setBeaconContent, setBeaconInterval, snapshot } from "../store";
 import { countdown } from "./countdown";
@@ -13,6 +13,8 @@ import Switch from "./Switch.vue";
 
 const { t } = useI18n();
 const props = defineProps<{ now: number }>();
+/** Unique: the session panel and the station home can both show this. */
+const headId = useId();
 const beacon = computed(() => snapshot.value?.beacon ?? null);
 const idle = computed(() => modemState.value === "ready" || modemState.value === "listening");
 const INTERVALS = [5, 10, 15, 20, 30, 45, 60];
@@ -29,8 +31,8 @@ function onToggle(e: Event) {
 </script>
 
 <template>
-  <section class="card stack beacon" aria-labelledby="h-beacon">
-    <span id="h-beacon" class="label">{{ t("beacon.title") }}</span>
+  <section class="card stack beacon" :aria-labelledby="headId">
+    <span :id="headId" class="label">{{ t("beacon.title") }}</span>
     <template v-if="beacon">
       <label class="switch-row">
         <span>{{ t("beacon.periodic") }}</span>

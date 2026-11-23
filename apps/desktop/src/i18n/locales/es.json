@@ -56,7 +56,8 @@
   "where": {
     "simulator": "Simulador · sin radio",
     "builtIn": "Mercury integrado",
-    "mercury": "Mercury {host}:{port}"
+    "mercury": "Mercury {host}:{port}",
+    "builtInVersion": "Mercury integrado {version}"
   },
   "banner": {
     "recovering": "Reconectando con el módem tras perder la conexión. No se reenvía nada automáticamente.",
@@ -1273,5 +1274,19 @@
       "bytes": "{n} B",
       "kb": "{n} kB"
     }
+  },
+  "home": {
+    "aria": "Inicio de la estación",
+    "dial": "Dial",
+    "sourceRig": "Del equipo",
+    "sourceMercury": "De Mercury",
+    "sourceNone": "Aún sin frecuencia",
+    "bands": "Bandas",
+    "tuneBand": "Sintonizar la primera frecuencia guardada en {band}",
+    "noBands": "Aún no hay frecuencias guardadas.",
+    "savedFrequencies": "Frecuencias guardadas…",
+    "cqTitle": "Llamar CQ",
+    "cqBody": "Pide a cualquier estación a la escucha que responda. El CQ solo sale con el módem en reposo.",
+    "cqNow": "Llamar CQ ahora"
   }
 }

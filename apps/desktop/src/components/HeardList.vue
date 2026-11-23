@@ -10,9 +10,10 @@ import { useI18n } from "vue-i18n";
 import type { HeardSource } from "../bindings/HeardSource";
 import type { HeardStation } from "../bindings/HeardStation";
 import type { Reading } from "../bindings/Reading";
+import Avatar from "./Avatar.vue";
 import QsyPropose from "./QsyPropose.vue";
 import { describeTuning, extras, tuneSuggested } from "../extras";
-import { activeProfile, app, chat, discovery, discoveryError, inSession, openPeer, setFavourite } from "../store";
+import { activeProfile, app, chat, discovery, discoveryError, inSession, linkPeer, openPeer, setFavourite } from "../store";
 
 const { t } = useI18n();
 const emit = defineEmits<{ opened: [peer: string] }>();
@@ -106,6 +107,7 @@ async function pick(h: HeardStation) {
         :data-callsign="h.callsign"
       >
         <button class="pick" :aria-current="h.callsign === chat.open ? 'true' : undefined" @click="pick(h)">
+          <Avatar :callsign="h.callsign" :live="h.callsign === linkPeer" :size="32" />
           <span class="line">
             <b class="mono call">{{ h.callsign }}</b>
             <span v-if="h.source" :class="['badge', h.source]">{{ t(`heard.source.${h.source}`) }}</span>
@@ -170,7 +172,9 @@ async function pick(h: HeardStation) {
   from { background: color-mix(in srgb, var(--accent) 30%, var(--raised)); border-color: var(--accent); }
   to { background: transparent; border-color: transparent; }
 }
-.pick { display: grid; gap: 2px; text-align: left; padding: 6px 8px; border-color: transparent; background: transparent; min-width: 0; }
+.pick { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 2px 10px; text-align: left; padding: 6px 8px; border-color: transparent; background: transparent; min-width: 0; }
+.pick > .avatar { grid-row: 1 / span 3; align-self: start; margin-top: 2px; }
+.pick > .line { grid-column: 2; }
 .line { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .call { overflow-wrap: anywhere; }
 .meta { gap: 2px 8px; }
