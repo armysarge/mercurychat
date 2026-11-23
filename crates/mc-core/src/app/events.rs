@@ -65,6 +65,19 @@ pub struct SessionInfo {
     pub peer_max_file: u64,
 }
 
+/// The built-in modem's own state, beside the modem state (M5 §5.4–5.5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase")]
+#[ts(export)]
+pub enum ModemDetail {
+    /// "Starting Mercury…"
+    StartingMercury,
+    /// "Mercury stopped: <reason>"; the reason may be its log's last lines.
+    MercuryStopped { reason: String },
+    /// No sound card chosen yet: Mercury runs with no audio (LAB-01).
+    ChooseSoundCard,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 #[ts(export)]
@@ -72,6 +85,10 @@ pub enum AppEvent {
     ModemState {
         state: ModemState,
         detail: Option<String>,
+    },
+    /// The built-in modem's own state changed (M5).
+    BuiltIn {
+        detail: Option<ModemDetail>,
     },
     /// A session began (Some) or ended (None).
     Session {

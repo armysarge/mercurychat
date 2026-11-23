@@ -34,7 +34,9 @@ pub use broadcast::{
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
-pub use events::{is_current, AppEvent, EventEnvelope, EventLog, ModemState, SessionDirection, SessionInfo, Since};
+pub use events::{
+    is_current, AppEvent, EventEnvelope, EventLog, ModemDetail, ModemState, SessionDirection, SessionInfo, Since,
+};
 pub use frequencies::{FrequencyEntry, DEFAULT_MODES, MAX_ENTRY_HZ, PURPOSES, SEEDED_SETTING};
 pub use logbook::{Qso, QsoEdit, FINALISE_SETTING, OPERATOR_SOURCE};
 pub use modem::{ModemCmd, ModemOptions, ModemReport, ReportKind, SpectrumFeed};
@@ -45,9 +47,9 @@ pub use rig::{
     PTT_WINDOW, RIG_SOURCE,
 };
 pub use rigconfig::{
-    mercury_ptt_for, ptt_echo_matches, rigctld_spec_for, BandLevels, CatLink, CatSettings, Endpoint, FreqControl,
-    HamlibModelView, LineState, Parity, PttLine, PttMethod, PttSettings, RigConfig, READ_EVERY_CHOICES, TUNE_RANGE,
-    TX_GAIN_RANGE,
+    builtin_mercury_ptt, mercury_ptt_for, ptt_echo_matches, rigctld_spec_for, BandLevels, CatLink, CatSettings,
+    Endpoint, FreqControl, HamlibModelView, LineState, Parity, PttLine, PttMethod, PttSettings, RigConfig,
+    READ_EVERY_CHOICES, TUNE_RANGE, TX_GAIN_RANGE,
 };
 pub use schedule::{Schedule, ScheduleNext, ScheduleSlot, MAX_SLOTS};
 pub use service::{spawn_app, AppHandle, AppOptions};

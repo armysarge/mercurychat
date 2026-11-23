@@ -6,13 +6,13 @@
 //! stops only the process it started. Restarting after an exit is the
 //! caller's rule (M5 §5.4); the supervisor reports the exit and the log tail.
 
-pub mod child;
 pub mod ini;
 pub mod ports;
 
 use crate::app::PttLine;
 use crate::bundle::BundleError;
 use crate::profile::BuiltInPorts;
+pub use mercury_adapter::child;
 use ports::PortTaken;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
@@ -34,6 +34,20 @@ pub enum MercuryPtt {
     Cm108 {
         device: String,
     },
+}
+
+/// What a modem task needs to run a built-in profile's Mercury (M5 §5.4).
+#[derive(Debug, Clone)]
+pub struct BuiltInRun {
+    pub bundle: crate::bundle::Bundle,
+    /// `stations/<id>/mercury`.
+    pub dir: PathBuf,
+    pub ptt: MercuryPtt,
+    /// A sound card has been chosen (M5 §5.5); shared with the actor, which
+    /// sets it when Mercury accepts one.
+    pub audio_chosen: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// The profile's managed rigctld, which must answer before Mercury starts.
+    pub rigctld: Option<std::net::SocketAddr>,
 }
 
 #[derive(Debug, Clone)]
@@ -120,7 +134,7 @@ async fn answers(port: u16) -> bool {
 
 impl Supervisor {
     pub async fn start(cfg: BuiltInStart) -> Result<Supervisor, StartError> {
-        ports::check_free(&cfg.ports).map_err(StartError::PortTaken)?;
+        ports::check_mercury_free(&cfg.ports).map_err(StartError::PortTaken)?;
         let ini = ini::write_ini(&cfg.dir, &cfg.ports, &cfg.ptt)
             .map_err(|e| StartError::Spawn(format!("cannot write mercury.ini: {e}")))?;
         let log = cfg.dir.join("mercury.log");

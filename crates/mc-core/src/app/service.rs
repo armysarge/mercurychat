@@ -14,7 +14,7 @@ use super::broadcast::{
 use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::discovery::{self, Discovery};
-use super::events::{AppEvent, EventEnvelope, EventLog, ModemState, SessionInfo, Since};
+use super::events::{AppEvent, EventEnvelope, EventLog, ModemDetail, ModemState, SessionInfo, Since};
 use super::logbook::{self, Qso, Start, FINALISE_SETTING};
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use super::notify::{NotifyPrefs, NOTIFY_SETTING};
@@ -49,6 +49,11 @@ pub const UI_LANGUAGE_SETTING: &str = "ui.language";
 pub const UI_LANGUAGES: [&str; 5] = ["system", "en", "es", "pt-BR", "fr"];
 /// Longest history search text, in characters.
 const SEARCH_MAX: usize = 128;
+
+/// Set once Mercury has accepted a sound card for a built-in profile (M5 §5.5).
+fn audio_chosen_key(profile: &str) -> String {
+    format!("builtin.audioChosen:{profile}")
+}
 
 fn macros_seeded_key(profile: &str) -> String {
     format!("macros.seeded:{profile}")
@@ -85,6 +90,9 @@ pub struct AppOptions {
     pub schedule_tick: Option<std::time::Duration>,
     /// The QSY windows (tests); `None` is B3's 60 s, 120 s and 20 s.
     pub qsy_windows: Option<super::qsy::QsyWindows>,
+    /// The built-in modem's programs (M5): the release build's bundle, or a
+    /// lab bundle in development; `None`: no built-in modem in this build.
+    pub bundle: Option<crate::bundle::Bundle>,
 }
 
 impl Default for AppOptions {
@@ -104,6 +112,7 @@ impl Default for AppOptions {
             schedule_clock: None,
             schedule_tick: None,
             qsy_windows: None,
+            bundle: None,
         }
     }
 }
@@ -185,6 +194,9 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         events: events.clone(),
         modem: ModemState::Unavailable,
         modem_detail: None,
+        builtin_detail: None,
+        builtin_audio: None,
+        bundle: opts.bundle,
         session: None,
         chat: None,
         sim_root: opts.sim_root,
@@ -197,6 +209,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             sim_peer_broadcasts: opts.sim_peer_broadcasts,
             sim_rig: opts.sim_rig,
             files: Default::default(),
+            builtin: None,
         },
         reports,
         task: None,
@@ -319,6 +332,11 @@ struct App {
     events: broadcast::Sender<EventEnvelope>,
     modem: ModemState,
     modem_detail: Option<String>,
+    /// The built-in modem's own state (M5), as last reported.
+    builtin_detail: Option<ModemDetail>,
+    /// The running built-in Mercury's "sound card chosen" flag, shared with its task.
+    builtin_audio: Option<Arc<std::sync::atomic::AtomicBool>>,
+    bundle: Option<crate::bundle::Bundle>,
     /// The negotiated session, as the modem task last reported it.
     session: Option<SessionInfo>,
     /// The selected station's own store (its outbox, history and drafts),
@@ -1211,8 +1229,7 @@ impl App {
         self.broadcast_abort = None;
         self.broadcast_silent = false;
         self.listen_mode = ListenMode::default();
-        let telemetry =
-            matches!(&target, Some(p) if matches!(&p.modem, ModemTarget::Existing { telemetry_url: Some(_), .. }));
+        let telemetry = matches!(&target, Some(p) if matches!(&p.modem, ModemTarget::Existing { telemetry_url: Some(_), .. } | ModemTarget::BuiltIn { .. }));
         self.telemetry.reset(telemetry);
         // Beacons are armed for one run: a new modem or profile starts disarmed (RF-02).
         self.beacon.select(target.as_ref().map(|p| p.id.clone()), &self.store);
@@ -1223,6 +1240,16 @@ impl App {
         // A new active profile (or none): its stored Receive only choice.
         self.sync_receive_only();
         self.rig_modem_changed();
+        // A built-in profile's rigctld is the bundled one on its own port.
+        self.rig.builtin = match target.as_ref().map(|p| &p.modem) {
+            Some(ModemTarget::BuiltIn { ports }) => Some(rig::BuiltInRig {
+                bundle: self.bundle.clone(),
+                listen: std::net::SocketAddr::from(([127, 0, 0, 1], ports.rigctld)),
+            }),
+            _ => None,
+        };
+        self.builtin_audio = None;
+        self.set_builtin(None);
         self.start_rig(target.as_ref().map(|p| p.id.as_str()));
         self.freq_profile_changed(target.as_ref().map(|p| p.id.as_str()));
         let Some(p) = target else { return self.set_modem(ModemState::Unavailable, None) };
@@ -1236,8 +1263,52 @@ impl App {
                 return self.set_modem(ModemState::Faulted, Some("simulator unavailable: no data directory".into()));
             }
         }
+        let mut opts = self.modem_opts.clone();
+        if let ModemTarget::BuiltIn { ports } = &p.modem {
+            let (Some(bundle), Some(stations)) = (self.bundle.clone(), self.modem_opts.stations_root.clone()) else {
+                let why = "the built-in modem is not part of this build".to_string();
+                self.set_builtin(Some(ModemDetail::MercuryStopped { reason: why.clone() }));
+                return self.set_modem(ModemState::Faulted, Some(why));
+            };
+            let chosen = self.store.setting(&audio_chosen_key(&p.id)).ok().flatten().is_some();
+            let chosen = Arc::new(std::sync::atomic::AtomicBool::new(chosen));
+            let rig = crate::app::RigConfig::load(&self.store, &p.id);
+            let rigctld = (rig.freq_control == crate::app::FreqControl::ManagedRigctld)
+                .then(|| std::net::SocketAddr::from(([127, 0, 0, 1], ports.rigctld)));
+            opts.builtin = Some(crate::app::builtin::BuiltInRun {
+                bundle,
+                dir: stations.join(&p.id).join("mercury"),
+                ptt: crate::app::builtin_mercury_ptt(&rig, ports.rigctld),
+                audio_chosen: chosen.clone(),
+                rigctld,
+            });
+            self.builtin_audio = Some(chosen);
+        }
         let generation = self.log.generation();
-        self.task = Some(modem::spawn(p, generation, self.modem_opts.clone(), self.reports.clone()));
+        self.task = Some(modem::spawn(p, generation, opts, self.reports.clone()));
+    }
+
+    /// The built-in modem's own state, published when it changes.
+    fn set_builtin(&mut self, detail: Option<ModemDetail>) {
+        if self.builtin_detail != detail {
+            self.builtin_detail = detail.clone();
+            self.emit(AppEvent::BuiltIn { detail });
+        }
+    }
+
+    /// Mercury accepted a sound card: a built-in profile now starts with it
+    /// (M5 §5.5), remembered per profile.
+    pub(super) fn builtin_audio_chosen(&mut self) {
+        let Some(flag) = &self.builtin_audio else { return };
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        if let Ok(Some(id)) = self.store.setting(ACTIVE_PROFILE) {
+            if let Err(e) = self.store.set_setting(&audio_chosen_key(&id), "1") {
+                tracing::warn!("could not remember the sound card choice: {e}");
+            }
+        }
+        if self.builtin_detail == Some(ModemDetail::ChooseSoundCard) {
+            self.set_builtin(None);
+        }
     }
 
     /// A report from a modem task. One from a task the actor has replaced
@@ -1302,6 +1373,7 @@ impl App {
                 self.emit_all(events);
             }
             ReportKind::TelemetryCmds(tx) => self.rig_telemetry(tx),
+            ReportKind::BuiltIn(detail) => self.set_builtin(detail),
             ReportKind::Tune(result) => self.tune_report(result),
             ReportKind::Peer(m) => self.on_peer(m),
             ReportKind::File(ev) => self.on_file(ev),
@@ -1464,6 +1536,7 @@ impl App {
             generation: self.log.generation(),
             modem: self.modem,
             modem_detail: self.modem_detail.clone(),
+            builtin_detail: self.builtin_detail.clone(),
             profiles,
             receive_only,
             receive_only_pending: self.receive_only_pending(receive_only),

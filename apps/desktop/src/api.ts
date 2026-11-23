@@ -169,6 +169,9 @@ export class Mirror {
         v.snapshot.modem = ev.state;
         v.snapshot.modemDetail = ev.detail;
         break;
+      case "builtIn":
+        v.snapshot.builtinDetail = ev.detail;
+        break;
       case "activeProfileChanged":
         v.snapshot.activeProfileId = ev.id;
         break;

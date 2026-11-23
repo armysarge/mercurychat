@@ -9,8 +9,9 @@
 //! lock's own text, and the task ends: no takeover loop.
 
 use super::broadcast::{broadcast_gate, BroadcastKind, GateRefusal};
+use super::builtin::{BuiltInRun, BuiltInStart, StartError, Supervisor};
 use super::chat::ChatMessage;
-use super::events::{ModemState, SessionDirection, SessionInfo};
+use super::events::{ModemDetail, ModemState, SessionDirection, SessionInfo};
 use crate::profile::{ModemTarget, StationProfile};
 use crate::session::{PeerMsg, SessionCommand, SessionEnd, SessionEvent};
 use crate::station::{ConnectInfo, Observation, Station, StationConfig, StationError, StationRequest};
@@ -52,6 +53,8 @@ pub struct ModemOptions {
     pub sim_rig: bool,
     /// The active profile's file settings, for the station (M4).
     pub files: FileOptions,
+    /// A built-in profile's Mercury (M5 §5.4); set per task by the actor.
+    pub builtin: Option<BuiltInRun>,
 }
 
 /// What the station takes from the profile's file settings (M4).
@@ -189,6 +192,8 @@ pub enum ReportKind {
     /// Where to send commands for this modem's telemetry client (M3b: the
     /// per-band TX level). Sent once, when the client starts.
     TelemetryCmds(mpsc::Sender<TelemetryCmd>),
+    /// The built-in modem's own state (M5): starting, stopped, or no sound card.
+    BuiltIn(Option<ModemDetail>),
 }
 
 /// What a failed CQFRAME means, truthfully (03 section 6): a modem that never
@@ -533,65 +538,264 @@ async fn run(
     let mut forwarders = Forwarders::default();
     match profile.modem.clone() {
         ModemTarget::Existing { host, control_port, data_port, broadcast_port, telemetry_url } => {
-            let _lock = match &opts.locks_dir {
-                Some(dir) => match crate::lock::lock_endpoint(dir, &host, control_port) {
-                    Ok(l) => Some(l),
-                    Err(e) => return r.fault(e.to_string()).await,
-                },
-                None => None,
-            };
-            r.state(ModemState::Attaching, None).await;
-            let endpoint = Endpoint { host: host.clone(), control_port, data_port };
-            let mut cfg = StationConfig::defaults(call, endpoint, &station_dir);
-            cfg.hello_timeout = opts.radio_hello_timeout.unwrap_or(crate::station::RADIO_HELLO_TIMEOUT);
-            opts.files.apply(&mut cfg);
-            let mut station = match open_station(cfg).await {
-                Ok(s) => s,
-                Err(e) => return r.fault(format!("station data: {e}")).await,
-            };
-            forwarders.observe(&mut station, &r);
-            // Mercury may still see the predecessor's sockets for a moment
-            // after they close: after a hand-over, "occupied" is retried briefly.
+            let t = Target { host, control_port, data_port, broadcast_port, telemetry_url };
             let patience = if handed_over { HANDOVER_ATTACH } else { Duration::ZERO };
-            let attach = async {
-                let deadline = tokio::time::Instant::now() + patience;
-                loop {
-                    match station.attach().await {
-                        Err(StationError::Attach(mercury_adapter::AttachError::Occupied { .. }))
-                            if tokio::time::Instant::now() < deadline =>
-                        {
-                            tokio::time::sleep(Duration::from_millis(100)).await
-                        }
-                        other => return other,
-                    }
-                }
-            };
-            tokio::select! {
-                res = attach => if let Err(e) = res {
-                    return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await;
-                },
-                _ = stopped(&mut cmds, &r) => return,
-            }
-            let mut broadcast = Broadcast::new(broadcast_port.map(|p| (host.clone(), p)), &r);
-            tokio::select! {
-                _ = broadcast.open(false) => {}
-                _ = stopped(&mut cmds, &r) => return,
-            }
-            let _telemetry = telemetry_url.map(|url| Telemetry::start(url, &opts.spectrum, &r));
-            let mut station = station;
-            probe_tune(&mut station, &r).await;
-            r.send(ReportKind::ListenMode(station.listen_mode())).await;
-            r.state(ModemState::Ready, None).await;
-            serve(&mut station, cmds, &r, receive_only, &mut broadcast).await;
+            attach(t, &opts, cmds, &r, &station_dir, call, &mut forwarders, patience, receive_only).await
         }
-        // Started by the supervisor from M5 Task 5; until then, not available.
-        ModemTarget::BuiltIn { .. } => {
-            r.state(ModemState::Unavailable, Some("the built-in modem is not available in this build".into())).await;
+        // M5 §5.4: MercuryChat's own Mercury (after its rigctld), then attached
+        // as any Mercury on 127.0.0.1. The keeper stops it before the slot goes.
+        ModemTarget::BuiltIn { ports } => {
+            let Some(b) = opts.builtin.clone() else {
+                return r.fault("the built-in modem is not part of this build".into()).await;
+            };
+            let Some(keeper) = start_builtin(&b, ports, &mut cmds, &r).await else { return };
+            let t = Target {
+                host: "127.0.0.1".into(),
+                control_port: ports.control,
+                data_port: ports.control.wrapping_add(1),
+                broadcast_port: Some(ports.broadcast),
+                telemetry_url: Some(format!("ws://127.0.0.1:{}/websocket", ports.ui)),
+            };
+            // Mercury may still see the start check's connection for a moment.
+            attach(t, &opts, cmds, &r, &station_dir, call, &mut forwarders, HANDOVER_ATTACH, receive_only).await;
+            keeper.stop().await;
         }
         ModemTarget::Simulator => {
             let on_air = opts.sim_peer_broadcasts;
             simulator(&station_dir, call, receive_only, cmds, r, &mut forwarders, on_air, opts.sim_rig, &opts.files)
                 .await
+        }
+    }
+}
+
+/// A Mercury to attach to.
+struct Target {
+    host: String,
+    control_port: u16,
+    data_port: u16,
+    broadcast_port: Option<u16>,
+    telemetry_url: Option<String>,
+}
+
+/// Attach to a real Mercury (MOD-02's endpoint lock held throughout), open
+/// its broadcast port and telemetry, and serve until stopped. An attach that
+/// finds Mercury occupied is retried for `patience`.
+#[allow(clippy::too_many_arguments)]
+async fn attach(
+    t: Target,
+    opts: &ModemOptions,
+    mut cmds: mpsc::Receiver<ModemCmd>,
+    r: &Reporter,
+    station_dir: &Path,
+    call: Callsign,
+    forwarders: &mut Forwarders,
+    patience: Duration,
+    receive_only: Arc<AtomicBool>,
+) {
+    let Target { host, control_port, data_port, broadcast_port, telemetry_url } = t;
+    let _lock = match &opts.locks_dir {
+        Some(dir) => match crate::lock::lock_endpoint(dir, &host, control_port) {
+            Ok(l) => Some(l),
+            Err(e) => return r.fault(e.to_string()).await,
+        },
+        None => None,
+    };
+    r.state(ModemState::Attaching, None).await;
+    let endpoint = Endpoint { host: host.clone(), control_port, data_port };
+    let mut cfg = StationConfig::defaults(call, endpoint, station_dir);
+    cfg.hello_timeout = opts.radio_hello_timeout.unwrap_or(crate::station::RADIO_HELLO_TIMEOUT);
+    opts.files.apply(&mut cfg);
+    let mut station = match open_station(cfg).await {
+        Ok(s) => s,
+        Err(e) => return r.fault(format!("station data: {e}")).await,
+    };
+    forwarders.observe(&mut station, r);
+    // Mercury may still see a predecessor's sockets for a moment after they
+    // close: "occupied" is retried for `patience`.
+    let attach = async {
+        let deadline = tokio::time::Instant::now() + patience;
+        loop {
+            match station.attach().await {
+                Err(StationError::Attach(mercury_adapter::AttachError::Occupied { .. }))
+                    if tokio::time::Instant::now() < deadline =>
+                {
+                    tokio::time::sleep(Duration::from_millis(100)).await
+                }
+                other => return other,
+            }
+        }
+    };
+    tokio::select! {
+        res = attach => if let Err(e) = res {
+            return r.fault(format!("could not attach to Mercury at {host}:{control_port}: {e}")).await;
+        },
+        _ = stopped(&mut cmds, r) => return,
+    }
+    let mut broadcast = Broadcast::new(broadcast_port.map(|p| (host.clone(), p)), r);
+    tokio::select! {
+        _ = broadcast.open(false) => {}
+        _ = stopped(&mut cmds, r) => return,
+    }
+    let _telemetry = telemetry_url.map(|url| Telemetry::start(url, &opts.spectrum, r));
+    let mut station = station;
+    probe_tune(&mut station, r).await;
+    r.send(ReportKind::ListenMode(station.listen_mode())).await;
+    r.state(ModemState::Ready, None).await;
+    serve(&mut station, cmds, r, receive_only, &mut broadcast).await;
+}
+
+/// How long a built-in start waits for its rigctld to answer.
+const RIGCTLD_WAIT: Duration = Duration::from_secs(15);
+/// The wait before the one restart of a built-in Mercury (M5 §5.4).
+const MERCURY_RESTART_AFTER: Duration = Duration::from_secs(2);
+
+/// The built-in Mercury will not run: said in the built-in detail and as a fault.
+async fn mercury_stopped(r: &Reporter, reason: String) {
+    r.send(ReportKind::BuiltIn(Some(ModemDetail::MercuryStopped { reason: reason.clone() }))).await;
+    r.fault(reason).await;
+}
+
+fn start_error_text(e: &StartError) -> String {
+    match e {
+        StartError::NoAnswer { log_tail } if !log_tail.trim().is_empty() => format!("{e}\n{log_tail}"),
+        _ => e.to_string(),
+    }
+}
+
+/// Start the built-in Mercury: the bundled program checked (G4), its rigctld
+/// answering first when it has one, then the supervisor. `None`: it did not
+/// start (already reported) or the task was stopped meanwhile.
+async fn start_builtin(
+    b: &BuiltInRun,
+    ports: crate::profile::BuiltInPorts,
+    cmds: &mut mpsc::Receiver<ModemCmd>,
+    r: &Reporter,
+) -> Option<Keeper> {
+    r.send(ReportKind::BuiltIn(Some(ModemDetail::StartingMercury))).await;
+    r.state(ModemState::Attaching, Some("Starting Mercury…".into())).await;
+    let mercury = match b.bundle.verify(crate::bundle::MERCURY_EXE) {
+        Ok(p) => p,
+        Err(e) => {
+            mercury_stopped(r, e.to_string()).await;
+            return None;
+        }
+    };
+    if let Some(addr) = b.rigctld {
+        let wait = async {
+            let end = tokio::time::Instant::now() + RIGCTLD_WAIT;
+            loop {
+                if mercury_adapter::rigctl::answers_as_rigctld(addr).await {
+                    return true;
+                }
+                if tokio::time::Instant::now() >= end {
+                    return false;
+                }
+                tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+        };
+        tokio::select! {
+            up = wait => if !up {
+                mercury_stopped(r, format!("rigctld did not answer on {addr}: see the CAT log")).await;
+                return None;
+            },
+            _ = stopped(cmds, r) => return None,
+        }
+    }
+    let cfg = BuiltInStart {
+        mercury,
+        dir: b.dir.clone(),
+        ports,
+        ptt: b.ptt.clone(),
+        audio_null: !b.audio_chosen.load(Ordering::SeqCst),
+    };
+    let sup = tokio::select! {
+        res = Supervisor::start(cfg.clone()) => match res {
+            Ok(s) => s,
+            Err(e) => {
+                mercury_stopped(r, start_error_text(&e)).await;
+                return None;
+            }
+        },
+        _ = stopped(cmds, r) => return None,
+    };
+    r.send(ReportKind::BuiltIn(cfg.audio_null.then_some(ModemDetail::ChooseSoundCard))).await;
+    Some(Keeper::spawn(sup, cfg, b.audio_chosen.clone(), r.clone()))
+}
+
+/// Watches the built-in Mercury for the modem task: one restart after 2 s,
+/// then, if it dies again, its log's last lines and no more (M5 §5.4).
+struct Keeper {
+    stop: Option<oneshot::Sender<()>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl Keeper {
+    fn spawn(sup: Supervisor, cfg: BuiltInStart, chosen: Arc<AtomicBool>, r: Reporter) -> Keeper {
+        let (tx, rx) = oneshot::channel();
+        Keeper { stop: Some(tx), task: tokio::spawn(keep(sup, cfg, chosen, r, rx)) }
+    }
+
+    /// Stop Mercury (asked, then ended) and return once it has gone.
+    async fn stop(mut self) {
+        if let Some(tx) = self.stop.take() {
+            let _ = tx.send(());
+        }
+        let _ = (&mut self.task).await;
+    }
+}
+
+impl Drop for Keeper {
+    fn drop(&mut self) {
+        // Not stopped in order (a panic): dropping the supervisor ends Mercury.
+        self.task.abort();
+    }
+}
+
+async fn keep(
+    mut sup: Supervisor,
+    mut cfg: BuiltInStart,
+    chosen: Arc<AtomicBool>,
+    r: Reporter,
+    mut stop: oneshot::Receiver<()>,
+) {
+    let mut restarted = false;
+    loop {
+        let exited = tokio::select! {
+            info = sup.exited() => Some(info),
+            _ = &mut stop => None,
+        };
+        let Some(info) = exited else { return sup.stop().await };
+        let code = info.code.map_or_else(|| "no exit code".to_string(), |c| format!("exit code {c}"));
+        tracing::warn!("the built-in Mercury exited ({code})");
+        if restarted {
+            let reason =
+                if info.log_tail.trim().is_empty() { format!("Mercury exited ({code})") } else { info.log_tail };
+            mercury_stopped(&r, reason).await;
+            let _ = stop.await;
+            return;
+        }
+        restarted = true;
+        r.send(ReportKind::BuiltIn(Some(ModemDetail::StartingMercury))).await;
+        tokio::select! {
+            _ = tokio::time::sleep(MERCURY_RESTART_AFTER) => {}
+            _ = &mut stop => return,
+        }
+        cfg.audio_null = !chosen.load(Ordering::SeqCst);
+        let started = tokio::select! {
+            res = Supervisor::start(cfg.clone()) => Some(res),
+            _ = &mut stop => None,
+        };
+        match started {
+            None => return,
+            Some(Ok(s)) => {
+                sup = s;
+                r.send(ReportKind::BuiltIn(cfg.audio_null.then_some(ModemDetail::ChooseSoundCard))).await;
+            }
+            Some(Err(e)) => {
+                mercury_stopped(&r, start_error_text(&e)).await;
+                let _ = stop.await;
+                return;
+            }
         }
     }
 }

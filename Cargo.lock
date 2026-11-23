@@ -2400,7 +2400,6 @@ dependencies = [
  "tracing-subscriber",
  "ts-rs",
  "uuid",
- "windows-sys 0.59.0",
  "zstd",
 ]
 
@@ -2445,12 +2444,14 @@ name = "mercury-adapter"
 version = "0.0.1"
 dependencies = [
  "futures-util",
+ "libc",
  "rand 0.9.5",
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
  "tokio",
  "tokio-tungstenite",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -80,6 +80,9 @@ impl App {
                 }
                 if let (Some(AudioWait::Status(_)), Some(ok)) = (self.audio.wait, st.audio_ok) {
                     self.audio.wait = None;
+                    if ok {
+                        self.builtin_audio_chosen();
+                    }
                     let text = if ok {
                         "Audio applied: Mercury saved the new devices".to_string()
                     } else {

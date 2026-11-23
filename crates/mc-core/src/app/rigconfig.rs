@@ -312,6 +312,26 @@ pub fn mercury_ptt_for(cfg: &RigConfig, managed: SocketAddr) -> Option<Telemetry
     }
 }
 
+/// The PTT a built-in Mercury's ini starts with (M5 §5.3): the choice
+/// [`mercury_ptt_for`] sends at runtime, with the profile's own rigctld.
+/// "Leave Mercury's setting" is no PTT: the private ini has no other.
+pub fn builtin_mercury_ptt(cfg: &RigConfig, rigctld_port: u16) -> crate::app::builtin::MercuryPtt {
+    use crate::app::builtin::MercuryPtt;
+    let listen = SocketAddr::from(([127, 0, 0, 1], rigctld_port));
+    let Some(TelemetryCmd::SetPttConfig { method, device, line, .. }) = mercury_ptt_for(cfg, listen) else {
+        return MercuryPtt::None;
+    };
+    match method.as_str() {
+        "hamlib" => match device.parse::<SocketAddr>() {
+            Ok(a) if a.ip().is_loopback() => MercuryPtt::Rigctld { port: a.port() },
+            _ => MercuryPtt::None,
+        },
+        "serial" => MercuryPtt::Serial { port: device, line: if line == "dtr" { PttLine::Dtr } else { PttLine::Rts } },
+        "cm108" => MercuryPtt::Cm108 { device },
+        _ => MercuryPtt::None,
+    }
+}
+
 /// Mercury's `radio_list` already says what `want` would set.
 pub fn ptt_echo_matches(rl: &RadioList, want: &TelemetryCmd) -> bool {
     let TelemetryCmd::SetPttConfig { method, device, model, line, invert, gpio, .. } = want else { return false };

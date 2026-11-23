@@ -17,7 +17,19 @@ fn free(port: u16) -> bool {
 /// Ok when every port is free; else the first taken one and the next set
 /// that is free throughout (control, broadcast and UI step by 10, rigctld by 1).
 pub fn check_free(p: &BuiltInPorts) -> Result<(), PortTaken> {
-    let Some(port) = p.all().into_iter().map(|(_, port)| port).find(|&port| !free(port)) else {
+    check(p, true)
+}
+
+/// As [`check_free`], for Mercury's own ports: the rigctld port is the
+/// rigctld's to check (it may be MercuryChat's own rigctld already there).
+pub fn check_mercury_free(p: &BuiltInPorts) -> Result<(), PortTaken> {
+    check(p, false)
+}
+
+fn check(p: &BuiltInPorts, with_rigctld: bool) -> Result<(), PortTaken> {
+    let mine = |name: &str| with_rigctld || name != "rigctldPort";
+    let Some(port) = p.all().into_iter().filter(|(n, _)| mine(n)).map(|(_, port)| port).find(|&port| !free(port))
+    else {
         return Ok(());
     };
     let suggestion = (1..=200u16)

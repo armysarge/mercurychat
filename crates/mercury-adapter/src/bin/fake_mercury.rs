@@ -6,6 +6,12 @@
 //! Extra flags come from the command line or from `fake-mercury.args` beside
 //! the log (so a test can change one start without changing the supervisor):
 //! - `--die-after <ms>`: log `fake-mercury: dying` and exit with code 3.
+//! - `--audio-fail <text>`: a `set_audio_config` is answered `audio_ok: false`
+//!   with `<text>` as the error.
+//! - `--expect-rigctld <port>`: log whether a rigctld answers on that port at
+//!   start (`fake-mercury: rigctld answered` / `... not answering`).
+//!
+//! The UI WebSocket greets with device lists and a healthy status, as Mercury.
 
 use mercury_adapter::fake::FakeNet;
 use mercury_adapter::fake_ws::FakeWs;
@@ -49,6 +55,20 @@ async fn main() {
             std::process::exit(2);
         }
     };
+    ws.set_status(Some(r#"{"type":"status","audio_ok":true,"audio_error":""}"#));
+    ws.set_hello(vec![
+        r#"{"type":"capture_dev_list","selected":"in1","list":[{"name":"Line In","id":"in1"},{"name":"USB CODEC","id":"in2"}]}"#.into(),
+        r#"{"type":"playback_dev_list","selected":"out1","list":[{"name":"Speakers","id":"out1"},{"name":"USB CODEC","id":"out2"}]}"#.into(),
+        r#"{"type":"audio_system","selected":"wasapi","list":["wasapi"]}"#.into(),
+        r#"{"type":"input_channel","selected":"left","list":["left","right","stereo"]}"#.into(),
+    ]);
+    if let Some(text) = flag(&args, "--audio-fail") {
+        ws.set_audio_result(false, &text);
+    }
+    if let Some(port) = flag(&args, "--expect-rigctld").and_then(|p| p.parse::<u16>().ok()) {
+        let up = mercury_adapter::rigctl::answers_as_rigctld(([127, 0, 0, 1], port).into()).await;
+        say(if up { "fake-mercury: rigctld answered" } else { "fake-mercury: rigctld not answering" });
+    }
     say(&format!("fake-mercury: listening control {} broadcast {} ui {}", net.a_base, net.a_bcast, ws.url));
 
     if let Some(ms) = flag(&args, "--die-after").and_then(|v| v.parse::<u64>().ok()) {

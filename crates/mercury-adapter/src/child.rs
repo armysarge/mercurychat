@@ -1,5 +1,5 @@
-//! Programs MercuryChat starts for the built-in modem live no longer than the
-//! app (M5 §5.4): on Windows they join a job object that ends them when the
+//! Programs MercuryChat starts for the built-in modem (Mercury, rigctld) live
+//! no longer than the app (M5 §5.4): on Windows they join a job object that ends them when the
 //! app's last handle to it closes (also on a crash); on Linux they get a
 //! parent-death signal. Both are set up here, at spawn.
 

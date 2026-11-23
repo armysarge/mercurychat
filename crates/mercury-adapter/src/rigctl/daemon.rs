@@ -174,7 +174,19 @@ impl Drop for RigctldDaemon {
 
 impl RigctldDaemon {
     pub fn start(exe: PathBuf, spec: RigctldSpec, events: mpsc::Sender<DaemonState>) -> RigctldDaemon {
-        Self::spawn(exe, spec, events, Vec::new(), None)
+        Self::spawn(exe, spec, events, Vec::new(), None, false)
+    }
+
+    /// A built-in station's rigctld (M5 §5.4): never one already answering at
+    /// the address (that is refused, with the port named), and tied to the
+    /// app's life ([`crate::child`]). Starts once `previous` has stopped.
+    pub fn start_owned(
+        exe: PathBuf,
+        spec: RigctldSpec,
+        events: mpsc::Sender<DaemonState>,
+        previous: Option<RigctldDaemon>,
+    ) -> RigctldDaemon {
+        Self::spawn(exe, spec, events, Vec::new(), previous, true)
     }
 
     /// As [`RigctldDaemon::start`], once `previous` (the daemon this one
@@ -186,7 +198,7 @@ impl RigctldDaemon {
         events: mpsc::Sender<DaemonState>,
         previous: Option<RigctldDaemon>,
     ) -> RigctldDaemon {
-        Self::spawn(exe, spec, events, Vec::new(), previous)
+        Self::spawn(exe, spec, events, Vec::new(), previous, false)
     }
 
     /// As [`RigctldDaemon::start`], with extra environment for the program (tests).
@@ -196,7 +208,7 @@ impl RigctldDaemon {
         events: mpsc::Sender<DaemonState>,
         env: Vec<(String, String)>,
     ) -> RigctldDaemon {
-        Self::spawn(exe, spec, events, env, None)
+        Self::spawn(exe, spec, events, env, None, false)
     }
 
     fn spawn(
@@ -205,6 +217,7 @@ impl RigctldDaemon {
         events: mpsc::Sender<DaemonState>,
         env: Vec<(String, String)>,
         previous: Option<RigctldDaemon>,
+        owned: bool,
     ) -> RigctldDaemon {
         let log = Arc::new(Mutex::new(VecDeque::with_capacity(LOG_LINES)));
         let (stop, stopped) = watch::channel(false);
@@ -213,7 +226,7 @@ impl RigctldDaemon {
             if let Some(p) = previous {
                 p.shutdown().await;
             }
-            supervise(exe, spec, events, env, l, stopped).await;
+            supervise(exe, spec, events, env, l, stopped, owned).await;
         });
         RigctldDaemon { log, stop, task: Some(task) }
     }
@@ -257,11 +270,22 @@ async fn supervise(
     env: Vec<(String, String)>,
     log: Arc<Mutex<VecDeque<String>>>,
     mut stop: watch::Receiver<bool>,
+    owned: bool,
 ) {
     if *stop.borrow() {
         return;
     }
-    if answers_as_rigctld(spec.listen).await {
+    if owned {
+        let taken = answers_as_rigctld(spec.listen).await || std::net::TcpListener::bind(spec.listen).is_err();
+        if taken {
+            let reason = format!(
+                "port {} is already in use: a built-in station uses only the rigctld MercuryChat starts",
+                spec.listen.port()
+            );
+            let _ = events.send(DaemonState::Failed { reason }).await;
+            return;
+        }
+    } else if answers_as_rigctld(spec.listen).await {
         let _ = events.send(DaemonState::Reused).await;
         return;
     }
@@ -275,7 +299,7 @@ async fn supervise(
                 _ = stopped(&mut stop) => return,
             }
         }
-        let Some(why) = run_once(&exe, &args, &env, spec.listen, &events, &log, &mut stop).await else {
+        let Some(why) = run_once(&exe, &args, &env, spec.listen, &events, &log, &mut stop, owned).await else {
             return; // stopped
         };
         if attempt == 1 {
@@ -291,6 +315,7 @@ async fn stopped(stop: &mut watch::Receiver<bool>) {
 
 /// Start rigctld once and wait for it to stop; why it stopped, or None when
 /// `stop` ended it (killed and waited for).
+#[allow(clippy::too_many_arguments)]
 async fn run_once(
     exe: &Path,
     args: &[String],
@@ -299,8 +324,11 @@ async fn run_once(
     events: &mpsc::Sender<DaemonState>,
     log: &Arc<Mutex<VecDeque<String>>>,
     stop: &mut watch::Receiver<bool>,
+    owned: bool,
 ) -> Option<String> {
-    let mut cmd = tokio::process::Command::new(exe);
+    // A built-in station's rigctld is tied to the app; the M3b.1 one is not
+    // (it may be left running at exit while Mercury keys through it).
+    let mut cmd = if owned { crate::child::command(exe) } else { tokio::process::Command::new(exe) };
     cmd.args(args)
         .envs(env.iter().map(|(k, v)| (k, v)))
         .stdin(Stdio::null())
@@ -312,7 +340,8 @@ async fn run_once(
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    let mut child = match cmd.spawn() {
+    let spawned = if owned { crate::child::spawn(&mut cmd) } else { cmd.spawn() };
+    let mut child = match spawned {
         Ok(c) => c,
         Err(e) => return Some(format!("{}: {e}", exe.display())),
     };

@@ -34,11 +34,7 @@ rand = "0.9"
 zstd = "0.13"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "gif"] }
 
-# The built-in modem's children end with the app (M5 §5.4): a job object on
-# Windows, a parent-death signal on Linux.
-[target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_Security", "Win32_System_JobObjects", "Win32_System_Threading"] }
-
+# Stopping the built-in Mercury asks it to quit first (SIGTERM, M5 §5.4).
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
 

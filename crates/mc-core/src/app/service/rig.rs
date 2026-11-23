@@ -170,6 +170,9 @@ pub(super) struct RigSide {
     /// The rigctld program (tests); `None`: look for it.
     rigctld_program: Option<Option<PathBuf>>,
     managed_listen: SocketAddr,
+    /// The active profile is built-in (M5 §5.4): its own rigctld is the
+    /// bundled one, on the profile's port, and never one already running.
+    pub(super) builtin: Option<BuiltInRig>,
     /// MercuryChat's own rig link errors, for the CAT log.
     cat_log: VecDeque<String>,
     /// Mercury's PTT setting, last sent (and when): not sent again until
@@ -179,7 +182,19 @@ pub(super) struct RigSide {
     ptt_deferred: bool,
 }
 
+/// A built-in profile's rigctld: the bundle it comes from and where it listens.
+#[derive(Debug, Clone)]
+pub(super) struct BuiltInRig {
+    pub bundle: Option<crate::bundle::Bundle>,
+    pub listen: SocketAddr,
+}
+
 impl RigSide {
+    /// Where MercuryChat's own rigctld listens for the active profile.
+    pub(super) fn listen(&self) -> SocketAddr {
+        self.builtin.as_ref().map_or(self.managed_listen, |b| b.listen)
+    }
+
     pub(super) fn with_options(
         limit: Option<Duration>,
         rigctld_program: Option<Option<PathBuf>>,
@@ -243,6 +258,7 @@ impl Default for RigSide {
             daemon_bridge: None,
             rigctld_program: None,
             managed_listen: MANAGED_LISTEN.parse().unwrap(),
+            builtin: None,
             cat_log: VecDeque::new(),
             ptt_sent: None,
             ptt_deferred: false,
@@ -375,7 +391,7 @@ impl App {
             r.policy.carry_safety(&old);
         }
         r.policy.set_activity(Activity::Idle);
-        let check = owner_check(&cfg, r.radio_list.as_ref(), r.managed_listen);
+        let check = owner_check(&cfg, r.radio_list.as_ref(), r.listen());
         let refused = matches!(check, OwnerCheck::Refused { .. });
         r.policy.set_owner_check(check);
         r.cfg = cfg.clone();
@@ -406,11 +422,31 @@ impl App {
                     out_tx,
                 )),
                 FreqControl::ManagedRigctld => {
-                    let listen = r.managed_listen;
-                    match (r.rigctld_program(&cfg.hamlib_dir), rigctld_spec_for(&cfg, listen)) {
-                        (Some(exe), Some(spec)) => {
+                    let listen = r.listen();
+                    // A built-in profile: the bundled rigctld, checked, or nothing.
+                    let program = match &r.builtin {
+                        Some(b) => match b.bundle.as_ref().map(|b| b.verify(crate::bundle::RIGCTLD_EXE)) {
+                            Some(Ok(exe)) => Ok(Some(exe)),
+                            Some(Err(e)) => Err(e.to_string()),
+                            None => Err("the built-in rigctld is not part of this build".to_string()),
+                        },
+                        None => Ok(r.rigctld_program(&cfg.hamlib_dir)),
+                    };
+                    let owned = r.builtin.is_some();
+                    match (program, rigctld_spec_for(&cfg, listen)) {
+                        (Err(reason), _) => {
+                            r.policy.set_daemon(Some(format!("failed: {reason}")));
+                            r.cat_note(reason.clone());
+                            r.policy.on_msg(&RigMsg::Link(RigLink::Lost { reason }), Instant::now());
+                            None
+                        }
+                        (Ok(Some(exe)), Some(spec)) => {
                             let (dtx, mut drx) = mpsc::channel(8);
-                            r.daemon = Some(RigctldDaemon::start_after(exe, spec, dtx, previous.take()));
+                            r.daemon = Some(if owned {
+                                RigctldDaemon::start_owned(exe, spec, dtx, previous.take())
+                            } else {
+                                RigctldDaemon::start_after(exe, spec, dtx, previous.take())
+                            });
                             let fwd = out_tx.clone();
                             let bridge = tokio::spawn(async move {
                                 while let Some(state) = drx.recv().await {
@@ -423,7 +459,7 @@ impl App {
                             r.policy.set_daemon(Some("starting".into()));
                             Some(RigClient::spawn_every(listen.to_string(), read_every, cmd_rx, out_tx))
                         }
-                        (None, _) => {
+                        (Ok(None), _) => {
                             r.policy.set_daemon(Some("notFound".into()));
                             let reason = "rigctld not found: install Hamlib or choose its folder".to_string();
                             r.cat_note(reason.clone());
@@ -555,7 +591,7 @@ impl App {
             return;
         }
         let cfg = RigConfig::external(&host, config.external.port);
-        let owner = match owner_check(&cfg, self.rig.radio_list.as_ref(), self.rig.managed_listen) {
+        let owner = match owner_check(&cfg, self.rig.radio_list.as_ref(), self.rig.listen()) {
             OwnerCheck::Ok => {
                 RigTestStep { name: "owner".into(), ok: Some(true), detail: "Mercury keys through this rigctld".into() }
             }
@@ -1155,7 +1191,7 @@ impl App {
     /// Set Mercury's PTT to match the rig settings (M3b.1 §5.2), once its
     /// radio_list is known and differs; while the station is busy, later.
     pub(super) fn push_mercury_ptt(&mut self) {
-        let Some(want) = mercury_ptt_for(&self.rig.cfg, self.rig.managed_listen) else {
+        let Some(want) = mercury_ptt_for(&self.rig.cfg, self.rig.listen()) else {
             self.rig.ptt_deferred = false;
             return;
         };
@@ -1198,7 +1234,7 @@ impl App {
                 let before = self.rig.policy.owner_check().clone();
                 self.rig.radio_list = Some(rl.clone());
                 self.push_mercury_ptt();
-                let after = owner_check(&self.rig.cfg, Some(rl), self.rig.managed_listen);
+                let after = owner_check(&self.rig.cfg, Some(rl), self.rig.listen());
                 if after != before {
                     let was_refused = matches!(before, OwnerCheck::Refused { .. });
                     let refused = matches!(after, OwnerCheck::Refused { .. });

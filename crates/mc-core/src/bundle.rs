@@ -13,6 +13,10 @@ use sha2::{Digest, Sha256};
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+/// The bundled Mercury and rigctld, as the manifest names them.
+pub const MERCURY_EXE: &str = if cfg!(windows) { "mercury.exe" } else { "mercury" };
+pub const RIGCTLD_EXE: &str = if cfg!(windows) { "rigctld.exe" } else { "rigctld" };
+
 /// The shipped programs, where they are, and what they must hash to.
 #[derive(Debug, Clone)]
 pub struct Bundle {

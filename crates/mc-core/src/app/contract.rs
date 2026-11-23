@@ -6,7 +6,7 @@ use super::audio::AudioSettingsView;
 use super::beacon::{BeaconContentView, BeaconStatus};
 use super::chat::{ChatMessage, Conversation};
 use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
-use super::events::{ModemState, SessionInfo};
+use super::events::{ModemDetail, ModemState, SessionInfo};
 use super::files::{FileSettings, PreparedView, TransferView};
 use super::frequencies::FrequencyEntry;
 use super::info::ShareConfig;
@@ -33,6 +33,9 @@ pub struct AppSnapshot {
     pub modem: ModemState,
     /// Why the modem is in its state (a fault's reason), as last reported.
     pub modem_detail: Option<String>,
+    /// The built-in modem's own state (M5): starting, stopped, or waiting
+    /// for a sound card. `null` for other profiles.
+    pub builtin_detail: Option<ModemDetail>,
     pub profiles: Vec<StationProfile>,
     pub active_profile_id: Option<String>,
     /// The active profile is Receive only (D18): it never answers calls by
