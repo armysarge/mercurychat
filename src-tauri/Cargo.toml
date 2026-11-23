@@ -39,6 +39,7 @@ simulator = ["mc-core/sim"]
 devtools = ["tauri/devtools"]
 
 [dev-dependencies]
+sha2 = "0.10"
 tempfile = "3"
 # The spectrum forwarder's test runs on a paused clock.
 tokio = { version = "1", features = ["time", "sync", "macros", "rt", "test-util"] }

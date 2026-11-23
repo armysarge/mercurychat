@@ -13,6 +13,7 @@
 //   B5 no console errors from the first screen to the end
 //   B6 Settings → About lists the diagnostics file's entries before saving:
 //      versions, settings and Mercury's log; no database (Task 11)
+//   B7 Settings → About → Licences lists the components of THIRD-PARTY.md (Task 12)
 // Usage: node lab/windows/m5-ui-check.mjs <mercurychat.exe> <empty data dir> [port]
 // Build first (debug: MC_BUNDLE_DIR is read only by debug builds):
 //   cargo build -p mercury-adapter --bins
@@ -178,6 +179,17 @@ try {
   if (diag.some((n) => /\.db$|files\//.test(n))) throw new Error(`B6: the preview lists data: ${diag.join(", ")}`);
   results.push(`PASS B6 diagnostics preview: ${diag.join(", ")}`);
 
+  // ---- B7: About → Licences, the same list as THIRD-PARTY.md (M5 Task 12).
+  await s.eval("document.querySelector('#panel-about button.licences-show').click()");
+  await until(s, "document.querySelectorAll('#panel-about .licences [data-component]').length > 50", "the licence list");
+  const lic = await s.eval(`(() => {
+    const rows = [...document.querySelectorAll('#panel-about .licences [data-component]')];
+    const has = (n) => rows.some((r) => r.dataset.component === n);
+    return { n: rows.length, mercury: has('Mercury'), hamlib: has('Hamlib'), tauri: has('tauri'), vue: has('vue') };
+  })()`);
+  for (const k of ["mercury", "hamlib", "tauri", "vue"]) if (!lic[k]) throw new Error(`B7: the licence list has no ${k}`);
+  results.push(`PASS B7 licences: ${lic.n} components, Mercury, Hamlib, tauri and vue among them`);
+
   await sleep(1000);
   await noErrors("the end");
   results.push("PASS B5 console: no errors from the first screen to the end");
@@ -189,4 +201,4 @@ try {
   kill(app);
 }
 for (const r of results) console.log(r);
-process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 6 ? 1 : 0);
+process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 7 ? 1 : 0);

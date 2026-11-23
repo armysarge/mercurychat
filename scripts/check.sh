@@ -35,6 +35,7 @@ node --test apps/desktop/scripts/rigForm.test.mjs
 node --test apps/desktop/scripts/quick.test.mjs
 node --test apps/desktop/scripts/transfers.test.mjs
 node --test apps/desktop/scripts/wizard.test.mjs
+node --test apps/desktop/scripts/third-party.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

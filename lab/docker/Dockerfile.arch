@@ -1,0 +1,6 @@
+# Arch Linux package build (M5 Task 12): makepkg as an unprivileged user.
+#   docker build -f lab/docker/Dockerfile.arch -t mercurychat-arch-build lab/docker
+FROM archlinux:latest
+RUN pacman -Syu --noconfirm --needed base-devel && pacman -Scc --noconfirm \
+ && useradd -m builder
+WORKDIR /home/builder

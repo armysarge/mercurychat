@@ -1287,5 +1287,21 @@
     "cqTitle": "Call CQ",
     "cqBody": "Ask any station listening to answer. CQ goes out only while the modem is idle.",
     "cqNow": "Call CQ now"
+  },
+  "licences": {
+    "title": "Licences",
+    "body": "MercuryChat is free software under the GPL, version 3 or later. It ships these components, each under its own licence; THIRD-PARTY.md beside every release lists the same.",
+    "show": "Show the components and their licences",
+    "search": "Search by name or licence",
+    "count": "{n} components",
+    "component": "Component",
+    "version": "Version",
+    "licence": "Licence",
+    "kind": {
+      "modem": "The built-in modem",
+      "installer": "The Windows installer",
+      "rust": "Rust crates",
+      "npm": "JavaScript packages"
+    }
   }
 }

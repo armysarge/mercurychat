@@ -1,0 +1,30 @@
+<!-- M5 Task 12: the NSIS installer's clean install in Windows Sandbox.
+     1. Put the release's MercuryChat_*_x64-setup.exe in E:\mc-lab-out\m5\sandbox\in
+        (and, for a real upgrade, an older one named older-setup.exe).
+     2. Double-click this file. The sandbox installs, checks and writes
+        E:\mc-lab-out\m5\sandbox\out\result.txt, then closes itself.
+     Windows Sandbox must be turned on (Windows features), with no network. -->
+<Configuration>
+  <Networking>Disable</Networking>
+  <vGPU>Disable</vGPU>
+  <MappedFolders>
+    <MappedFolder>
+      <HostFolder>E:\mc-lab-out\m5\sandbox\in</HostFolder>
+      <SandboxFolder>C:\mc\in</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>E:\mc-lab-out\m5\sandbox\out</HostFolder>
+      <SandboxFolder>C:\mc\out</SandboxFolder>
+      <ReadOnly>false</ReadOnly>
+    </MappedFolder>
+    <MappedFolder>
+      <HostFolder>E:\Programming\MercuryChat-m5-work\lab\windows</HostFolder>
+      <SandboxFolder>C:\mc\scripts</SandboxFolder>
+      <ReadOnly>true</ReadOnly>
+    </MappedFolder>
+  </MappedFolders>
+  <LogonCommand>
+    <Command>powershell.exe -ExecutionPolicy Bypass -File C:\mc\scripts\sandbox-install.ps1</Command>
+  </LogonCommand>
+</Configuration>

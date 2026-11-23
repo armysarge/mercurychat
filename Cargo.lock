@@ -2328,7 +2328,7 @@ checksum = "5d15f86d12da44cd8d4ec3c73984537eb7f4cadcb9776a575a0a8a05ca11005c"
 
 [[package]]
 name = "m0-client"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2391,7 +2391,7 @@ dependencies = [
 
 [[package]]
 name = "mc-core"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "chrono",
  "filetime",
@@ -2423,7 +2423,7 @@ dependencies = [
 
 [[package]]
 name = "mc-storage"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "chrono",
  "rusqlite",
@@ -2433,7 +2433,7 @@ dependencies = [
 
 [[package]]
 name = "mch-protocol"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "hex",
  "rand 0.9.5",
@@ -2459,7 +2459,7 @@ dependencies = [
 
 [[package]]
 name = "mercury-adapter"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "futures-util",
  "libc",
@@ -2474,7 +2474,7 @@ dependencies = [
 
 [[package]]
 name = "mercury-contract"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "futures-util",
  "hex",
@@ -2490,7 +2490,7 @@ dependencies = [
 
 [[package]]
 name = "mercurychat"
-version = "0.0.1"
+version = "0.5.0-beta.1"
 dependencies = [
  "mc-core",
  "mc-storage",
@@ -2498,6 +2498,7 @@ dependencies = [
  "mercury-adapter",
  "serde",
  "serde_json",
+ "sha2",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

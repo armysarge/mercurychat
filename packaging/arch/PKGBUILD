@@ -1,0 +1,27 @@
+# Maintainer: the MercuryChat project <https://github.com/armysarge/mercurychat>
+# The Arch package (M5 Task 12): the release .deb's files, repackaged. The
+# .deb is built on Ubuntu 22.04, so its programs run on Arch's newer glibc.
+# lab/release/build-release.sh puts the .deb beside this file and sets
+# pkgver from it (a beta "0.5.0-beta.1" becomes 0.5.0beta1: Arch versions
+# take no '-').
+pkgname=mercurychat
+pkgver=0.5.0beta1
+pkgrel=1
+pkgdesc="Radio messaging over the Mercury HF modem, with a built-in Mercury and Hamlib"
+arch=('x86_64')
+url="https://github.com/armysarge/mercurychat"
+license=('GPL-3.0-or-later')
+depends=('webkit2gtk-4.1' 'libpulse' 'alsa-lib')
+options=('!strip' '!debug')
+source=("mercurychat.deb")
+noextract=("mercurychat.deb")
+sha256sums=('SKIP')
+
+package() {
+  cd "$srcdir"
+  local data
+  data=$(bsdtar -tf mercurychat.deb | grep '^data\.tar')
+  bsdtar -xOf mercurychat.deb "$data" | bsdtar -xf - -C "$pkgdir"
+  # The built-in modem's programs stay exactly as built: their SHA-256 is checked at start.
+  chmod 0755 "$pkgdir"/usr/lib/mercurychat/mercury "$pkgdir"/usr/lib/mercurychat/rigctld
+}

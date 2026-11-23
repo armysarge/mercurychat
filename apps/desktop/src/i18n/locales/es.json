@@ -1288,5 +1288,21 @@
     "cqTitle": "Llamar CQ",
     "cqBody": "Pide a cualquier estación a la escucha que responda. El CQ solo sale con el módem en reposo.",
     "cqNow": "Llamar CQ ahora"
+  },
+  "licences": {
+    "title": "Licencias",
+    "body": "MercuryChat es software libre bajo la GPL, versión 3 o posterior. Incluye estos componentes, cada uno con su propia licencia; THIRD-PARTY.md junto a cada versión lista lo mismo.",
+    "show": "Mostrar los componentes y sus licencias",
+    "search": "Buscar por nombre o licencia",
+    "count": "{n} componentes",
+    "component": "Componente",
+    "version": "Versión",
+    "licence": "Licencia",
+    "kind": {
+      "modem": "El módem integrado",
+      "installer": "El instalador de Windows",
+      "rust": "Crates de Rust",
+      "npm": "Paquetes de JavaScript"
+    }
   }
 }

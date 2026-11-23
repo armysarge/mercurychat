@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+// THIRD-PARTY.md and apps/desktop/src/thirdParty.json (Settings → About →
+// Licences), M5 Task 12: every component a release ships, with its licence.
+//   - Rust crates: the normal (not build or dev) dependencies of the
+//     `mercurychat` package, from `cargo metadata --offline`, both platforms;
+//   - the window's npm packages: apps/desktop/package-lock.json, dev ones left out;
+//   - the built-in modem by hand: Mercury (and the FreeDV code in it), Hamlib,
+//     at the versions in BUILD.txt ($MC_BUNDLE_BUILD, a release) or the lab pins;
+//   - the Windows installer's WebView2 bootstrapper.
+// No tool is installed. --check: exit 1 if either file would change.
+//   node lab/release/third-party.mjs [--check]
+import { execFileSync } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
+const check = process.argv.includes("--check");
+
+function rustCrates() {
+  const meta = JSON.parse(
+    execFileSync("cargo", ["metadata", "--format-version", "1", "--offline", "--locked"], { cwd: root, maxBuffer: 64 << 20 }).toString(),
+  );
+  const byId = new Map(meta.packages.map((p) => [p.id, p]));
+  const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
+  const start = meta.packages.find((p) => p.name === "mercurychat" && meta.workspace_members.includes(p.id));
+  const seen = new Set();
+  const queue = [start.id];
+  while (queue.length) {
+    const id = queue.shift();
+    if (seen.has(id)) continue;
+    seen.add(id);
+    for (const d of nodes.get(id)?.deps ?? []) {
+      if (d.dep_kinds.some((k) => k.kind === null)) queue.push(d.pkg);
+    }
+  }
+  return [...seen]
+    .map((id) => byId.get(id))
+    .filter((p) => p.source !== null) // the workspace's own crates are MercuryChat
+    .map((p) => ({
+      name: p.name,
+      version: p.version,
+      licence: p.license ?? (p.license_file ? `see ${p.license_file}` : "unknown"),
+      kind: "rust",
+      url: p.repository ?? `https://crates.io/crates/${p.name}`,
+    }));
+}
+
+function npmPackages() {
+  const lock = JSON.parse(readFileSync(join(root, "apps", "desktop", "package-lock.json"), "utf8"));
+  return Object.entries(lock.packages ?? {})
+    .filter(([path, p]) => path.startsWith("node_modules/") && !p.dev && !p.devOptional)
+    .map(([path, p]) => {
+      const name = path.slice(path.lastIndexOf("node_modules/") + "node_modules/".length);
+      return { name, version: p.version, licence: p.license ?? "unknown", kind: "npm", url: `https://www.npmjs.com/package/${name}` };
+    });
+}
+
+function bundled() {
+  let mercury = "";
+  let hamlib = "";
+  const build = process.env.MC_BUNDLE_BUILD;
+  if (build && existsSync(build)) {
+    const get = (k) => (readFileSync(build, "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] ?? "").trim().replace(/^v/, "");
+    mercury = get("mercury_version") || get("mercury_commit").slice(0, 12);
+    hamlib = get("hamlib_version");
+  } else {
+    const pin = (f, k) => (readFileSync(join(root, "lab", f), "utf8").match(new RegExp(`^${k}=(.*)$`, "m"))?.[1] ?? "").trim();
+    mercury = pin("mercury-pin.env", "MERCURY_COMMIT").slice(0, 12);
+    hamlib = pin("hamlib-pin.env", "HAMLIB_VERSION");
+  }
+  return [
+    { name: "Mercury", version: mercury, licence: "GPL-3.0", kind: "modem", url: "https://github.com/Rhizomatica/mercury" },
+    { name: "Mercury FreeDV code", version: mercury, licence: "LGPL-2.1", kind: "modem", url: "https://github.com/Rhizomatica/mercury" },
+    { name: "Hamlib", version: hamlib, licence: "LGPL-2.1-or-later AND GPL-2.0-or-later", kind: "modem", url: "https://github.com/Hamlib/Hamlib" },
+    {
+      name: "Microsoft Edge WebView2 bootstrapper",
+      version: "evergreen",
+      licence: "Microsoft Software License (redistributable)",
+      kind: "installer",
+      url: "https://developer.microsoft.com/microsoft-edge/webview2/",
+    },
+  ];
+}
+
+const KIND_ORDER = { modem: 0, installer: 1, rust: 2, npm: 3 };
+const list = [...bundled(), ...rustCrates(), ...npmPackages()].sort(
+  (a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || a.name.localeCompare(b.name, "en") || a.version.localeCompare(b.version, "en"),
+);
+// One row per name@version (a crate can be reached twice).
+const rows = list.filter((c, i) => i === list.findIndex((d) => d.name === c.name && d.version === c.version));
+
+const HEAD = {
+  modem: "The built-in modem (shipped as separate programs; their source is published beside every release)",
+  installer: "The Windows installer",
+  rust: "Rust crates compiled into MercuryChat",
+  npm: "JavaScript packages in MercuryChat's window",
+};
+let md = `# Third-party components
+
+MercuryChat is free software under the GNU General Public License, version 3
+or later (GPL-3.0-or-later). A release ships the components below, each under
+its own licence. This file is generated by \`lab/release/third-party.mjs\`;
+Settings → About → Licences shows the same list.
+`;
+for (const kind of Object.keys(HEAD)) {
+  const part = rows.filter((c) => c.kind === kind);
+  if (!part.length) continue;
+  md += `\n## ${HEAD[kind]}\n\n| Component | Version | Licence | Source |\n| --- | --- | --- | --- |\n`;
+  for (const c of part) md += `| ${c.name} | ${c.version} | ${c.licence} | ${c.url} |\n`;
+}
+const json = JSON.stringify(rows.map(({ name, version, licence, kind, url }) => ({ name, version, licence, kind, url })), null, 1) + "\n";
+
+const targets = [
+  [join(root, "THIRD-PARTY.md"), md],
+  [join(root, "apps", "desktop", "src", "thirdParty.json"), json],
+];
+let stale = 0;
+for (const [path, text] of targets) {
+  const now = existsSync(path) ? readFileSync(path, "utf8").replace(/\r\n/g, "\n") : null;
+  if (now === text) continue;
+  if (check) {
+    console.error(`stale: ${path} (run node lab/release/third-party.mjs)`);
+    stale++;
+  } else {
+    writeFileSync(path, text);
+    console.log(`wrote ${path}`);
+  }
+}
+console.log(`${rows.length} components`);
+process.exit(stale ? 1 : 0);

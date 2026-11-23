@@ -391,7 +391,59 @@ fn boot_steps(app: tauri::AppHandle) {
     }
 }
 
+/// `mercurychat --version` (M5 Task 12): the app's version, the built-in
+/// modem's Mercury and Hamlib versions and whether every shipped file is as
+/// built. Headless: it runs before any window or display is touched, so a
+/// clean-install check can call it. `false`: the bundle failed its check.
+fn version_text(bundle: Option<&mc_core::bundle::Bundle>) -> (String, bool) {
+    let mut out = format!(
+        "MercuryChat {}
+",
+        env!("CARGO_PKG_VERSION")
+    );
+    let Some(b) = bundle else {
+        out.push_str(
+            "bundle: none
+",
+        );
+        return (out, true);
+    };
+    let v = b.versions();
+    out.push_str(&format!(
+        "Mercury {}
+Hamlib {}
+",
+        v.mercury, v.hamlib
+    ));
+    let files = b.manifest_names().count();
+    match b.verify_all() {
+        Ok(()) => (
+            out + &format!(
+                "bundle: verified ({files} files)
+"
+            ),
+            true,
+        ),
+        Err(e) => {
+            use mc_core::bundle::BundleError::{Changed, Missing, NotInManifest};
+            let (Changed(name) | Missing(name) | NotInManifest(name)) = &e;
+            (
+                out + &format!(
+                    "bundle: FAILED {name}: {e}
+"
+                ),
+                false,
+            )
+        }
+    }
+}
+
 pub fn run() {
+    if std::env::args().skip(1).any(|a| a == "--version" || a == "-V") {
+        let (text, ok) = version_text(builtin_bundle().as_ref());
+        print!("{text}");
+        std::process::exit(if ok { 0 } else { 1 });
+    }
     STARTED.get_or_init(Instant::now);
     tauri::Builder::default()
         // Desktop notifications (M3a Task 12b): the window may only send one,
@@ -474,5 +526,58 @@ mod bundle_tests {
             }
             _ => assert!(super::BUNDLE_MANIFEST.is_empty() && super::BUNDLE_BUILD.is_empty()),
         }
+    }
+}
+
+#[cfg(test)]
+mod version_tests {
+    use mc_core::bundle::Bundle;
+    use sha2::{Digest, Sha256};
+
+    fn lab_bundle(tamper: bool) -> (tempfile::TempDir, Bundle) {
+        let dir = tempfile::tempdir().unwrap();
+        let build = "mercury_version=v1.9.25\nhamlib_version=4.7.2\n";
+        std::fs::write(dir.path().join("BUILD.txt"), build).unwrap();
+        std::fs::write(dir.path().join("mercury"), b"modem").unwrap();
+        let sha = |b: &[u8]| format!("{:x}", Sha256::digest(b));
+        let manifest = format!("{}  BUILD.txt\n{}  mercury\n", sha(build.as_bytes()), sha(b"modem"));
+        if tamper {
+            std::fs::write(dir.path().join("mercury"), b"changed").unwrap();
+        }
+        let b = Bundle::for_tests(
+            dir.path().into(),
+            Box::leak(manifest.into_boxed_str()),
+            Box::leak(build.to_string().into_boxed_str()),
+        );
+        (dir, b)
+    }
+
+    /// `mercurychat --version` without a built-in modem: the app's version and "none".
+    #[test]
+    fn version_without_a_bundle_says_none() {
+        let (text, ok) = super::version_text(None);
+        assert!(ok);
+        assert!(text.starts_with(&format!("MercuryChat {}\n", env!("CARGO_PKG_VERSION"))), "{text}");
+        assert!(text.contains("bundle: none"), "{text}");
+    }
+
+    /// With the bundle as built: its versions and "bundle: verified".
+    #[test]
+    fn version_names_the_bundle_and_verifies_it() {
+        let (_d, b) = lab_bundle(false);
+        let (text, ok) = super::version_text(Some(&b));
+        assert!(ok, "{text}");
+        assert!(text.contains("Mercury 1.9.25\n"), "{text}");
+        assert!(text.contains("Hamlib 4.7.2\n"), "{text}");
+        assert!(text.lines().any(|l| l == "bundle: verified (2 files)"), "{text}");
+    }
+
+    /// A changed file fails the check, and says which.
+    #[test]
+    fn version_reports_a_changed_file() {
+        let (_d, b) = lab_bundle(true);
+        let (text, ok) = super::version_text(Some(&b));
+        assert!(!ok);
+        assert!(text.lines().any(|l| l.starts_with("bundle: FAILED") && l.contains("mercury")), "{text}");
     }
 }

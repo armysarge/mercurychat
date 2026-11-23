@@ -100,12 +100,15 @@ impl Bundle {
         Ok(path)
     }
 
+    /// The names the manifest lists, in its order.
+    pub fn manifest_names(&self) -> impl Iterator<Item = &str> {
+        self.manifest.lines().filter_map(|l| l.split_once("  ").map(|(_, n)| n.trim())).filter(|n| !n.is_empty())
+    }
+
     /// Every file the manifest lists, checked: the first one that fails.
     pub fn verify_all(&self) -> Result<(), BundleError> {
-        for name in self.manifest.lines().filter_map(|l| l.split_once("  ").map(|(_, n)| n.trim())) {
-            if !name.is_empty() {
-                self.verify(name)?;
-            }
+        for name in self.manifest_names() {
+            self.verify(name)?;
         }
         Ok(())
     }

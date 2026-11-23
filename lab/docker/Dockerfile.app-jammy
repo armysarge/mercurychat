@@ -1,0 +1,20 @@
+# MercuryChat release build image for the .deb (M5 Task 12): Ubuntu 22.04
+# (glibc 2.35), so the package installs on Ubuntu 22.04, 24.04 and Debian 12.
+# The trixie image (Dockerfile.app) stays for the Pi packaging signal.
+#   docker build -f lab/docker/Dockerfile.app-jammy -t mercurychat-app-build:jammy lab/docker
+# The Rust toolchain is copied from mercurychat-app-build:amd64 (no rustup
+# download). Its cargo-tauri was built on trixie, so it is dropped: the release
+# script installs tauri-cli once into the /tools volume, against glibc 2.35.
+FROM mercurychat-app-build:amd64 AS toolchain
+
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates build-essential pkg-config file git xz-utils dpkg-dev \
+      libwebkit2gtk-4.1-dev librsvg2-dev libssl-dev libxdo-dev \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=toolchain /opt/rustup /opt/rustup
+COPY --from=toolchain /opt/cargo /opt/cargo
+RUN rm -f /opt/cargo/bin/cargo-tauri
+ENV RUSTUP_HOME=/opt/rustup CARGO_HOME=/opt/cargo PATH=/tools/bin:/opt/cargo/bin:$PATH
+WORKDIR /src

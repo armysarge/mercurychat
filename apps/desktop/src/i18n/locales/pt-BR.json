@@ -1288,5 +1288,21 @@
     "cqTitle": "Chamar CQ",
     "cqBody": "Peça a qualquer estação na escuta que responda. O CQ só sai com o modem ocioso.",
     "cqNow": "Chamar CQ agora"
+  },
+  "licences": {
+    "title": "Licenças",
+    "body": "O MercuryChat é software livre sob a GPL, versão 3 ou posterior. Ele inclui estes componentes, cada um com sua própria licença; o THIRD-PARTY.md ao lado de cada versão lista o mesmo.",
+    "show": "Mostrar os componentes e suas licenças",
+    "search": "Buscar por nome ou licença",
+    "count": "{n} componentes",
+    "component": "Componente",
+    "version": "Versão",
+    "licence": "Licença",
+    "kind": {
+      "modem": "O modem integrado",
+      "installer": "O instalador do Windows",
+      "rust": "Crates Rust",
+      "npm": "Pacotes JavaScript"
+    }
   }
 }

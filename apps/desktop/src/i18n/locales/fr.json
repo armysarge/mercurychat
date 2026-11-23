@@ -1288,5 +1288,21 @@
     "cqTitle": "Appel CQ",
     "cqBody": "Demande à toute station à l’écoute de répondre. Le CQ ne part que lorsque le modem est au repos.",
     "cqNow": "Lancer CQ"
+  },
+  "licences": {
+    "title": "Licences",
+    "body": "MercuryChat est un logiciel libre sous GPL, version 3 ou ultérieure. Il inclut ces composants, chacun sous sa propre licence ; THIRD-PARTY.md, à côté de chaque version, donne la même liste.",
+    "show": "Afficher les composants et leurs licences",
+    "search": "Chercher par nom ou licence",
+    "count": "{n} composants",
+    "component": "Composant",
+    "version": "Version",
+    "licence": "Licence",
+    "kind": {
+      "modem": "Le modem intégré",
+      "installer": "L’installateur Windows",
+      "rust": "Crates Rust",
+      "npm": "Paquets JavaScript"
+    }
   }
 }

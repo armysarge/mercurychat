@@ -53,6 +53,14 @@ for p in $MERCURY_PATCHES; do
   applied="$applied $p@$(sha256sum "/patches/$p" | cut -c1-12)"
 done
 
+# The exact source built (M5 Task 12, GPL): Mercury as patched, the patches,
+# and the Hamlib tarball, beside the programs in /out/source.
+rm -rf /out/source && mkdir -p /out/source
+tar -C / --exclude=m/.git -czf "/out/source/mercury-$mversion-source.tar.gz" m
+for p in $MERCURY_PATCHES; do cp "/patches/$p" /out/source/; done
+cp "$tarball" /out/source/
+( cd /out/source && sha256sum ./* > SHA256SUMS )
+
 for t in "${targets[@]}"; do
   echo "=== $t ==="
   prefix=/opt/hamlib/$t
