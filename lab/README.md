@@ -160,6 +160,27 @@ What each check proves, and the commands, are in [`docker/rig/M3c-checks.md`](do
 
 `crates/mercury-contract` holds every Mercury behaviour MercuryChat relies on, written once. `scripts/check.sh` runs it against the fake on every check. `lab/docker/contract/check-mercury.sh` (Git Bash) runs the same suite against two real Mercury stations: it builds the pinned Mercury (`lab/mercury-pin.env`: the fork's commit plus the listed patches), builds the contract binary, and runs it in `mercurychat-lab:rig`. `--latest` tests the fork's `upstream/mercuryv2` instead, with no patches and no network fetch. Output goes to `E:/mc-lab-out/m4/contracts-<sha7>[-latest]`, and `run/summary.txt` there has one line per contract, and `listen-modes.txt` the build's `mercury -l` sizes, which must match `tests/fixtures/mercury-listen-modes.txt` at the pin. Details, and how a failure is triaged, are in [`docker/contract/README.md`](docker/contract/README.md).
 
+## 3c. Files (M4)
+
+- **Contracts:** two of the suite's contracts run MercuryChat's own session engine on both stations (`tests/contracts/files.rs`):
+  - a 16 KiB text file, zstd-encoded, crosses ARQ at BW2300 byte-exact;
+  - at BW500, a chat sent after a file's first chunk must be receipted within 30 s. `run/summary.txt` records the time as a `NOTE` line (9.7 s on 1.9.25).
+- **Window:** `node lab/windows/m4-ui-check.mjs <mercurychat.exe> <empty data dir>` checks the window with the simulator:
+  - Settings → Files refuses 2 MiB;
+  - accept one of SIM1's files and decline another;
+  - send a dropped file;
+  - an old peer's disabled "Send file";
+  - cancel mid-send on a slow link;
+  - no console errors.
+
+  Build the app with its assets embedded first: `npm --prefix apps/desktop run build && cargo build -p mercurychat --features tauri/custom-protocol`.
+- **Simulator switches** (environment variables, for the app):
+  - `MC_SIM_PEER_OFFERS=1`: SIM1 offers `notes.txt`, then a photo;
+  - `MC_SIM_PEER_MINOR0=1`: SIM1 has no QSY, info or files;
+  - `MC_SIM_RATE=<bytes a second>`: a slow link.
+
+The system file picker can't be driven this way, so the checks drop files instead.
+
 ## 4. Desktop shell
 
 ```bash

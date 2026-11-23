@@ -1,5 +1,28 @@
 # Planning changes
 
+## 0.10 — 23 November 2026 (M4 files)
+
+- Built M4 on branch `m4`. **Files in a session (FIL-01…05):** send a file with "Send file" or by dropping it on the conversation; the other station accepts, declines or asks for more time within 2 minutes. Each file has a card in the conversation, and the new Files view lists them all. A received file is never opened by MercuryChat: "Show in folder" only shows where it is.
+- **As few bytes as possible:** photos (JPEG, PNG, WebP, single-frame GIF) are shrunk before sending, medium (640 px) by default, with their metadata (GPS included) removed. Every file is then compressed with zstd when that makes it smaller, and unpacked on arrival, with a limit that stops a decompression bomb. The send dialog shows the size, the size on the air and an airtime estimate before anything is sent.
+- **Chat stays first:** file data waiting in the modem is limited by airtime (about 12 s), measured from Mercury's `BUFFER` reports. At BW500 on real Mercury, a chat sent mid-file got its receipt in **9.7 s**; M0 measured 162 s.
+- **Never wrong, never half:** the received file has the sender's SHA-256 or it is not saved. Truncated, mismatched, disk-full, cancelled, declined and interrupted files never show as complete, after a restart included. A remote name can't leave the receive folder or overwrite a file. Free space is checked before accepting.
+- **Settings → Files:** the largest incoming file (1 KiB to 1 MiB, **64 KiB** by default), the receive folder, and the photo size a send starts at.
+- **MCH/1 minor 2:** capability `file/2`, with the offer's `encoding` and `wire_size`, and golden vectors. An older peer sees "not supported by this station" and never gets a file frame.
+- **Mercury 1.9.25** (33efac4) is the new pin, with patches 0001 and 0002 rebased (upstream took neither as written). Two listen-mode frame sizes changed in 1.9.25. The capacity tables were updated, and the lab now fails if a pin changes them again.
+- **The eight M3c minors are fixed:**
+  - an over-wide passband is declined;
+  - a fallback with no known frequency asks for a return by hand;
+  - an agreed QSY that never disconnects is abandoned after 30 s;
+  - tuning and beacons wait while a QSY owns the rig;
+  - an unsolicited answer fills only the email;
+  - a `pending` decline has its own notice;
+  - two doc comments were moved.
+- **Checks:**
+  - the contract suite on real Mercury 1.9.25: 34 PASS and 1 SKIP;
+  - the rig lab `m3c`: 5 of 5;
+  - the window checks `m4-ui-check.mjs` and `m3c-ui-check.mjs`: 7 of 7 each.
+- Still open: files on air with a real radio (the owner, in M6, with an IC-7300), the real throughput behind the airtime estimate, and the system file picker (the checks drop files instead). Details: docs/M4-progress.md.
+
 ## 0.9 — 22 November 2026 (M3c operator extras)
 
 - Built M3c on branch `m3c`. **Mercury contract suite** (`crates/mercury-contract`): every Mercury behaviour MercuryChat relies on, written once. It runs against the fake in `check.sh`, and against real Mercury with `lab/docker/contract/check-mercury.sh`, both at the pin (f77adfb + 0001 + 0002) and at upstream `mercuryv2` (`--latest`).
