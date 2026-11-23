@@ -1114,6 +1114,7 @@
       "noSession": "no hay sesión",
       "unsupported": "esta estación no lo admite",
       "overPeerLimit": "supera el límite de la otra estación",
+      "qsy": "no mientras se acuerda un QSY",
       "tooLarge": "el archivo es demasiado grande"
     }
   }

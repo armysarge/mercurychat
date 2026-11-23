@@ -1114,6 +1114,7 @@
       "noSession": "il n'y a pas de session",
       "unsupported": "non pris en charge par cette station",
       "overPeerLimit": "au-delà de la limite de l'autre station",
+      "qsy": "pas pendant qu'un QSY se négocie",
       "tooLarge": "le fichier est trop volumineux"
     }
   }

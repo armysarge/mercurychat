@@ -180,6 +180,7 @@ impl App {
         if !s.files {
             return Err(refused("files.refused.unsupported", "not supported by this station"));
         }
+        self.files_no_qsy()?;
         let size = {
             let map = self.files.prepared.lock().unwrap();
             map.get(prep_id).map(|p| p.size).ok_or_else(|| conflict("that file is no longer prepared".into()))?
@@ -239,8 +240,18 @@ impl App {
         }
     }
 
+    /// No file starts while a QSY is being arranged: its disconnect would cut
+    /// the file short (the other order is `qsy_no_transfer`).
+    fn files_no_qsy(&self) -> Result<(), AppError> {
+        if self.qsy_pending() {
+            return Err(refused("files.refused.qsy", "not while a QSY is being arranged"));
+        }
+        Ok(())
+    }
+
     pub(super) fn accept_file(&mut self, id: &str) -> Result<CommandOk, AppError> {
         let raw = self.incoming(id)?;
+        self.files_no_qsy()?;
         self.command_modem(ModemCmd::File(SessionCommand::AcceptFile { id: ObjectId(raw) }))?;
         self.files.offers.remove(&raw);
         Ok(CommandOk::Done)

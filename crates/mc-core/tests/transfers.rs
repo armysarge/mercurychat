@@ -474,3 +474,34 @@ async fn settings_bounds() {
     a.call(AppCommand::SetFileSettings { settings: ok.clone() }).await.unwrap();
     assert_eq!(a.call(AppCommand::FileSettings).await.unwrap(), CommandOk::FileSettings(ok));
 }
+
+/// Final review 8 (Review Focus 1, the other order): while a QSY is being
+/// arranged, no file starts, so the QSY's disconnect can't cut one short.
+#[tokio::test(flavor = "multi_thread")]
+async fn no_file_starts_while_a_qsy_is_arranged() {
+    let dir = tempfile::tempdir().unwrap();
+    let t = two(dir.path(), None).await;
+    connect(&t.a, &t.b).await;
+    let entry = FrequencyEntry {
+        name: "40m".into(),
+        freq_hz: 7_105_000,
+        mode: "USB".into(),
+        passband_hz: Some(2400),
+        purpose: vec!["chat".into()],
+        ..FrequencyEntry::default()
+    };
+    let entry_id = match t.a.call(AppCommand::SaveFrequency { entry }).await.unwrap() {
+        CommandOk::Frequencies { entries } => entries.into_iter().find(|e| e.name == "40m").unwrap().id,
+        other => panic!("{other:?}"),
+    };
+    t.a.call(AppCommand::ProposeQsy { entry_ids: vec![entry_id], note: None }).await.unwrap();
+    // The proposer can't send a file while it waits for the answer.
+    let p = t.a.prepare(&source(dir.path(), "a.txt", b"hello")).await;
+    let e = t.a.call(AppCommand::SendFile { prep_id: p.prep_id }).await.unwrap_err();
+    assert_eq!(refusal(&e), "not while a QSY is being arranged");
+    // Nor can the station it was offered to.
+    t.b.wait(10, "B offered the QSY", |s| s.qsy.is_some()).await;
+    let p = t.b.prepare(&source(dir.path(), "b.txt", b"hello")).await;
+    let e = t.b.call(AppCommand::SendFile { prep_id: p.prep_id }).await.unwrap_err();
+    assert_eq!(refusal(&e), "not while a QSY is being arranged");
+}

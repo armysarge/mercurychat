@@ -418,3 +418,173 @@ async fn chat_waits_less_than_30s_at_bw500() {
     let waited = t.elapsed();
     assert!(waited < Duration::from_secs(30), "chat waited {waited:?}");
 }
+
+/// Collect what station `from` sends while held, until a frame of type
+/// `until` is among it.
+async fn held_until(net: &FakeNet, from: usize, until: FrameType) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let end = tokio::time::Instant::now() + Duration::from_secs(15);
+    loop {
+        bytes.extend(net.take_held().into_iter().filter(|(s, _)| *s == from).flat_map(|(_, b)| b));
+        let mut d = Decoder::new();
+        d.push(&bytes);
+        let mut seen = false;
+        while let Ok(Some(f)) = d.next_frame() {
+            seen |= f.ftype == until;
+        }
+        if seen {
+            return bytes;
+        }
+        assert!(tokio::time::Instant::now() < end, "never sent {until:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}
+
+/// Final review 4: a receive folder that exists but cannot take files is
+/// found at the offer, not after the whole file has used its airtime.
+#[tokio::test(flavor = "multi_thread")]
+async fn unwritable_receive_folder_declines_at_the_offer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_net, mut a, mut b) = pair(dir.path(), &|_| {}).await;
+    // A file where the partial folder must go: nothing can be written there.
+    std::fs::write(b.rx_dir().join(".partial"), b"x").unwrap();
+    let id = ObjectId::random();
+    a.send(SessionCommand::SendFile { id, prepared: prepared(&a, "notes.txt", &text(40)) }).await;
+    let r = a
+        .next(10, "refused", |e| matches!(e, SessionEvent::FileRejected { .. } | SessionEvent::FileDelivered { .. }))
+        .await;
+    assert!(matches!(&r, SessionEvent::FileRejected { reason, .. } if reason == "write failed"), "{r:?}");
+    b.none(1, |e| matches!(e, SessionEvent::FileOffered { .. })).await;
+}
+
+/// Final review 2: bidi and invisible characters cannot disguise a name.
+#[tokio::test(flavor = "multi_thread")]
+async fn bidi_name_is_shown_and_saved_plainly() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_net, a, mut b) = pair(dir.path(), &|_| {}).await;
+    let id = ObjectId::random();
+    a.send(SessionCommand::SendFile { id, prepared: prepared(&a, "holiday\u{202E}gpj.exe", &text(5)) }).await;
+    let o = b.next(10, "FileOffered", |e| matches!(e, SessionEvent::FileOffered { .. })).await;
+    let SessionEvent::FileOffered { name, .. } = o else { unreachable!() };
+    assert_eq!(name, "holiday_gpj.exe", "the operator sees the name as it is");
+    b.send(SessionCommand::AcceptFile { id }).await;
+    let (path, _) = received_ok(&mut b).await;
+    assert_eq!(path.file_name().unwrap().to_string_lossy(), "holiday_gpj.exe");
+}
+
+/// Final review 3: an offer that reuses a known transfer id is refused, and
+/// the earlier record is left as it was.
+#[tokio::test(flavor = "multi_thread")]
+async fn reused_transfer_id_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (_net, mut a, mut b) = pair(dir.path(), &|_| {}).await;
+    let id = offer(&a, &mut b, prepared(&a, "notes.txt", &text(5))).await;
+    b.send(SessionCommand::AcceptFile { id }).await;
+    received_ok(&mut b).await;
+    a.next(10, "FileDelivered", |e| matches!(e, SessionEvent::FileDelivered { .. })).await;
+    let before = b.row(Direction::In, id);
+    a.send(SessionCommand::SendFile { id, prepared: prepared(&a, "other.txt", &text(7)) }).await;
+    let r = a.next(10, "refused", |e| matches!(e, SessionEvent::FileRejected { .. })).await;
+    assert!(matches!(&r, SessionEvent::FileRejected { reason, .. } if reason == "duplicate"), "{r:?}");
+    b.none(1, |e| matches!(e, SessionEvent::FileOffered { .. })).await;
+    let after = b.row(Direction::In, id);
+    assert_eq!(after.state, TransferState::Complete);
+    assert_eq!((after.original_name, after.saved_path), (before.original_name, before.saved_path));
+}
+
+/// Final review 6: the sender cancels after FILE_END, but the receiver had
+/// already saved the file: its receipt wins, and both say complete.
+#[tokio::test(flavor = "multi_thread")]
+async fn receipt_after_own_cancel_marks_delivered() {
+    let dir = tempfile::tempdir().unwrap();
+    let (net, mut a, mut b) = pair(dir.path(), &|_| {}).await;
+    let id = offer(&a, &mut b, prepared(&a, "notes.txt", &text(20))).await;
+    net.set_hold_from(0, true);
+    b.send(SessionCommand::AcceptFile { id }).await;
+    let to_b = held_until(&net, 0, FrameType::FileEnd).await;
+    a.send(SessionCommand::CancelFile { id }).await;
+    a.next(10, "own FileCancelled", |e| matches!(e, SessionEvent::FileCancelled { by_peer: false, .. })).await;
+    // B gets everything up to FILE_END, saves the file and sends its receipt;
+    // A's cancel stays held.
+    net.inject(0, to_b);
+    received_ok(&mut b).await;
+    a.next(10, "FileDelivered", |e| matches!(e, SessionEvent::FileDelivered { .. })).await;
+    assert_eq!(a.row(Direction::Out, id).state, TransferState::Complete);
+    assert_eq!(b.row(Direction::In, id).state, TransferState::Complete);
+}
+
+/// Final review 7: one transfer at a time per session. A file sent while one
+/// is arriving waits for it.
+#[tokio::test(flavor = "multi_thread")]
+async fn send_waits_while_receiving() {
+    let dir = tempfile::tempdir().unwrap();
+    let auto = |c: &mut StationConfig| c.auto_accept_files = true;
+    let (_net, mut a, b) = pair_with(dir.path(), &auto, &auto, |n| {
+        n.set_drain_rate(0, 2000.0);
+        n.set_drain_rate(1, 2000.0);
+    })
+    .await;
+    let mut b = b;
+    let first = ObjectId::random();
+    a.send(SessionCommand::SendFile { id: first, prepared: prepared(&a, "first.bin", &noise(8000)) }).await;
+    b.next(10, "B receiving", |e| matches!(e, SessionEvent::FileProgress { .. })).await;
+    let second = ObjectId::random();
+    b.send(SessionCommand::SendFile { id: second, prepared: prepared(&b, "second.bin", &noise(500)) }).await;
+    let r = a
+        .next(30, "A's first done or B's offer", |e| {
+            matches!(e, SessionEvent::FileDelivered { .. } | SessionEvent::FileOffered { .. })
+        })
+        .await;
+    assert!(matches!(r, SessionEvent::FileDelivered { id } if id == first), "B offered while receiving: {r:?}");
+    a.next(30, "B's file after", |e| matches!(e, SessionEvent::FileReceived { .. })).await;
+}
+
+/// Final review 7: offers that cross on the air. One goes; the other is
+/// refused as busy, the same way on both sides.
+#[tokio::test(flavor = "multi_thread")]
+async fn crossed_offers_one_goes() {
+    let dir = tempfile::tempdir().unwrap();
+    let auto = |c: &mut StationConfig| c.auto_accept_files = true;
+    let (net, mut a, mut b) = pair_with(dir.path(), &auto, &auto, |_| {}).await;
+    net.set_hold_from(0, true);
+    net.set_hold_from(1, true);
+    let (ia, ib) = (ObjectId::random(), ObjectId::random());
+    a.send(SessionCommand::SendFile { id: ia, prepared: prepared(&a, "a.txt", &text(5)) }).await;
+    b.send(SessionCommand::SendFile { id: ib, prepared: prepared(&b, "b.txt", &text(6)) }).await;
+    let mut from_a = Vec::new();
+    let mut from_b = Vec::new();
+    let end = tokio::time::Instant::now() + Duration::from_secs(10);
+    let has_offer = |bytes: &[u8]| {
+        let mut d = Decoder::new();
+        d.push(bytes);
+        let mut seen = false;
+        while let Ok(Some(f)) = d.next_frame() {
+            seen |= f.ftype == FrameType::FileOffer;
+        }
+        seen
+    };
+    while !(has_offer(&from_a) && has_offer(&from_b)) {
+        for (s, bytes) in net.take_held() {
+            if s == 0 {
+                from_a.extend(bytes)
+            } else {
+                from_b.extend(bytes)
+            }
+        }
+        assert!(tokio::time::Instant::now() < end, "the offers were never sent");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    net.set_hold_from(0, false);
+    net.set_hold_from(1, false);
+    net.inject(0, from_a);
+    net.inject(1, from_b);
+    let (win, lose) = if ia.0 > ib.0 { (ia, ib) } else { (ib, ia) };
+    let (winner, loser) = if win == ia { (&mut a, &mut b) } else { (&mut b, &mut a) };
+    let r = loser
+        .next(10, "the loser's answer", |e| matches!(e, SessionEvent::FileRejected { id, .. } if *id == lose))
+        .await;
+    assert!(matches!(&r, SessionEvent::FileRejected { reason, .. } if reason == "busy"), "{r:?}");
+    winner
+        .next(30, "the winner's file delivered", |e| matches!(e, SessionEvent::FileDelivered { id } if *id == win))
+        .await;
+}

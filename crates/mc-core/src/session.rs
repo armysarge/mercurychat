@@ -7,7 +7,7 @@
 //! `BUFFER` is seen to drain, so chat is not stuck behind a large backlog.
 
 use crate::files::pace::Pacer;
-use crate::files::{sanitize_name, unique_target, unpack_zstd, Prepared, UnpackError};
+use crate::files::{display_name, sanitize_name, unique_target, unpack_zstd, Prepared, UnpackError};
 use mc_storage::{Direction, OutState, Store, Stored, TransferRow, TransferState};
 use mch_protocol::payload::*;
 use mch_protocol::{encode, Decoder, Frame, FrameType, ObjectId, ProtocolError};
@@ -302,6 +302,10 @@ pub struct Session<'a> {
     out_file: Option<OutFile>,
     queued_files: VecDeque<(ObjectId, Prepared)>,
     in_file: Option<InFile>,
+    /// Outgoing files cancelled after FILE_END went out, with their wire
+    /// size: the peer may have saved one before the cancel reached it, and
+    /// its receipt then wins.
+    cancelled_after_end: VecDeque<(ObjectId, u64)>,
     peer_max_file: u64,
     verify: Option<(ObjectId, oneshot::Receiver<Verdict>)>,
     pacer: Pacer,
@@ -336,6 +340,7 @@ impl<'a> Session<'a> {
             out_file: None,
             queued_files: VecDeque::new(),
             in_file: None,
+            cancelled_after_end: VecDeque::new(),
             peer_max_file: 0,
             verify: None,
             pacer,
@@ -653,7 +658,13 @@ impl<'a> Session<'a> {
             }
             SessionCommand::CancelFile { id } => {
                 let cancel = || Reason::new("user", "cancelled").to_frame(FrameType::FileCancel, id).ok();
-                if self.out_file.as_ref().is_some_and(|f| f.id == id) {
+                if let Some(of) = self.out_file.as_ref().filter(|f| f.id == id) {
+                    if of.state == OutFileState::AwaitingReceipt {
+                        if self.cancelled_after_end.len() >= 8 {
+                            self.cancelled_after_end.pop_front();
+                        }
+                        self.cancelled_after_end.push_back((id, of.sent));
+                    }
                     if let Some(f) = cancel() {
                         self.q_proto.push_back(f);
                     }
@@ -686,8 +697,10 @@ impl<'a> Session<'a> {
         }
     }
 
+    /// Offer the next queued file, unless one is going either way: one
+    /// transfer at a time per session (M4 C2).
     async fn start_next_file(&mut self) {
-        if self.out_file.is_some() {
+        if self.out_file.is_some() || self.in_file.is_some() {
             return;
         }
         let Some((id, p)) = self.queued_files.pop_front() else { return };
@@ -832,6 +845,11 @@ impl<'a> Session<'a> {
                 if self.out_file.as_ref().is_some_and(|o| o.id == f.id && o.state == OutFileState::AwaitingReceipt) {
                     self.end_out_file(TransferState::Complete, None).await;
                     self.emit(SessionEvent::FileDelivered { id: f.id });
+                } else if let Some(i) = self.cancelled_after_end.iter().position(|(c, _)| *c == f.id) {
+                    // Our cancel came too late: the peer has the file.
+                    let (_, sent) = self.cancelled_after_end.remove(i).expect("found");
+                    let _ = self.store.transfer_set_state(Direction::Out, &f.id.0, TransferState::Complete, sent, None);
+                    self.emit(SessionEvent::FileDelivered { id: f.id });
                 } else {
                     let _ = self.store.log_event("protocol", &format!("unexpected FILE_RECEIPT {}", f.id));
                 }
@@ -871,7 +889,16 @@ impl<'a> Session<'a> {
     }
 
     async fn on_offer(&mut self, f: &Frame) -> Result<(), SessionEnd> {
-        let o = FileOffer::from_frame(f).map_err(proto_err)?;
+        let mut o = FileOffer::from_frame(f).map_err(proto_err)?;
+        // A transfer id we already hold (from any station) is refused, and its
+        // record is left alone: ids travel in the clear and could be reused.
+        if self.store.transfer(Direction::In, &f.id.0).ok().flatten().is_some() {
+            self.send_reject(f.id, "duplicate");
+            let _ = self.store.log_event("file", &format!("offer reuses transfer id {}", f.id));
+            return Ok(());
+        }
+        // What the operator sees can't be disguised by format characters.
+        o.name = display_name(&o.name);
         let row = TransferRow {
             id: f.id.0,
             direction: Direction::In,
@@ -893,13 +920,18 @@ impl<'a> Session<'a> {
         let _ = self.store.transfer_upsert(&row);
         // Refused before the operator sees it (M4 C3).
         let free = self.cfg.free_space.of(&self.cfg.files_dir);
-        let refusal = if self.in_file.is_some() {
+        // One transfer at a time. Offers that crossed on the air: the larger
+        // transfer id goes, on both sides, and the other is refused as busy.
+        let ours_goes = self.out_file.as_ref().is_some_and(|o| o.state != OutFileState::Offered || o.id.0 > f.id.0);
+        let refusal = if self.in_file.is_some() || ours_goes {
             Some("busy")
         } else if o.size == 0 || o.size > self.cfg.max_file.min(MAX_FILE_CEILING) {
             Some("too large")
         } else if !self.cfg.files_dir.is_dir() {
             Some("no folder")
-        } else if free.map_or(true, |n| n < o.size + o.wire_size + DISK_MARGIN) {
+        } else if !can_write(&self.cfg.files_dir.join(".partial"), f.id) {
+            Some("write failed")
+        } else if free.map_or(true, |n| n < o.size.saturating_add(o.wire_size).saturating_add(DISK_MARGIN)) {
             Some("no space")
         } else {
             None
@@ -981,6 +1013,7 @@ impl<'a> Session<'a> {
             let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Rejected, 0, Some(code));
             self.emit(SessionEvent::FileRejected { id, reason: code.into() });
         }
+        self.start_next_file().await;
     }
 
     async fn offer_expired(&mut self) {
@@ -1005,6 +1038,7 @@ impl<'a> Session<'a> {
         let code = if by_peer { "peer" } else { "user" };
         let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Cancelled, received, Some(code));
         self.emit(SessionEvent::FileCancelled { id, by_peer });
+        self.start_next_file().await;
     }
 
     async fn abort_in_file(&mut self, id: ObjectId, code: &str, why: &str) {
@@ -1019,6 +1053,7 @@ impl<'a> Session<'a> {
             self.q_proto.push_back(fr);
         }
         self.emit(SessionEvent::FileFailed { id, reason: format!("{code}: {why}") });
+        self.start_next_file().await;
     }
 
     async fn on_chunk(&mut self, f: &Frame) -> Result<(), SessionEnd> {
@@ -1075,8 +1110,14 @@ impl<'a> Session<'a> {
         Ok(())
     }
 
-    /// The check is back: publish, store completion, and only then FILE_RECEIPT.
+    /// The check is back: publish, store completion, and only then
+    /// FILE_RECEIPT. Then a waiting outgoing file may go.
     async fn on_verified(&mut self, id: ObjectId, verdict: Verdict) {
+        self.publish_verified(id, verdict).await;
+        self.start_next_file().await;
+    }
+
+    async fn publish_verified(&mut self, id: ObjectId, verdict: Verdict) {
         let Some(inf) = self.in_file.take_if(|i| i.id == id) else { return };
         let _ = tokio::fs::remove_file(&inf.wire).await;
         if inf.cancelled {
@@ -1106,6 +1147,11 @@ impl<'a> Session<'a> {
             self.emit(SessionEvent::FileFailed { id, reason: format!("publish failed: {e}") });
             return;
         }
+        // The rename itself on disk too, before completion is recorded.
+        #[cfg(unix)]
+        if let Ok(d) = std::fs::File::open(&self.cfg.files_dir) {
+            let _ = d.sync_all();
+        }
         let saved = target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let path_s = target.to_string_lossy().into_owned();
         // Completion is stored before FILE_RECEIPT is sent (FIL-03).
@@ -1117,6 +1163,16 @@ impl<'a> Session<'a> {
         self.q_proto.push_back(Frame::empty(FrameType::FileReceipt, id));
         self.emit(SessionEvent::FileReceived { id, path: target, sha256: inf.sha256 });
     }
+}
+
+/// Whether a file can be created in `dir` (made if missing): checked at the
+/// offer, so an unwritable folder is found before any airtime is spent.
+fn can_write(dir: &Path, id: ObjectId) -> bool {
+    let probe = dir.join(format!("{id}.probe"));
+    let ok = std::fs::create_dir_all(dir).is_ok()
+        && std::fs::OpenOptions::new().write(true).create_new(true).open(&probe).is_ok();
+    let _ = std::fs::remove_file(&probe);
+    ok
 }
 
 /// Decode (zstd) or copy the wire bytes to `out`, then check the length and
@@ -1135,6 +1191,9 @@ fn verify_file(wire: &Path, out: &Path, encoding: Option<Encoding>, size: u64, s
         })?,
         None => {
             std::fs::copy(wire, out).map_err(disk)?;
+            // On disk before the receipt, as the zstd path is (a power cut
+            // must not leave a "complete" file empty).
+            std::fs::OpenOptions::new().write(true).open(out).and_then(|f| f.sync_all()).map_err(disk)?;
         }
     }
     let mut f = std::fs::File::open(out).map_err(disk)?;

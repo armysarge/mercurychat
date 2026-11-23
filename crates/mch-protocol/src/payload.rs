@@ -151,6 +151,10 @@ impl FileOffer {
         if self.encoding.is_none() && self.wire_size != self.size {
             return Err(bad("without an encoding, wire_size equals size"));
         }
+        // A file is only encoded when that makes it smaller (M4 C2).
+        if self.encoding.is_some() && self.wire_size >= self.size {
+            return Err(bad("an encoded file's wire_size is less than its size"));
+        }
         Ok(())
     }
     pub fn to_frame(&self, transfer: ObjectId) -> Result<Frame, ProtocolError> {
@@ -615,5 +619,24 @@ mod tests {
             br#"{"name":"a","size":3,"sha256":"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"}"#;
         let f = Frame::new(FrameType::FileOffer, ObjectId::ZERO, json.to_vec());
         assert!(FileOffer::from_frame(&f).is_err(), "the minor-0 shape is not a minor-2 offer");
+    }
+
+    /// Final review 1: an encoded file is only sent when it is smaller, so a
+    /// wire size at or over the file's own is refused (it could also overflow
+    /// the receiver's space check).
+    #[test]
+    fn zstd_wire_size_must_be_smaller() {
+        let sha = "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad".to_string();
+        let offer = |wire_size| FileOffer {
+            name: "a.txt".into(),
+            size: 100,
+            sha256: sha.clone(),
+            mime: None,
+            encoding: Some(Encoding::Zstd),
+            wire_size,
+        };
+        assert!(offer(99).validate().is_ok());
+        assert!(offer(100).validate().is_err());
+        assert!(offer(u64::MAX - 10).validate().is_err());
     }
 }

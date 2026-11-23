@@ -18,7 +18,8 @@ const RESERVED: [&str; 22] = [
 /// Reduce a peer-supplied name to a safe single path component.
 pub fn sanitize_name(offered: &str) -> String {
     let base = offered.rsplit(['/', '\\']).next().unwrap_or("");
-    let mut s: String = base.chars().map(|c| if c.is_control() || "<>:\"|?*".contains(c) { '_' } else { c }).collect();
+    let mut s: String =
+        base.chars().map(|c| if c.is_control() || is_format(c) || "<>:\"|?*".contains(c) { '_' } else { c }).collect();
     s = s.trim_matches(|c: char| c == '.' || c == ' ').to_string();
     if s.is_empty() {
         s = "file".into();
@@ -31,6 +32,40 @@ pub fn sanitize_name(offered: &str) -> String {
         s.pop();
     }
     s
+}
+
+/// A peer-supplied name as shown to the operator: format characters, which
+/// could make it read as another name (a right-to-left override turning
+/// `gpj.exe` into `exe.jpg`), become `_`.
+pub fn display_name(offered: &str) -> String {
+    offered.chars().map(|c| if is_format(c) { '_' } else { c }).collect()
+}
+
+/// Unicode format characters (category Cf): bidi controls, zero-width
+/// characters, the BOM and tag characters.
+fn is_format(c: char) -> bool {
+    matches!(
+        c,
+        '\u{00AD}'
+            | '\u{0600}'..='\u{0605}'
+            | '\u{061C}'
+            | '\u{06DD}'
+            | '\u{070F}'
+            | '\u{08E2}'
+            | '\u{180E}'
+            | '\u{200B}'..='\u{200F}'
+            | '\u{202A}'..='\u{202E}'
+            | '\u{2060}'..='\u{2064}'
+            | '\u{2066}'..='\u{206F}'
+            | '\u{FEFF}'
+            | '\u{FFF9}'..='\u{FFFB}'
+            | '\u{110BD}'
+            | '\u{110CD}'
+            | '\u{1BCA0}'..='\u{1BCA3}'
+            | '\u{1D173}'..='\u{1D17A}'
+            | '\u{E0001}'
+            | '\u{E0020}'..='\u{E007F}'
+    )
 }
 
 /// First free `name`, `name (1)`, ... in `dir`. Never overwrites.
@@ -66,6 +101,16 @@ mod tests {
         assert_eq!(sanitize_name("a\u{0}b?.bin"), "a_b_.bin");
         assert_eq!(sanitize_name("photo.jpg"), "photo.jpg");
         assert!(sanitize_name(&"x".repeat(300)).len() <= 120);
+    }
+
+    /// Final review 2: format characters (bidi overrides, zero-width) can't
+    /// make a name read as something else.
+    #[test]
+    fn strips_bidi_and_invisible() {
+        assert_eq!(sanitize_name("holiday\u{202E}gpj.exe"), "holiday_gpj.exe");
+        assert_eq!(display_name("holiday\u{202E}gpj.exe"), "holiday_gpj.exe");
+        assert_eq!(sanitize_name("a\u{200B}b\u{2066}c\u{FEFF}.txt"), "a_b_c_.txt");
+        assert_eq!(display_name("../../evil.txt"), "../../evil.txt", "display keeps the rest as sent");
     }
 
     #[test]
