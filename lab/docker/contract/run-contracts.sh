@@ -83,6 +83,8 @@ set -e
   # With --nocapture a line can start with the harness's "test <path> ... ".
   sed -nE 's/^(test .* \.\.\. )?CONTRACT ([a-z0-9_]+) (PASS|SKIP|DIVERGENCE|FAIL).*/\3 \2/p' "$OUT/contracts.log"
   sed -nE 's/^(test .* \.\.\. )?DIVERGENCE-FIXED ([a-z0-9_]+).*/FAIL \2 (listed as a divergence but passes)/p' "$OUT/contracts.log"
+  # A contract's measurement (M4: the BW500 chat latency), as "NOTE <contract> <text>".
+  sed -nE 's/^(test .* \.\.\. )?NOTE ([a-z0-9_]+) (.*)/NOTE \2 \3/p' "$OUT/contracts.log"
   grep -E '^test result:' "$OUT/contracts.log" || echo "test result: none (the binary exited $rc)"
 } > "$OUT/summary.txt"
 

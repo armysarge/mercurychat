@@ -15,6 +15,11 @@ futures-util = { version = "0.3", default-features = false, features = ["std", "
 
 [dev-dependencies]
 mch-protocol = { path = "../mch-protocol" }
+# M4: the file contracts run MercuryChat's own session engine over the target.
+mc-core = { path = "../mc-core" }
+tempfile = "3"
+sha2 = "0.10"
+hex = "0.4"
 
 [[test]]
 name = "contracts"

@@ -8,6 +8,7 @@ mod attach;
 mod broadcast;
 mod busy;
 mod data;
+mod files;
 mod new_frames;
 mod new_kinds;
 mod ptt;

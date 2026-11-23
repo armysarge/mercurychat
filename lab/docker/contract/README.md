@@ -32,11 +32,17 @@ The stations, both with PTT `none` (no radio, no serial port, no RF):
 
 A rigctld with the Hamlib dummy rig listens on 4532 for the one contract that switches A to Hamlib PTT.
 
+The file contracts (M4, `tests/contracts/files.rs`) run MercuryChat's own session engine on both stations:
+`compressed_file_crosses_arq` sends a 16 KiB text file, zstd-encoded, at BW2300 and checks it arrives
+byte-exact with its receipt; `chat_during_file_at_bw500` sends a 4 KiB incompressible file at BW500 and a
+chat after its first chunk, which must be receipted within 30 s on real Mercury (on the fake, with a 200 B/s
+drain, the chat must arrive before the file ends).
+
 ## Output
 
 In `E:/mc-lab-out/m4/contracts-<sha7>[-latest]/`:
 
-- `run/summary.txt`: the commit and patches, then `PASS|SKIP|DIVERGENCE|FAIL <contract>`, one line each;
+- `run/summary.txt`: the commit and patches, then `PASS|SKIP|DIVERGENCE|FAIL <contract>`, one line each, and `NOTE <contract> <text>` for a measurement a contract records (M4: `chat_during_file_at_bw500`'s chat receipt latency);
 - `run/contracts.log`: the test binary's full output;
 - `run/a`, `run/b`: each station's ini and Mercury log;
 - `bin/linux-amd64/MANIFEST.txt`, `contracts/MANIFEST.txt`: what was built.
