@@ -32,11 +32,13 @@ while [ $# -gt 0 ]; do
     --latest) commit=$(git -C "$FORK" rev-parse 'upstream/mercuryv2^{commit}'); patches=""; suffix=-latest ;;
     --commit) commit=$(git -C "$FORK" rev-parse "$2^{commit}"); patches=""; shift ;;
     --out) out=$2; shift ;;
+    # M5: test the built-in modem bundle's own Linux Mercury (no Mercury build).
+    --bundle) bundle=$2; commit=$(sed -n 's/^mercury_commit=//p' "$2/BUILD.txt"); suffix=-bundle; shift ;;
     *) echo "unknown argument $1" >&2; exit 2 ;;
   esac
   shift
 done
-out=${out:-E:/mc-lab-out/m4/contracts-${commit:0:7}$suffix}
+out=${out:-E:/mc-lab-out/m5/contracts-${commit:0:7}$suffix}
 case "$(win "$out")" in [Ff]:*) echo "refusing to write to F: ($out)" >&2; exit 2 ;; esac
 mkdir -p "$out/bin" "$out/contracts" "$out/run" "$out/patches"
 rm -f "$out/patches"/*.patch
@@ -46,11 +48,22 @@ echo "commit=$commit patches=${patches:-none} out=$out"
 export MSYS_NO_PATHCONV=1
 R=$(win "$repo"); O=$(win "$out")
 
+if [ -n "${bundle:-}" ]; then
+  echo "=== 1. Mercury from the bundle $bundle"
+  mkdir -p "$out/bin/linux-amd64"
+  cp "$bundle/mercury" "$out/bin/linux-amd64/mercury"
+  {
+    echo "mercury_commit=$commit"
+    echo "patches=$(sed -n 's/^mercury_patches=//p' "$bundle/BUILD.txt")"
+    echo "source=bundle $(sed -n 's/^hamlib_version=/hamlib /p' "$bundle/BUILD.txt")"
+  } > "$out/bin/linux-amd64/MANIFEST.txt"
+else
 echo "=== 1. Mercury $commit"
 docker run --rm -e MERCURY_COMMIT="$commit" -v "$FORK:/src:ro" -v "$O/bin:/out" \
   -v "$R/lab/docker:/scripts:ro" -v "$O/patches:/patches:ro" mercurychat-lab:m0 \
   bash -c 'git config --global --add safe.directory "*" && bash /scripts/build-mercury.sh linux-amd64' \
   > "$out/build-mercury.log" 2>&1 || { tail -20 "$out/build-mercury.log"; exit 1; }
+fi
 
 echo "=== 1b. listen-mode frame sizes against tests/fixtures/mercury-listen-modes.txt"
 docker run --rm -v "$O/bin:/mercury:ro" mercurychat-lab:rig bash -c '/mercury/linux-amd64/mercury -l 2>&1' \

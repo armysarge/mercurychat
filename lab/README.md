@@ -181,6 +181,28 @@ What each check proves, and the commands, are in [`docker/rig/M3c-checks.md`](do
 
 The system file picker can't be driven this way, so the checks drop files instead.
 
+## 3d. The built-in modem bundle (M5)
+
+What the installers carry: Mercury (+ `lab/mercury-patches`) linked against our own Hamlib build, plus `rigctld`, for `linux-amd64` and `windows-x64`. Output is in `E:/mc-lab-out/m5/bundle/<target>/`:
+- the programs;
+- `BUILD.txt`: versions, commit, patches, the Hamlib source's SHA-256, and the build image;
+- `MANIFEST.sha256`: every file's SHA-256, which the app checks before starting one.
+
+```bash
+docker build -f lab/docker/Dockerfile.bundle -t mercurychat-bundle:jammy lab/docker
+M=(-v "$PWD/lab/docker:/scripts:ro" -v "$PWD/lab:/pins:ro" -v "$PWD/lab/mercury-patches:/patches:ro" \
+   -v "E:/Programming/mercury-fork:/src:ro" -v "E:/mc-lab-out/m5/src:/hamlib-src:ro" -v "E:/mc-lab-out/m5/bundle:/out")
+MSYS_NO_PATHCONV=1 docker run --rm "${M[@]}" mercurychat-bundle:jammy bash /scripts/build-bundle.sh linux-amd64
+MSYS_NO_PATHCONV=1 docker run --rm "${M[@]}" mercurychat-lab:m0 bash /scripts/build-bundle.sh windows-x64
+```
+
+- **Linux** is built on Ubuntu 22.04, the oldest supported distro, so the binaries run on Ubuntu 22.04/24.04, Debian 12 and Arch. Hamlib is linked statically.
+- **Windows** is built in the Debian 13 lab image, because Ubuntu 22.04's mingw headers lack `struct pollfd`. It uses our `libhamlib-4.dll`, not the one Mercury vendors.
+- **Hamlib:** `E:/mc-lab-out/m5/src/` holds the pinned tarball. `lab/hamlib-pin.env` has its version and SHA-256, and the build refuses a tarball that differs.
+- **Checks:** each build ends with `check-bundle.sh`. It verifies the manifest, the Hamlib version, the dummy rig in `rigctld -l`, and that only common system libraries (Linux) or bundled/Windows DLLs are needed.
+- **Release builds** use `build-bundle.sh --latest`: the newest Mercury release and Hamlib release from GitHub (`resolve-latest.sh`), cloned inside the container, and never into the fork. A patch that no longer applies, or a failed check, stops the build. `test-latest.sh <old commit>` tests this without the network.
+- **Contracts** on the bundle's own Mercury: `lab/docker/contract/check-mercury.sh --bundle E:/mc-lab-out/m5/bundle/linux-amd64`.
+
 ## 4. Desktop shell
 
 ```bash

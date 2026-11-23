@@ -1,0 +1,14 @@
+# MercuryChat built-in modem bundle image (M5 Task 1): builds Hamlib and Mercury
+# for linux-amd64 and windows-x64 (mingw cross). Ubuntu 22.04 is the oldest
+# Linux MercuryChat supports, so binaries built here run on Ubuntu 22.04/24.04,
+# Debian 12 and Arch (newer glibc is backward compatible).
+#   docker build -f Dockerfile.bundle -t mercurychat-bundle:jammy .
+FROM ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl build-essential git pkg-config file binutils xz-utils \
+      libpulse-dev libasound2-dev libssl-dev libiniparser-dev \
+      gcc-mingw-w64-x86-64 g++-mingw-w64-x86-64 binutils-mingw-w64-x86-64 \
+ && rm -rf /var/lib/apt/lists/*
+WORKDIR /work
