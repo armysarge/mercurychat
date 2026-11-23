@@ -18,7 +18,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import type { BroadcastOutcome } from "../bindings/BroadcastOutcome";
 import {
-  activeProfile, discovery, discoveryError, inSession, modemState, selectProfile, sendBeaconNow, sendCq, session, snapshot,
+  activeProfile, app, discovery, discoveryError, inSession, modemState, selectProfile, sendBeaconNow, sendCq, session, snapshot,
 } from "../store";
 import type { FrequencyEntry } from "../bindings/FrequencyEntry";
 import {
@@ -30,6 +30,7 @@ import { formatDigits } from "./freqStep";
 import Popover from "./Popover.vue";
 import RigPopover from "./RigPopover.vue";
 import Waterfall from "./Waterfall.vue";
+import { settingsTabRequest } from "../builtin";
 
 const { t } = useI18n();
 const props = defineProps<{ now: number }>();
@@ -51,6 +52,16 @@ watch(open, (v) => {
 });
 
 const tel = computed(() => snapshot.value?.telemetry ?? null);
+// The built-in modem's own state (M5): a sound card to choose, starting, stopped.
+const builtinDetail = computed(() => snapshot.value?.builtinDetail ?? null);
+const lastLine = (s: string) => {
+  const lines = s.split("\n").map((l) => l.trim()).filter(Boolean);
+  return lines.length ? lines[lines.length - 1] : s;
+};
+function openAudio() {
+  settingsTabRequest.value = "audio";
+  app.page = "settings";
+}
 const beacon = computed(() => snapshot.value?.beacon ?? null);
 const idle = computed(() => modemState.value === "ready" || modemState.value === "listening");
 /** "7.105.000": the rig's frequency while its link is up, else Mercury's; dashes for none. */
@@ -177,6 +188,9 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
           <span v-else class="muted small next-beacon">{{ t("beacon.off") }}</span>
         </div>
         <div class="status small">
+          <button v-if="builtinDetail?.kind === 'chooseSoundCard'" type="button" class="builtin-note link warn line" @click="openAudio">{{ t("strip.chooseSoundCard") }}</button>
+          <span v-else-if="builtinDetail?.kind === 'startingMercury'" class="builtin-note muted line" role="status">{{ t("strip.startingMercury") }}</span>
+          <span v-else-if="builtinDetail?.kind === 'mercuryStopped'" class="builtin-note err line" role="alert" :title="builtinDetail.reason">{{ t("strip.mercuryStopped", { reason: lastLine(builtinDetail.reason) }) }}</span>
           <span v-if="fault" class="chip ptt-fault" role="alert" :title="t('strip.pttFaultTitle')">{{ t("strip.pttFault") }}</span>
           <span v-if="checkOff" class="chip ptt-check-off" :title="t('strip.pttCheckOffTitle')">{{ t("strip.pttCheckOff") }}</span>
           <span v-if="activeProfile && !idle" class="muted idle-only line" :title="t('strip.idleOnly')">{{ t("strip.idleOnly") }}</span>

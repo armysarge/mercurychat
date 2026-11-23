@@ -1,12 +1,17 @@
 <script setup lang="ts">
-// Make a station profile and use it: the simulator, or an existing Mercury
-// at host:port. The core validates every field (profile.rs); its errors are
-// shown next to the fields they name.
-import { ref } from "vue";
+// Make a station profile and use it (M5 §5.1): the built-in Mercury
+// (recommended: MercuryChat starts its own Mercury and rigctld), my own
+// Mercury at host:port, or the simulator in development builds. The core
+// validates every field (profile.rs); its errors are shown next to the
+// fields they name. A built-in profile's ports are checked first: a taken
+// one is named, with a free set to use instead.
+import { computed, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { AppError } from "../bindings/AppError";
+import type { BuiltInPorts } from "../bindings/BuiltInPorts";
 import type { StationProfile } from "../bindings/StationProfile";
+import { builtin } from "../builtin";
 import { info } from "../diag";
 import { snapshot } from "../store";
 
@@ -16,6 +21,11 @@ const emit = defineEmits<{ done: [] }>();
 const props = defineProps<{ receiveOnly?: boolean }>();
 
 const simCall = ref("");
+const bi = ref({ callsign: "", control: 8300, broadcast: 8100, ui: 10000, rigctld: 4532 });
+const taken = ref<{ port: number; suggestion: BuiltInPorts } | null>(null);
+const builtinTitle = computed(() =>
+  builtin.value?.mercury ? t("profile.builtInTitle", { version: builtin.value.mercury }) : t("profile.builtInTitleNoVersion"),
+);
 const ex = ref({
   callsign: "", host: "127.0.0.1", controlPort: 8300, dataPort: 8301,
   // Optional, prefilled with Mercury's defaults (-b 8100, -U 10000).
@@ -65,6 +75,40 @@ function useSimulator() {
   return use(draft, "sim");
 }
 
+async function useBuiltIn() {
+  const v = bi.value;
+  const ports: BuiltInPorts = { control: Number(v.control), broadcast: Number(v.broadcast), ui: Number(v.ui), rigctld: Number(v.rigctld) };
+  const wanted = v.callsign.trim().toUpperCase();
+  // The same callsign is the same station: its history stays reachable.
+  const existing = snapshot.value?.profiles.find((p) => p.modem.kind === "builtIn" && p.callsign === wanted);
+  const running = existing && existing.id === snapshot.value?.activeProfileId;
+  taken.value = null;
+  // Our own running Mercury holds these ports: nothing to check then.
+  if (!running) {
+    try {
+      const r = await call({ type: "checkBuiltInPorts", ports });
+      if (r.type === "portCheck" && r.taken !== null && r.suggestion) {
+        taken.value = { port: r.taken, suggestion: r.suggestion };
+        return;
+      }
+    } catch (e) {
+      formError.value = describeError(e);
+      return;
+    }
+  }
+  const draft: StationProfile = existing
+    ? { ...existing, modem: { kind: "builtIn", ports } }
+    : { id: "", callsign: v.callsign, name: null, grid: null, modem: { kind: "builtIn", ports }, lab: false, receiveOnly: props.receiveOnly ?? false };
+  return use(draft, "bi");
+}
+
+function useFreeSet() {
+  const s = taken.value?.suggestion;
+  if (!s) return;
+  Object.assign(bi.value, s);
+  return useBuiltIn();
+}
+
 function useExisting() {
   const v = ex.value;
   // The same Mercury for the same callsign is the same station: reuse it, so
@@ -104,12 +148,34 @@ function useExisting() {
 
 <template>
   <div class="forms">
-    <form v-if="info?.simulator !== false" class="card stack simulator" @submit.prevent="useSimulator">
-      <h2>{{ t("profile.simulatorTitle") }}</h2>
-      <p class="muted small">{{ t("profile.simulatorBody") }}</p>
-      <label>{{ t("profile.callsign") }} <input v-model="simCall" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
-      <span v-if="errors['sim.callsign']" class="field-error">{{ errors["sim.callsign"] }}</span>
-      <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useSimulator") }}</button></div>
+    <form v-if="builtin?.available" class="card stack builtin" @submit.prevent="useBuiltIn">
+      <div class="title-row">
+        <h2>{{ builtinTitle }}</h2>
+        <span class="badge small">{{ t("profile.recommended") }}</span>
+      </div>
+      <p class="muted small">{{ t("profile.builtInBody") }}</p>
+      <label>{{ t("profile.callsign") }} <input v-model="bi.callsign" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
+      <span v-if="errors['bi.callsign']" class="field-error">{{ errors["bi.callsign"] }}</span>
+      <details class="advanced">
+        <summary>{{ t("profile.advanced") }}</summary>
+        <div class="ports">
+          <label>{{ t("profile.controlPort") }} <input v-model.number="bi.control" name="control" class="mono" type="number" min="1" max="65534" /></label>
+          <label>{{ t("profile.broadcastPort") }} <input v-model.number="bi.broadcast" name="broadcast" class="mono" type="number" min="1" max="65535" /></label>
+          <label>{{ t("profile.uiPort") }} <input v-model.number="bi.ui" name="ui" class="mono" type="number" min="1" max="65535" /></label>
+          <label>{{ t("profile.rigctldPort") }} <input v-model.number="bi.rigctld" name="rigctld" class="mono" type="number" min="1" max="65535" /></label>
+        </div>
+        <p class="muted small">{{ t("profile.portsHint") }}</p>
+      </details>
+      <template v-for="f in ['controlPort', 'broadcastPort', 'uiPort', 'rigctldPort', 'modemKind']" :key="f">
+        <span v-if="errors['bi.' + f]" class="field-error">{{ errors["bi." + f] }}</span>
+      </template>
+      <div v-if="taken" class="port-taken" role="alert">
+        <p class="warn small">{{ t("profile.portTaken", { port: taken.port }) }}</p>
+        <button type="button" class="use-free" :disabled="busy" @click="useFreeSet">
+          {{ t("profile.useFreeSet", { control: taken.suggestion.control, broadcast: taken.suggestion.broadcast, ui: taken.suggestion.ui, rigctld: taken.suggestion.rigctld }) }}
+        </button>
+      </div>
+      <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useBuiltIn") }}</button></div>
     </form>
 
     <form class="card stack existing" @submit.prevent="useExisting">
@@ -132,13 +198,29 @@ function useExisting() {
       </template>
       <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useExisting") }}</button></div>
     </form>
+
+    <form v-if="info?.simulator !== false" class="card stack simulator" @submit.prevent="useSimulator">
+      <h2>{{ t("profile.simulatorTitle") }}</h2>
+      <p class="muted small">{{ t("profile.simulatorBody") }}</p>
+      <label>{{ t("profile.callsign") }} <input v-model="simCall" name="callsign" class="mono" maxlength="15" autocomplete="off" spellcheck="false" /></label>
+      <span v-if="errors['sim.callsign']" class="field-error">{{ errors["sim.callsign"] }}</span>
+      <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useSimulator") }}</button></div>
+    </form>
     <p v-if="formError" class="err" role="alert">{{ formError }}</p>
   </div>
 </template>
 
 <style scoped>
-.forms { display: grid; gap: calc(var(--space) * 2); grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); align-items: start; }
+/* One column on a narrow window or tablet, side by side where they fit. */
+.forms { display: grid; gap: calc(var(--space) * 2); grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); align-items: start; }
 input { width: 100%; }
 .row label { flex: 1; min-width: 7em; }
 .row label.turl { flex: 3; min-width: 16em; }
+.title-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space); }
+.title-row h2 { margin: 0; }
+.badge { border: 1px solid var(--accent); color: var(--accent); border-radius: 999px; padding: 0 8px; }
+.ports { display: grid; gap: var(--space); grid-template-columns: repeat(auto-fit, minmax(min(100%, 9em), 1fr)); margin-top: var(--space); }
+summary { cursor: pointer; }
+.port-taken { display: grid; gap: 6px; justify-items: start; }
+.port-taken p { margin: 0; }
 </style>

@@ -32,7 +32,7 @@ pub use broadcast::{
     broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, NotConfirmedReason, TRANSMIT_WINDOW,
 };
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
-pub use contract::{AppCommand, AppError, AppSnapshot, CommandOk};
+pub use contract::{AppCommand, AppError, AppSnapshot, BuiltInView, CommandOk};
 pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
 pub use events::{
     is_current, AppEvent, EventEnvelope, EventLog, ModemDetail, ModemState, SessionDirection, SessionInfo, Since,

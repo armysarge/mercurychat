@@ -155,7 +155,9 @@ const mhz = (hz: number) => t("freqList.mhz", { mhz: (hz / 1e6).toFixed(4) });
 </template>
 
 <style scoped>
-.table-wrap { overflow-x: auto; }
+/* relative: the header's sr-only label stays inside the scroller, or it
+   widens the page past a tablet's width (M5 responsive check). */
+.table-wrap { overflow-x: auto; position: relative; }
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 3px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
 td.notes { white-space: normal; max-width: 16em; }

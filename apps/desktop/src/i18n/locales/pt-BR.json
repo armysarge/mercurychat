@@ -26,7 +26,13 @@
     "connected": "conectado",
     "draining": "concluindo envio",
     "recovering": "recuperando",
-    "faulted": "com falha"
+    "faulted": "com falha",
+    "title": "Modem integrado",
+    "mercury": "Mercury {version}, integrado",
+    "hamlib": "Hamlib {version}, integrado",
+    "integrityOk": "Todos os arquivos estão como foram compilados.",
+    "none": "Esta versão não tem modem integrado: use Meu próprio Mercury.",
+    "note": "Antes de iniciá-los, o MercuryChat confere o Mercury e o rigctld com a lista feita ao compilar esta versão."
   },
   "mode": {
     "noStation": "Nenhuma estação",
@@ -207,7 +213,7 @@
     "callsign": "Seu indicativo",
     "useSimulator": "Usar o simulador",
     "simulatorUnavailable": "Simulador: indisponível nesta versão",
-    "existingTitle": "Mercury existente",
+    "existingTitle": "Meu próprio Mercury",
     "existingBody": "Um modem Mercury que já está em execução, neste computador ou em outro que você indicar. O MercuryChat se conecta às portas de controle e de dados dele; atende as chamadas recebidas, a menos que você ative Somente recepção.",
     "host": "Host",
     "controlPort": "Porta de controle",
@@ -216,7 +222,18 @@
     "telemetryUrl": "Espectro (link de UI do Mercury)",
     "optionalHint": "A porta de difusão leva CQ, balizas e estações ouvidas (Mercury -b, padrão 8100). O espectro vem do link de UI do Mercury, desligado a menos que o Mercury rode com -G (ou ui_enabled = true no mercury.ini). Deixe um campo vazio para ficar sem ele.",
     "useExisting": "Usar este Mercury",
-    "unexpectedReply": "Resposta inesperada: {type}"
+    "unexpectedReply": "Resposta inesperada: {type}",
+    "builtInTitle": "Mercury integrado {version}",
+    "builtInTitleNoVersion": "Mercury integrado",
+    "recommended": "Recomendado",
+    "builtInBody": "O modem Mercury e o Hamlib que vêm com o MercuryChat. O MercuryChat os inicia e para, somente neste computador. Escolha a placa de som depois, em Configurações → Áudio.",
+    "advanced": "Avançado: portas",
+    "uiPort": "Porta da interface do Mercury",
+    "rigctldPort": "Porta do rigctld",
+    "portsHint": "Altere-as apenas se outro programa as usar. A porta de dados é a porta de controle + 1.",
+    "portTaken": "A porta {port} já está em uso neste computador, talvez por outro Mercury. O MercuryChat nunca usa um modem que não iniciou.",
+    "useFreeSet": "Usar as portas livres ({control}, {broadcast}, {ui}, {rigctld})",
+    "useBuiltIn": "Usar Mercury integrado"
   },
   "settings": {
     "title": "Configurações",
@@ -245,7 +262,8 @@
       "appearance": "Aparência",
       "about": "Sobre",
       "beacon": "Beacon",
-      "files": "Arquivos"
+      "files": "Arquivos",
+      "modem": "Modem"
     }
   },
   "appearance": {
@@ -527,7 +545,10 @@
     "pttFaultTitle": "O Mercury e o rádio discordam sobre a transmissão: verifique o rádio",
     "pttCheckOff": "Verificação de PTT desligada",
     "pttCheckOffTitle": "O PTT do rádio não pode ser lido, então as transmissões não são verificadas. Inicie o rigctld com o tipo de PTT do rádio (por exemplo -P RIG) para ligar a verificação.",
-    "nextQsy": "Próximo QSY {time} UTC: {name}"
+    "nextQsy": "Próximo QSY {time} UTC: {name}",
+    "chooseSoundCard": "Escolha uma placa de som",
+    "startingMercury": "Iniciando o Mercury…",
+    "mercuryStopped": "O Mercury parou: {reason}"
   },
   "qso": {
     "title": "Registro do QSO",
@@ -644,7 +665,8 @@
       "hamlib": "Hamlib, controle de rádio (LGPL-2.1-or-later)",
       "dseg": "Fonte DSEG7 Classic de keshikan (SIL Open Font License 1.1)"
     },
-    "openFailed": "Não foi possível abrir o navegador: {reason}"
+    "openFailed": "Não foi possível abrir o navegador: {reason}",
+    "builtin": "Integrados: Mercury {mercury} e Hamlib {hamlib}"
   },
   "waterfall": {
     "howUnconfigured": "Esta estação não tem endereço de espectro: adicione um em Configurações → Perfis (por exemplo ws://127.0.0.1:10000/websocket).",
@@ -855,7 +877,8 @@
     "freqTestResult": "O rádio informa {freq} Hz, {mode}.",
     "external": "rigctld externo",
     "flrig": "FLRig",
-    "flrigHint": "O FLRig só ajusta frequência e modo; escolha um método de PTT separado."
+    "flrigHint": "O FLRig só ajusta frequência e modo; escolha um método de PTT separado.",
+    "hamlibBuiltIn": "rigctld: Hamlib {version}, integrado"
   },
   "freqList": {
     "title": "Lista de frequências",

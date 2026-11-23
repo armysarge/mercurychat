@@ -8,6 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { onMounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import { describeError } from "../api";
+import { builtin } from "../builtin";
 
 const { t } = useI18n();
 const version = ref("");
@@ -43,6 +44,7 @@ const CREDITS = ["mercury", "hamlib", "dseg"] as const;
       <span class="mono about-version">{{ version }}</span>
       <span class="muted small mono">{{ build }}</span>
     </p>
+    <p v-if="builtin?.available" class="builtin-versions small">{{ t("about.builtin", { mercury: builtin.mercury || "?", hamlib: builtin.hamlib || "?" }) }}</p>
     <p>{{ t("about.founded") }}</p>
     <p class="small">{{ t("about.licence") }}</p>
     <div class="row links">

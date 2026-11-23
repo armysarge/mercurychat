@@ -22,14 +22,18 @@ import ThemePicker from "../components/ThemePicker.vue";
 import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../i18n/locale";
 import { activeProfile, mirror, setFinaliseOnDisconnect, snapshot } from "../store";
 import Switch from "../components/Switch.vue";
+import { builtin, settingsTabRequest } from "../builtin";
 
 const { t } = useI18n();
 
-const TABS = ["station", "profiles", "rig", "audio", "beacon", "files", "notifications", "appearance", "about"] as const;
+const TABS = ["station", "profiles", "modem", "rig", "audio", "beacon", "files", "notifications", "appearance", "about"] as const;
 type Tab = (typeof TABS)[number];
 const TAB_KEY = "mc.settingsTab";
 const tab = ref<Tab>(
   (() => {
+    const asked = settingsTabRequest.value;
+    settingsTabRequest.value = null;
+    if ((TABS as readonly string[]).includes(asked ?? "")) return asked as Tab;
     try {
       const v = localStorage.getItem(TAB_KEY);
       return (TABS as readonly string[]).includes(v ?? "") ? (v as Tab) : "station";
@@ -193,6 +197,20 @@ async function chooseFinalise(on: boolean) {
     </section>
     <h2 class="span-all">{{ t("settings.addStation") }}</h2>
     <ProfileForms class="span-all" />
+    </div>
+    <div v-show="tab === 'modem'" id="panel-modem" class="panel" role="tabpanel" aria-labelledby="tab-modem">
+      <section class="card stack modem-info" aria-labelledby="h-modem">
+        <h2 id="h-modem">{{ t("modem.title") }}</h2>
+        <template v-if="builtin?.available">
+          <p class="mercury-version">{{ t("modem.mercury", { version: builtin.mercury || "?" }) }}</p>
+          <p class="hamlib-version">{{ t("modem.hamlib", { version: builtin.hamlib || "?" }) }}</p>
+          <p :class="['integrity', 'small', builtin.integrity ? 'err' : 'ok']" :role="builtin.integrity ? 'alert' : undefined">
+            {{ builtin.integrity ?? t("modem.integrityOk") }}
+          </p>
+          <p class="muted small">{{ t("modem.note") }}</p>
+        </template>
+        <p v-else class="muted">{{ t("modem.none") }}</p>
+      </section>
     </div>
     <div v-show="tab === 'rig'" id="panel-rig" class="panel" role="tabpanel" aria-labelledby="tab-rig">
       <RigSettings />

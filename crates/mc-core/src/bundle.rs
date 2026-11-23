@@ -100,6 +100,16 @@ impl Bundle {
         Ok(path)
     }
 
+    /// Every file the manifest lists, checked: the first one that fails.
+    pub fn verify_all(&self) -> Result<(), BundleError> {
+        for name in self.manifest.lines().filter_map(|l| l.split_once("  ").map(|(_, n)| n.trim())) {
+            if !name.is_empty() {
+                self.verify(name)?;
+            }
+        }
+        Ok(())
+    }
+
     pub fn versions(&self) -> BundleVersions {
         let get = |key: &str| {
             self.build
@@ -196,6 +206,15 @@ mod tests {
         let (d, m) = folder();
         let b = Bundle::for_tests(d.path().into(), m, BUILD);
         assert_eq!(b.versions(), BundleVersions { mercury: "1.9.25".into(), hamlib: "4.7.2".into() });
+    }
+
+    #[test]
+    fn verify_all_names_the_changed_file() {
+        let (d, m) = folder();
+        let b = Bundle::for_tests(d.path().into(), m, BUILD);
+        assert_eq!(b.verify_all(), Ok(()));
+        std::fs::write(d.path().join("rigctld"), b"changed").unwrap();
+        assert_eq!(b.verify_all(), Err(BundleError::Changed("rigctld".into())));
     }
 
     #[test]

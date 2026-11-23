@@ -22,6 +22,21 @@ use crate::profile::{FieldError, StationProfile};
 use serde::{Deserialize, Serialize};
 use ts_rs::TS;
 
+/// The built-in modem of this build (M5): shown next to every mention of
+/// Mercury and Hamlib.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct BuiltInView {
+    /// This build has a built-in modem (a release build, or a lab bundle).
+    pub available: bool,
+    /// Without a leading "v"; empty when unknown.
+    pub mercury: String,
+    pub hamlib: String,
+    /// `null`: every shipped file is as built; else what is wrong, in words.
+    pub integrity: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
@@ -268,6 +283,14 @@ pub enum AppCommand {
     TestRig {
         config: RigConfig,
     },
+    /// The built-in modem of this build (M5 G4): its versions and whether
+    /// every shipped file is as built. Checked off the actor.
+    BuiltInInfo,
+    /// Are these built-in ports free on 127.0.0.1? The first taken one and a
+    /// free set when not (M5 §5.1); nothing is started.
+    CheckBuiltInPorts {
+        ports: crate::profile::BuiltInPorts,
+    },
     /// Hamlib's rig models, from `rigctld -l` (rigctld on the PATH, else in
     /// `hamlib_dir`); `found: false` when there is no rigctld (M3b.1 §5.3).
     HamlibModels {
@@ -412,6 +435,8 @@ pub enum CommandOk {
     RigTest { steps: Vec<RigTestStep> },
     RigSettings { config: RigConfig, region: u8, schedule: Schedule },
     HamlibModels { models: Vec<HamlibModelView>, found: bool },
+    BuiltIn(BuiltInView),
+    PortCheck { taken: Option<u16>, suggestion: Option<crate::profile::BuiltInPorts> },
     CatLog { lines: Vec<String> },
     Audio(AudioSettingsView),
     BandLevels { levels: std::collections::BTreeMap<String, BandLevels> },

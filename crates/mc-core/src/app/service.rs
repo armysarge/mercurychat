@@ -264,6 +264,10 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                                     app.test_rig(config, reply);
                                     continue;
                                 }
+                                AppCommand::BuiltInInfo => {
+                                    app.builtin_info(reply);
+                                    continue;
+                                }
                                 AppCommand::HamlibModels { hamlib_dir } => {
                                     app.hamlib_models(hamlib_dir, reply);
                                     continue;
@@ -810,6 +814,11 @@ impl App {
             AppCommand::RigSettings => self.rig_settings(),
             // Answered from the loop (see `test_rig`), never here.
             AppCommand::TestRig { .. } => Err(AppError::Internal { message: "the rig test runs on its own".into() }),
+            AppCommand::BuiltInInfo => Err(AppError::Internal { message: "checked off the actor".into() }),
+            AppCommand::CheckBuiltInPorts { ports } => Ok(match crate::app::builtin::ports::check_free(&ports) {
+                Ok(()) => CommandOk::PortCheck { taken: None, suggestion: None },
+                Err(t) => CommandOk::PortCheck { taken: Some(t.port), suggestion: Some(t.suggestion) },
+            }),
             AppCommand::HamlibModels { .. } => {
                 Err(AppError::Internal { message: "the model list runs on its own".into() })
             }
@@ -1290,6 +1299,26 @@ impl App {
         }
         let generation = self.log.generation();
         self.task = Some(modem::spawn(p, generation, opts, self.reports.clone()));
+    }
+
+    /// This build's built-in modem: versions now, every file hashed off the actor.
+    fn builtin_info(&self, reply: Reply<CommandOk>) {
+        let Some(bundle) = self.bundle.clone() else {
+            let view =
+                super::BuiltInView { available: false, mercury: String::new(), hamlib: String::new(), integrity: None };
+            let _ = reply.send(Ok(CommandOk::BuiltIn(view)));
+            return;
+        };
+        tokio::spawn(async move {
+            let v = bundle.versions();
+            let integrity = match tokio::task::spawn_blocking(move || bundle.verify_all()).await {
+                Ok(Ok(())) => None,
+                Ok(Err(e)) => Some(e.to_string()),
+                Err(e) => Some(format!("the check did not finish: {e}")),
+            };
+            let view = super::BuiltInView { available: true, mercury: v.mercury, hamlib: v.hamlib, integrity };
+            let _ = reply.send(Ok(CommandOk::BuiltIn(view)));
+        });
     }
 
     /// The built-in modem's own state, published when it changes.

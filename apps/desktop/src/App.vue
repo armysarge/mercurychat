@@ -27,6 +27,7 @@ import StationStrip from "./components/StationStrip.vue";
 import WindowControls from "./components/WindowControls.vue";
 import type { RigBanner } from "./bindings/RigBanner";
 import { dismissRigBanner, rigView } from "./rig";
+import { loadBuiltin } from "./builtin";
 
 const startupError = ref("");
 const now = ref(new Date());
@@ -158,6 +159,7 @@ onMounted(async () => {
     onAppEvent(notifyOn);
     startNotifier();
     await mirror.start();
+    void loadBuiltin();
     void reloadTransfers();
     void listenForDrops().catch((e) => console.warn("drag and drop unavailable:", e));
     const selfMeasure = await invoke<boolean>("ui_ready");

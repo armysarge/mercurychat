@@ -525,7 +525,13 @@ impl App {
 
     /// Hamlib's rig models (`rigctld -l`), from its own task.
     pub(super) fn hamlib_models(&mut self, hamlib_dir: String, reply: super::Reply<CommandOk>) {
-        let Some(exe) = self.rig.rigctld_program(&hamlib_dir) else {
+        let bundled = self
+            .rig
+            .builtin
+            .as_ref()
+            .and_then(|b| b.bundle.as_ref())
+            .and_then(|b| b.verify(crate::bundle::RIGCTLD_EXE).ok());
+        let Some(exe) = bundled.or_else(|| self.rig.rigctld_program(&hamlib_dir)) else {
             let _ = reply.send(Ok(CommandOk::HamlibModels { models: vec![], found: false }));
             return;
         };

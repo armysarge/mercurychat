@@ -25,7 +25,13 @@
     "connected": "connected",
     "draining": "draining",
     "recovering": "recovering",
-    "faulted": "faulted"
+    "faulted": "faulted",
+    "title": "Built-in modem",
+    "mercury": "Mercury {version}, built in",
+    "hamlib": "Hamlib {version}, built in",
+    "integrityOk": "Every shipped file is as built.",
+    "none": "This build has no built-in modem: use My own Mercury.",
+    "note": "Before starting them, MercuryChat checks Mercury and rigctld against the list made when this version was built."
   },
   "mode": {
     "noStation": "No station",
@@ -206,7 +212,7 @@
     "callsign": "Your callsign",
     "useSimulator": "Use simulator",
     "simulatorUnavailable": "Simulator: not available in this build",
-    "existingTitle": "Existing Mercury",
+    "existingTitle": "My own Mercury",
     "existingBody": "A Mercury modem already running, on this computer or one you name. MercuryChat attaches to its control and data ports; it answers incoming calls unless you turn on Receive only.",
     "host": "Host",
     "controlPort": "Control port",
@@ -215,7 +221,18 @@
     "telemetryUrl": "Spectrum (Mercury UI link)",
     "optionalHint": "The broadcast port carries CQ, beacons and heard stations (Mercury -b, default 8100). The spectrum comes from Mercury's UI link, which is off unless Mercury runs with -G (or ui_enabled = true in mercury.ini). Leave a field empty to go without it.",
     "useExisting": "Use this Mercury",
-    "unexpectedReply": "Unexpected reply: {type}"
+    "unexpectedReply": "Unexpected reply: {type}",
+    "builtInTitle": "Built-in Mercury {version}",
+    "builtInTitleNoVersion": "Built-in Mercury",
+    "recommended": "Recommended",
+    "builtInBody": "The Mercury modem and Hamlib that come with MercuryChat. MercuryChat starts and stops them, on this computer only. Choose the sound card afterwards, in Settings → Audio.",
+    "advanced": "Advanced: ports",
+    "uiPort": "Mercury UI port",
+    "rigctldPort": "rigctld port",
+    "portsHint": "Change these only if another program uses them. The data port is the control port + 1.",
+    "portTaken": "Port {port} is already in use on this computer, perhaps by another Mercury. MercuryChat never uses a modem it did not start.",
+    "useFreeSet": "Use the free set ({control}, {broadcast}, {ui}, {rigctld})",
+    "useBuiltIn": "Use built-in Mercury"
   },
   "settings": {
     "title": "Settings",
@@ -244,7 +261,8 @@
       "appearance": "Appearance",
       "about": "About",
       "beacon": "Beacon",
-      "files": "Files"
+      "files": "Files",
+      "modem": "Modem"
     }
   },
   "appearance": {
@@ -526,7 +544,10 @@
     "pttFaultTitle": "Mercury and the rig disagree about transmitting: check the radio",
     "pttCheckOff": "PTT check off",
     "pttCheckOffTitle": "The rig's PTT cannot be read, so transmissions are not checked. Start rigctld with the radio's PTT type (for example -P RIG) to turn the check on.",
-    "nextQsy": "Next QSY {time} UTC: {name}"
+    "nextQsy": "Next QSY {time} UTC: {name}",
+    "chooseSoundCard": "Choose a sound card",
+    "startingMercury": "Starting Mercury…",
+    "mercuryStopped": "Mercury stopped: {reason}"
   },
   "qso": {
     "title": "QSO record",
@@ -643,7 +664,8 @@
       "hamlib": "Hamlib, radio control (LGPL-2.1-or-later)",
       "dseg": "DSEG7 Classic font by keshikan (SIL Open Font License 1.1)"
     },
-    "openFailed": "The browser could not be opened: {reason}"
+    "openFailed": "The browser could not be opened: {reason}",
+    "builtin": "Built in: Mercury {mercury} and Hamlib {hamlib}"
   },
   "waterfall": {
     "howUnconfigured": "No spectrum address for this station: add one under Settings → Profiles (for example ws://127.0.0.1:10000/websocket).",
@@ -854,7 +876,8 @@
     "freqTestResult": "The rig reports {freq} Hz, {mode}.",
     "external": "External rigctld",
     "flrig": "FLRig",
-    "flrigHint": "FLRig sets frequency and mode only; choose a separate PTT method."
+    "flrigHint": "FLRig sets frequency and mode only; choose a separate PTT method.",
+    "hamlibBuiltIn": "rigctld: Hamlib {version}, built in"
   },
   "freqList": {
     "title": "Frequency list",

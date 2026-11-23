@@ -3,16 +3,25 @@
 // and input channel, as Mercury lists them on its UI link (it needs -G).
 // Apply sends them to Mercury, which restarts its audio and saves the choice
 // only if that works; its verdict arrives in the activity log.
-import { onMounted, onUnmounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import { call, describeError } from "../api";
 import type { AudioSettingsView } from "../bindings/AudioSettingsView";
 import { activeProfile } from "../store";
+import { builtinSystems } from "../builtin";
 
 const { t } = useI18n();
 const CHANNELS = ["left", "right", "stereo"] as const;
 
 const view = ref<AudioSettingsView | null>(null);
+/** The systems offered: for a built-in Mercury, this platform's two, preferred
+ *  first (M5 §5.5), of those Mercury has; otherwise all Mercury lists. */
+const systems = computed(() => {
+  const listed = view.value?.systems ?? [];
+  if (activeProfile.value?.modem.kind !== "builtIn") return listed;
+  const ours = builtinSystems().filter((s) => listed.includes(s));
+  return ours.length ? ours : listed;
+});
 const system = ref("");
 const input = ref("");
 const output = ref("");
@@ -28,7 +37,8 @@ async function refresh() {
     view.value = r;
     // The form follows Mercury until the operator changes something.
     if (!touched.value) {
-      system.value = r.system;
+      // A built-in Mercury's first start runs on "null": offer the preferred system.
+      system.value = systems.value.includes(r.system) || !systems.value.length ? r.system : systems.value[0];
       input.value = r.input;
       output.value = r.output;
       channel.value = r.channel || "left";
@@ -70,10 +80,10 @@ async function apply() {
     <p v-else-if="!view?.available" class="muted audio-unavailable">{{ t("waterfall.howLost") }}</p>
     <template v-else>
       <div class="grid">
-        <label v-if="view.systems.length > 1">
+        <label v-if="systems.length > 1">
           {{ t("audioSettings.system") }}
           <select v-model="system" class="audio-system" @change="touched = true">
-            <option v-for="s in view.systems" :key="s" :value="s">{{ s }}</option>
+            <option v-for="s in systems" :key="s" :value="s">{{ s }}</option>
           </select>
         </label>
         <label>

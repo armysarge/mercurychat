@@ -30,6 +30,7 @@ import BandLevelsEditor from "./BandLevels.vue";
 import FrequencyListEditor from "./FrequencyListEditor.vue";
 import ScheduleEditor from "./ScheduleEditor.vue";
 import Switch from "./Switch.vue";
+import { builtin } from "../builtin";
 
 const { t } = useI18n();
 const STEPS = ["connect", "caps", "frequency", "mode", "ptt", "owner"] as const;
@@ -376,6 +377,9 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
           <select v-model="config.freqControl" class="rig-freq-control" :aria-label="t('rigSettings.freqControl')">
             <option v-for="f in FREQ_CONTROLS" :key="f" :value="f">{{ t(`rigSettings.freqControlOpt.${f}`) }}</option>
           </select>
+          <p v-if="activeProfile?.modem.kind === 'builtIn' && builtin?.available" class="hamlib-builtin muted small">
+            {{ t("rigSettings.hamlibBuiltIn", { version: builtin.hamlib || "?" }) }}
+          </p>
           <label class="switch-row">
             <span>{{ t("rigSettings.restore") }}</span>
             <Switch input-class="rig-restore" :checked="config.restoreOnStartup" @change="config.restoreOnStartup = ($event.target as HTMLInputElement).checked" />
