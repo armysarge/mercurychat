@@ -15,6 +15,8 @@ tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "ma
 thiserror = "2"
 rand = { version = "0.9", optional = true }
 serde_json = "1"
+# The radio's serial line for the built-in CAT engine (M5 Task 11e); no udev/libudev, so no port listing.
+serialport = { version = "4", default-features = false }
 # Mercury's telemetry WebSocket: a plain ws:// client (and, under `fake`, the
 # test server). No TLS: Mercury's wss:// is not supported.
 tokio-tungstenite = { version = "0.30", default-features = false, features = ["connect"] }

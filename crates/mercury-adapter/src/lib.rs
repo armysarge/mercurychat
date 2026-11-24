@@ -2,6 +2,7 @@
 //! paired control/data attachment. No UI dependency (docs/05 §2 WP2).
 
 pub mod broadcast;
+pub mod cat;
 pub mod child;
 pub mod client;
 pub mod command;

@@ -1,0 +1,58 @@
+# Radios that ship with MercuryChat, written from the makers' published CAT manuals.
+
+[Icom IC-7300]
+encoding      = hex
+ptt_on        = FEFE94E01C0001FD
+ptt_off       = FEFE94E01C0000FD
+mode_usb      = FEFE94E02600010001FD
+mode_usb_data = FEFE94E02600010101FD
+mode_lsb      = FEFE94E02600000001FD
+mode_lsb_data = FEFE94E02600000101FD
+mode_fm       = FEFE94E02600050001FD
+mode_am       = FEFE94E02600020001FD
+mode_cw       = FEFE94E02600030001FD
+set_freq      = FEFE94E005{}FD
+freq_coding   = bcd
+freq_digits   = 10
+read_freq     = FEFE94E003FD
+read_len      = 22
+read_start    = 10
+read_digits   = 10
+
+[Yaesu FT-991A]
+encoding      = text
+ptt_on        = TX1;
+ptt_off       = TX0;
+mode_usb      = MD02;
+mode_usb_data = MD0C;
+mode_lsb      = MD01;
+mode_lsb_data = MD08;
+mode_fm       = MD04;
+mode_am       = MD05;
+mode_cw       = MD03;
+set_freq      = FA{};
+freq_coding   = text
+freq_digits   = 9
+read_freq     = FA;
+read_len      = 12
+read_start    = 2
+read_digits   = 9
+
+[Kenwood TS-590S/SG]
+encoding      = text
+ptt_on        = TX1;
+ptt_off       = RX;
+mode_usb      = MD2;,DA0;
+mode_usb_data = MD2;,DA1;
+mode_lsb      = MD1;,DA0;
+mode_lsb_data = MD1;,DA1;
+mode_fm       = MD4;
+mode_am       = MD5;
+mode_cw       = MD3;
+set_freq      = FA{};
+freq_coding   = text
+freq_digits   = 11
+read_freq     = FA;
+read_len      = 14
+read_start    = 2
+read_digits   = 11
