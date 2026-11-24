@@ -82,6 +82,8 @@ pub struct AppSnapshot {
     pub current_qso: Option<Box<Qso>>,
     /// Whether a session's record is finalised when it ends (default no).
     pub finalise_on_disconnect: bool,
+    /// The MODE an ADIF export writes (default DYNAMIC).
+    pub adif_mode: String,
     /// The interface language the operator chose: `system`, `en`, `es`,
     /// `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
     pub ui_language: String,
@@ -217,6 +219,11 @@ pub enum AppCommand {
     /// Finalise a record when its session ends (default off).
     SetFinaliseOnDisconnect {
         on: bool,
+    },
+    /// The MODE an ADIF export writes (default DYNAMIC): 1 to 20 letters,
+    /// digits or '-', stored upper-cased; anything else is refused.
+    SetAdifMode {
+        mode: String,
     },
     /// Choose the interface language: one of `system`, `en`, `es`, `pt-BR`,
     /// `fr`. Anything else is refused. Kept in the setting `ui.language`.

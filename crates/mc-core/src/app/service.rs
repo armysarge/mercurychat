@@ -752,6 +752,12 @@ impl App {
                 self.store.set_setting(FINALISE_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
                 Ok(CommandOk::Done)
             }
+            AppCommand::SetAdifMode { mode } => {
+                let mode = super::export::adif_mode(&mode)
+                    .map_err(|e| AppError::Validation { errors: chat::field("mode", e) })?;
+                self.store.set_setting(super::export::ADIF_MODE_SETTING, &mode).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
             AppCommand::SetUiLanguage { language } => {
                 if !UI_LANGUAGES.contains(&language.as_str()) {
                     return Err(AppError::Validation {
@@ -1001,7 +1007,7 @@ impl App {
         qsos.reverse();
         let qsos = export::select(qsos, finalised_only);
         let text = match format {
-            ExportFormat::Adif => export::adif(&qsos, env!("CARGO_PKG_VERSION")),
+            ExportFormat::Adif => export::adif(&qsos, env!("CARGO_PKG_VERSION"), &self.adif_mode()),
             ExportFormat::Csv => export::csv(&qsos),
         };
         write_export(&path, &text)?;
@@ -1749,6 +1755,16 @@ impl App {
         qso
     }
 
+    /// The stored ADIF mode, or DYNAMIC (a stored value that no longer checks counts as none).
+    fn adif_mode(&self) -> String {
+        self.store
+            .setting(super::export::ADIF_MODE_SETTING)
+            .ok()
+            .flatten()
+            .and_then(|m| super::export::adif_mode(&m).ok())
+            .unwrap_or_else(|| super::export::DEFAULT_ADIF_MODE.to_string())
+    }
+
     fn finalise_on_disconnect(&self) -> bool {
         matches!(self.store.setting(FINALISE_SETTING), Ok(Some(v)) if v == "true")
     }
@@ -1791,6 +1807,7 @@ impl App {
             telemetry: Box::new(self.telemetry.view(tokio::time::Instant::now())),
             current_qso: self.qso.as_ref().map(|r| Box::new(Qso::from(r))),
             finalise_on_disconnect: self.finalise_on_disconnect(),
+            adif_mode: self.adif_mode(),
             ui_language: self.ui_language(),
             notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
             rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),

@@ -356,3 +356,29 @@ async fn exports_write_the_logbook_and_the_conversation() {
     let text = std::fs::read_to_string(&path).unwrap();
     assert!(text.starts_with("MercuryChat conversation with SIM1") && text.contains("hello, José"), "{text}");
 }
+
+/// The ADIF mode is the operator's (owner, 24 Nov: Log4OM does not know
+/// DYNAMIC): stored, shown in the snapshot, used by the export, and checked.
+#[tokio::test]
+async fn the_adif_mode_is_chosen_and_used() {
+    use mc_core::app::export::ExportFormat;
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let _peer = spawn_peer(&net, &dir.path().join("peer"));
+    let (h, mut rx) = start(dir.path(), existing(&net, None)).await;
+    assert_eq!(snapshot(&h).await.adif_mode, "DYNAMIC", "DYNAMIC by default");
+    call(&h, &mut rx).await;
+
+    assert_eq!(h.call(AppCommand::SetAdifMode { mode: " mercury ".into() }).await.unwrap(), CommandOk::Done);
+    assert_eq!(snapshot(&h).await.adif_mode, "MERCURY");
+    let path = dir.path().join("log.adi").to_string_lossy().into_owned();
+    h.call(AppCommand::ExportLogbook { format: ExportFormat::Adif, finalised_only: false, path: path.clone() })
+        .await
+        .unwrap();
+    let adi = std::fs::read_to_string(&path).unwrap();
+    assert!(adi.contains("<MODE:7>MERCURY"), "{adi}");
+
+    let refused = h.call(AppCommand::SetAdifMode { mode: "A B".into() }).await;
+    assert!(matches!(refused, Err(AppError::Validation { .. })), "{refused:?}");
+    assert_eq!(snapshot(&h).await.adif_mode, "MERCURY", "a refused mode changes nothing");
+}

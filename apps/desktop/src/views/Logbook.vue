@@ -10,8 +10,9 @@ import { describeError } from "../api";
 import type { ExportFormat } from "../bindings/ExportFormat";
 import type { Qso } from "../bindings/Qso";
 import { exportLogbook } from "../exports";
+import { adifModeOk, withoutBand } from "../logExport";
 import QsoForm from "../components/QsoForm.vue";
-import { activeProfile, logbook, reloadLogbook } from "../store";
+import { activeProfile, logbook, reloadLogbook, setAdifMode, snapshot } from "../store";
 
 const { t } = useI18n();
 onMounted(() => void reloadLogbook());
@@ -60,6 +61,24 @@ const finalisedOnly = ref(false);
 const exporting = ref(false);
 const exportNote = ref("");
 const exportError = ref("");
+/** QSOs with neither band nor frequency: loggers refuse them, so say so before an ADIF export. */
+const missingBand = computed(() => (format.value === "adif" ? withoutBand(logbook.qsos, finalisedOnly.value) : 0));
+/** The MODE the ADIF export writes; saved when the field is left with a valid value. */
+const adifMode = ref(snapshot.value?.adifMode ?? "DYNAMIC");
+const modeError = ref("");
+async function saveAdifMode() {
+  modeError.value = "";
+  if (!adifModeOk(adifMode.value)) {
+    modeError.value = t("logbook.export.modeInvalid");
+    return;
+  }
+  try {
+    await setAdifMode(adifMode.value);
+    adifMode.value = adifMode.value.trim().toUpperCase();
+  } catch (e) {
+    modeError.value = describeError(e);
+  }
+}
 async function exportNow() {
   exporting.value = true;
   exportNote.value = "";
@@ -87,11 +106,17 @@ async function exportNow() {
           <option v-for="f in FORMATS" :key="f" :value="f">{{ t(`logbook.export.formatOpt.${f}`) }}</option>
         </select>
       </label>
+      <label v-if="format === 'adif'" :title="t('logbook.export.modeHint')">
+        {{ t("logbook.export.mode") }}
+        <input v-model="adifMode" class="adif-mode mono" maxlength="20" spellcheck="false" autocomplete="off" :aria-invalid="!!modeError" @change="saveAdifMode" />
+      </label>
       <label class="check"><input v-model="finalisedOnly" type="checkbox" class="export-final" /> {{ t("logbook.export.finalisedOnly") }}</label>
       <button class="export-logbook" :disabled="exporting || !logbook.qsos.length" @click="exportNow">{{ t("logbook.export.button") }}</button>
       <span v-if="exportNote" class="ok small" role="status">{{ exportNote }}</span>
       <span v-if="exportError" class="err small" role="alert">{{ exportError }}</span>
+      <span v-if="modeError" class="err small mode-error" role="alert">{{ modeError }}</span>
     </div>
+    <p v-if="missingBand" class="warn small export-missing-band" role="status">{{ t("logbook.export.missingBand", { n: missingBand }, missingBand) }}</p>
     <div v-if="rows.length" class="layout">
       <div class="table-wrap">
         <table class="qsos">

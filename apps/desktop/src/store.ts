@@ -533,6 +533,12 @@ export async function setFinaliseOnDisconnect(on: boolean) {
   mirror.patch({ finaliseOnDisconnect: on });
 }
 
+/** The MODE an ADIF export writes (owner, 24 Nov: Log4OM does not know DYNAMIC). */
+export async function setAdifMode(mode: string) {
+  await call({ type: "setAdifMode", mode });
+  mirror.patch({ adifMode: mode.trim().toUpperCase() });
+}
+
 export const macros = reactive({ list: [] as MacroDef[], error: "" });
 
 export async function loadMacros() {

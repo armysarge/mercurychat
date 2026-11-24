@@ -629,7 +629,11 @@
       },
       "finalisedOnly": "Somente registros finalizados",
       "button": "Exportar…",
-      "done": "{n} registro exportado. | {n} registros exportados."
+      "done": "{n} registro exportado. | {n} registros exportados.",
+      "mode": "Modo ADIF",
+      "modeHint": "O MODE que seu programa de log espera para contatos Mercury. DYNAMIC é o modo ADIF para modems de dados adaptativos; alguns programas, como o Log4OM, precisam que o modo seja adicionado à lista antes.",
+      "modeInvalid": "Use de 1 a 20 letras, dígitos ou -, por ex. DYNAMIC.",
+      "missingBand": "{n} QSO não tem banda nem frequência: a maioria dos programas de log vai ignorá-lo. Adicione a banda no registro antes. | {n} QSOs não têm banda nem frequência: a maioria dos programas de log vai ignorá-los. Adicione a banda nos registros antes."
     }
   },
   "macros": {

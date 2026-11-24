@@ -3,10 +3,11 @@
 //! the operator chose.
 //!
 //! ADIF's mode (design §10): ADIF has no Mercury mode. A record carries
-//! `MODE=DYNAMIC` with no SUBMODE (DYNAMIC is ADIF 3.1's mode for
+//! `MODE=DYNAMIC` by default with no SUBMODE (DYNAMIC is ADIF 3.1's mode for
 //! adaptive-rate ARQ modems; its listed submodes are VARA's, which would be
 //! false here) and the application field `APP_MERCURYCHAT_MODE=MERCURY`, which
-//! loggers that do not know it keep or skip without an error.
+//! loggers that do not know it keep or skip without an error. Some loggers
+//! (Log4OM) do not know DYNAMIC: the operator can set another mode.
 
 use super::logbook::Qso;
 use serde::{Deserialize, Serialize};
@@ -129,8 +130,29 @@ fn freq_mhz(q: &Qso) -> Option<String> {
     q.freq.as_ref().map(|r| format!("{:.6}", r.value as f64 / 1e6))
 }
 
-/// ADIF 3.1.4: a header, then one record per QSO.
-pub fn adif(qsos: &[Qso], program_version: &str) -> String {
+/// The setting that holds the operator's ADIF mode (owner, 24 Nov: Log4OM
+/// does not know DYNAMIC, so the operator picks what their logger has).
+pub const ADIF_MODE_SETTING: &str = "log.adif_mode";
+/// ADIF 3.1's mode for adaptive data modems: the default.
+pub const DEFAULT_ADIF_MODE: &str = "DYNAMIC";
+
+/// A chosen ADIF mode, checked: trimmed and upper-cased, 1 to 20 of A–Z,
+/// 0–9 and '-' (nothing that could break a field or a record).
+pub fn adif_mode(raw: &str) -> Result<String, String> {
+    let m = raw.trim().to_ascii_uppercase();
+    if m.is_empty() || m.len() > 20 || !m.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-') {
+        return Err("1 to 20 letters, digits or '-', e.g. DYNAMIC".into());
+    }
+    Ok(m)
+}
+
+/// QSOs with neither a band nor a frequency: most loggers refuse them.
+pub fn without_band(qsos: &[Qso]) -> usize {
+    qsos.iter().filter(|q| q.band.is_none() && q.freq.is_none()).count()
+}
+
+/// ADIF 3.1.4: a header, then one record per QSO, with `mode` as MODE.
+pub fn adif(qsos: &[Qso], program_version: &str, mode: &str) -> String {
     let mut out = String::from("MercuryChat logbook export\n");
     field(&mut out, "ADIF_VER", Some("3.1.4"));
     field(&mut out, "PROGRAMID", Some("MercuryChat"));
@@ -147,7 +169,7 @@ pub fn adif(qsos: &[Qso], program_version: &str) -> String {
         field(&mut r, "TIME_OFF", off.as_ref().map(|u| u.time.as_str()));
         field(&mut r, "FREQ", freq_mhz(q).as_deref());
         field(&mut r, "BAND", q.band.as_deref());
-        field(&mut r, "MODE", Some("DYNAMIC"));
+        field(&mut r, "MODE", Some(mode));
         field(&mut r, "APP_MERCURYCHAT_MODE", Some("MERCURY"));
         field(&mut r, "RST_SENT", q.rst_sent.as_deref());
         field(&mut r, "RST_RCVD", q.rst_rcvd.as_deref());
@@ -319,7 +341,7 @@ mod tests {
 
     #[test]
     fn adif_header_and_eoh() {
-        let text = adif(&[], "0.5.0");
+        let text = adif(&[], "0.5.0", DEFAULT_ADIF_MODE);
         assert!(!text.starts_with('<'), "a header starts with text, not a field");
         assert!(text.contains("<ADIF_VER:5>3.1.4"), "{text}");
         assert!(text.contains("<PROGRAMID:11>MercuryChat"), "{text}");
@@ -330,7 +352,7 @@ mod tests {
 
     #[test]
     fn adif_record_fields() {
-        let text = adif(&[qso()], "0.5.0");
+        let text = adif(&[qso()], "0.5.0", DEFAULT_ADIF_MODE);
         let body = &text[text.find("<EOH>").unwrap()..];
         let f = fields(body);
         assert_eq!(get(&f, "CALL"), Some("ZS6ABC"));
@@ -356,7 +378,7 @@ mod tests {
         q.name = Some("José Müller".into());
         q.qth = Some("São Paulo 東京".into());
         q.notes = Some("73 – ok".into());
-        let text = adif(&[q], "0.5.0");
+        let text = adif(&[q], "0.5.0", DEFAULT_ADIF_MODE);
         assert!(text.is_ascii(), "{text}");
         let f = fields(&text);
         assert_eq!(get(&f, "NAME"), Some("Jose Muller"));
@@ -373,7 +395,7 @@ mod tests {
         q.freq = None;
         q.my_power = Some("about a hundred".into());
         q.notes = None;
-        let text = adif(&[q], "0.5.0");
+        let text = adif(&[q], "0.5.0", DEFAULT_ADIF_MODE);
         for absent in ["TIME_OFF", "QSO_DATE_OFF", "GRIDSQUARE", "NAME", "FREQ", "TX_PWR", "COMMENT"] {
             assert!(!text.contains(&format!("<{absent}:")), "{absent} written: {text}");
         }
@@ -491,7 +513,7 @@ mod tests {
     #[test]
     fn log4om_sample_matches_the_fixture() {
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/export/log4om-sample.adi");
-        let text = adif(&sample(), "0.5.0");
+        let text = adif(&sample(), "0.5.0", DEFAULT_ADIF_MODE);
         if std::env::var_os("MC_WRITE_FIXTURE").is_some() {
             std::fs::create_dir_all(path.parent().unwrap()).unwrap();
             std::fs::write(&path, &text).unwrap();
@@ -501,10 +523,39 @@ mod tests {
     }
 
     #[test]
-    fn mode_is_what_log4om_imports() {
-        let f = fields(&adif(&[qso()], "0.5.0"));
+    fn mode_is_dynamic_by_default() {
+        let f = fields(&adif(&[qso()], "0.5.0", DEFAULT_ADIF_MODE));
         assert_eq!(get(&f, "MODE"), Some("DYNAMIC"));
         assert_eq!(get(&f, "SUBMODE"), None, "DYNAMIC's submodes are VARA's: none fits");
         assert_eq!(get(&f, "APP_MERCURYCHAT_MODE"), Some("MERCURY"));
+    }
+
+    /// Log4OM does not know DYNAMIC (owner's import, 24 Nov): the operator
+    /// chooses the mode their logger has, e.g. a custom MERCURY.
+    #[test]
+    fn mode_is_the_operators_choice() {
+        let f = fields(&adif(&[qso()], "0.5.0", "MERCURY"));
+        assert_eq!(get(&f, "MODE"), Some("MERCURY"));
+        assert_eq!(get(&f, "APP_MERCURYCHAT_MODE"), Some("MERCURY"));
+    }
+
+    #[test]
+    fn a_chosen_mode_is_checked() {
+        assert_eq!(adif_mode(" mercury ").as_deref(), Ok("MERCURY"));
+        assert_eq!(adif_mode("Data-1").as_deref(), Ok("DATA-1"));
+        for bad in ["", "   ", "A B", "<EOR>", "MODE:7", "ÉTÉ", "ABCDEFGHIJKLMNOPQRSTU"] {
+            assert!(adif_mode(bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    /// Loggers refuse a QSO with neither band nor frequency (Log4OM: "QSO NOT VALID").
+    #[test]
+    fn qsos_without_band_or_frequency_are_counted() {
+        let mut none = qso();
+        none.band = None;
+        none.freq = None;
+        let mut band_only = qso();
+        band_only.freq = None;
+        assert_eq!(without_band(&[qso(), none, band_only]), 1);
     }
 }

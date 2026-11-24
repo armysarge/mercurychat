@@ -628,7 +628,11 @@
       },
       "finalisedOnly": "Finalised records only",
       "button": "Export…",
-      "done": "Exported {n} record. | Exported {n} records."
+      "done": "Exported {n} record. | Exported {n} records.",
+      "mode": "ADIF mode",
+      "modeHint": "The MODE your logger expects for Mercury contacts. DYNAMIC is ADIF's mode for adaptive data modems; some loggers, such as Log4OM, need a mode added to their list first.",
+      "modeInvalid": "Use 1 to 20 letters, digits or -, e.g. DYNAMIC.",
+      "missingBand": "{n} QSO has no band or frequency: most loggers will skip it. Add the band in its record first. | {n} QSOs have no band or frequency: most loggers will skip them. Add the band in their records first."
     }
   },
   "macros": {

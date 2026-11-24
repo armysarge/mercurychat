@@ -67,6 +67,10 @@ currentQso: Qso | null,
  */
 finaliseOnDisconnect: boolean, 
 /**
+ * The MODE an ADIF export writes (default DYNAMIC).
+ */
+adifMode: string, 
+/**
  * The interface language the operator chose: `system`, `en`, `es`,
  * `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
  */
