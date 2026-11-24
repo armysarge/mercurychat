@@ -52,6 +52,7 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
 <template>
   <div ref="root" class="macros" @keydown="onKey">
     <button type="button" class="macro-toggle quiet" aria-haspopup="menu" :aria-expanded="open" :disabled="!chat.open || !activeProfile" @click="toggle">
+      <svg class="macro-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z" /></svg>
       {{ t("macros.button") }}
     </button>
     <div v-if="open" class="macro-menu" role="menu" :aria-label="t('macros.menuAria')">
@@ -71,6 +72,9 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
 
 <style scoped>
 .macros { position: relative; }
+.macro-toggle { display: inline-flex; align-items: center; gap: 6px; min-height: 0; padding: 8px 10px; border-color: transparent; }
+.macro-icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linejoin: round; }
+@media (max-width: 1099px) { .macro-toggle { font-size: 0; gap: 0; } }
 .macro-menu {
   position: absolute; bottom: calc(100% + 4px); left: 0; z-index: 25; min-width: 200px; max-height: 280px; overflow-y: auto;
   display: grid; padding: 4px; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--raised); box-shadow: 0 6px 18px var(--shadow);

@@ -128,7 +128,8 @@
     "bytes": "{used} / {max} bytes",
     "hint": "Ctrl+Enter sends · Enter adds a line",
     "send": "Send",
-    "tooLong": "A message can be at most {max} bytes."
+    "tooLong": "A message can be at most {max} bytes.",
+    "attach": "Attach a file"
   },
   "conversations": {
     "title": "History",
@@ -213,7 +214,11 @@
     "simulator": "Simulator (no radio)",
     "builtIn": "Built-in Mercury",
     "mercuryAt": "Mercury at {host}:{port}",
-    "chooseStation": "Choose a station in Settings."
+    "chooseStation": "Choose a station in Settings.",
+    "tabsAria": "Session panel",
+    "tabQso": "QSO record",
+    "tabSession": "Session",
+    "noQso": "No QSO in progress. One starts when a link comes up."
   },
   "window": {
     "minimise": "Minimise",
@@ -606,8 +611,8 @@
     "myPower": "My power",
     "freqMhz": "Frequency (MHz)",
     "notes": "Notes",
-    "save": "Save record",
-    "finalise": "Finalise",
+    "save": "Save draft",
+    "finalise": "Log QSO",
     "saved": "Saved",
     "finalNote": "Finalised: this record can no longer be changed.",
     "freqNone": "Frequency unavailable",
@@ -617,7 +622,9 @@
       "rstRcvd": "RST received",
       "name": "Name",
       "qth": "QTH"
-    }
+    },
+    "titleWith": "QSO with",
+    "band": "Band"
   },
   "logbook": {
     "title": "Logbook",

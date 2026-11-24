@@ -129,7 +129,8 @@
     "bytes": "{used} / {max} bytes",
     "hint": "Ctrl+Intro envía · Intro añade una línea",
     "send": "Enviar",
-    "tooLong": "Un mensaje puede tener como máximo {max} bytes."
+    "tooLong": "Un mensaje puede tener como máximo {max} bytes.",
+    "attach": "Adjuntar un archivo"
   },
   "conversations": {
     "title": "Historial",
@@ -214,7 +215,11 @@
     "simulator": "Simulador (sin radio)",
     "builtIn": "Mercury integrado",
     "mercuryAt": "Mercury en {host}:{port}",
-    "chooseStation": "Elige una estación en Ajustes."
+    "chooseStation": "Elige una estación en Ajustes.",
+    "tabsAria": "Panel de la sesión",
+    "tabQso": "Registro de QSO",
+    "tabSession": "Sesión",
+    "noQso": "No hay ningún QSO en curso. Empieza cuando se establece un enlace."
   },
   "window": {
     "minimise": "Minimizar",
@@ -607,8 +612,8 @@
     "myPower": "Mi potencia",
     "freqMhz": "Frecuencia (MHz)",
     "notes": "Notas",
-    "save": "Guardar registro",
-    "finalise": "Finalizar",
+    "save": "Guardar borrador",
+    "finalise": "Registrar QSO",
     "saved": "Guardado",
     "finalNote": "Finalizado: este registro ya no se puede cambiar.",
     "freqNone": "Frecuencia no disponible",
@@ -618,7 +623,9 @@
       "rstRcvd": "RST recibido",
       "name": "Nombre",
       "qth": "QTH"
-    }
+    },
+    "titleWith": "QSO con",
+    "band": "Banda"
   },
   "logbook": {
     "title": "Libro de guardia",

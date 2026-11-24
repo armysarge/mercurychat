@@ -129,7 +129,8 @@
     "bytes": "{used} / {max} octets",
     "hint": "Ctrl+Entrée envoie · Entrée ajoute une ligne",
     "send": "Envoyer",
-    "tooLong": "Un message ne peut pas dépasser {max} octets."
+    "tooLong": "Un message ne peut pas dépasser {max} octets.",
+    "attach": "Joindre un fichier"
   },
   "conversations": {
     "title": "Historique",
@@ -214,7 +215,11 @@
     "simulator": "Simulateur (sans radio)",
     "builtIn": "Mercury intégré",
     "mercuryAt": "Mercury à {host}:{port}",
-    "chooseStation": "Choisissez une station dans Réglages."
+    "chooseStation": "Choisissez une station dans Réglages.",
+    "tabsAria": "Panneau de la session",
+    "tabQso": "Fiche QSO",
+    "tabSession": "Session",
+    "noQso": "Aucun QSO en cours. Il commence quand une liaison s'établit."
   },
   "window": {
     "minimise": "Réduire",
@@ -607,8 +612,8 @@
     "myPower": "Ma puissance",
     "freqMhz": "Fréquence (MHz)",
     "notes": "Notes",
-    "save": "Enregistrer la fiche",
-    "finalise": "Finaliser",
+    "save": "Enregistrer le brouillon",
+    "finalise": "Consigner le QSO",
     "saved": "Enregistré",
     "finalNote": "Finalisée : cette fiche ne peut plus être modifiée.",
     "freqNone": "Fréquence indisponible",
@@ -618,7 +623,9 @@
       "rstRcvd": "RST reçu",
       "name": "Nom",
       "qth": "QTH"
-    }
+    },
+    "titleWith": "QSO avec",
+    "band": "Bande"
   },
   "logbook": {
     "title": "Carnet de trafic",

@@ -7,7 +7,7 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
 import MacroPicker from "./MacroPicker.vue";
-import { chat, MAX_BYTES, saveDraft, send } from "../store";
+import { chat, MAX_BYTES, pickFile, saveDraft, send, sendFileBlock } from "../store";
 
 const { t } = useI18n();
 const box = ref<HTMLTextAreaElement | null>(null);
@@ -77,6 +77,20 @@ async function submit() {
 
 <template>
   <form class="composer-box" @submit.prevent="submit">
+    <div class="compose-row">
+    <div class="tools">
+      <MacroPicker @insert="insert" />
+      <button
+        type="button"
+        class="attach quiet icon-btn"
+        :disabled="!chat.open || !!sendFileBlock"
+        :title="sendFileBlock ?? t('composer.attach')"
+        :aria-label="t('composer.attach')"
+        @click="pickFile"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12.5 12.6 20a5 5 0 0 1-7.1-7.1l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.8 1.8 0 0 1-2.5-2.5l7.2-7.2" /></svg>
+      </button>
+    </div>
     <textarea
       ref="box"
       v-model="chat.draft"
@@ -87,12 +101,14 @@ async function submit() {
       :aria-label="chat.open ? t('composer.placeholder', { peer: chat.open }) : t('composer.aria')"
       @keydown.enter.ctrl.prevent="submit"
     ></textarea>
-    <div class="row">
-      <MacroPicker @insert="insert" />
+    <button type="submit" class="primary send" :disabled="!sendable">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12 20 4l-4 16-4.5-6.5L4 12Zm7.5 1.5L20 4" /></svg>
+      {{ t("composer.send") }}
+    </button>
+    </div>
+    <div class="row below">
       <span :class="['mono', 'small', bytes > MAX_BYTES ? 'err' : 'muted']" aria-live="off">{{ t("composer.bytes", { used: bytes, max: MAX_BYTES }) }}</span>
       <span class="muted small hint">{{ t("composer.hint") }}</span>
-      <span class="grow"></span>
-      <button type="submit" class="primary" :disabled="!sendable">{{ t("composer.send") }}</button>
     </div>
     <p v-if="inserted" :class="['macro-note', 'small', inserted.missing.length ? 'warn' : 'muted']" role="status">
       {{ t("macros.insertedBytes", inserted.bytes) }}
@@ -109,7 +125,13 @@ async function submit() {
   border: 1px solid var(--border-strong); border-radius: 18px; background: var(--surface); display: grid; gap: 6px;
 }
 .composer-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong)); }
-.composer { width: 100%; border: 0; background: transparent; resize: none; padding: 4px; line-height: 1.4; overflow-y: hidden; }
+.composer { flex: 1; min-width: 0; border: 0; background: transparent; resize: none; padding: 8px 4px; line-height: 1.4; overflow-y: hidden; }
+.compose-row { display: flex; align-items: flex-end; gap: 8px; }
+.tools { display: flex; align-items: center; gap: 2px; padding-bottom: 2px; }
+.icon-btn { min-height: 0; padding: 8px; border-color: transparent; }
+.icon-btn svg, .send svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.send { display: inline-flex; align-items: center; gap: 6px; border-radius: 12px; }
+.below { gap: 12px; padding-left: 4px; }
 @media (max-height: 560px) {
   .hint { display: none; }
 }

@@ -35,6 +35,9 @@
 //   O16 Heard starts empty at every start; the station heard this run is
 //      listed; the Listen before transmit switch is on by default and off after
 //      turning it off (Settings -> Modem)
+//   O17 the canvas's message and panel details: the time and the double tick
+//      inside the bubble; the composer's macro and attach icons and Send icon;
+//      the panel's QSO record / Session tabs, the 2x2 facts and Save draft / Log QSO
 //   O12 the rail in the canvas's order; Heard on it counts new stations and
 //      opens the Heard list (the count clears)
 // Usage: node lab/windows/m5-operate-check.mjs <mercurychat.exe> <empty data dir> <png out dir> [port]
@@ -193,6 +196,25 @@ try {
   await until(s, `!${menu}`, "Escape closing the header menu");
   results.push(`PASS O9 session header: Hang up and Abort in view; "…" holds ${headItems.join(", ")}`);
 
+  // ---- O17: bubbles, composer and panel tabs.
+  const bub = await s.eval(`(() => {
+    const m = document.querySelector('.transcript [data-direction=out] .bubble');
+    const c = document.querySelector('.composer-box');
+    return {
+      inside: !!m?.querySelector('.meta .when') && !!m?.querySelector('.meta .status'),
+      tick: m?.querySelector('.status')?.textContent.includes('✓✓'),
+      macro: !!c?.querySelector('.macro-toggle svg'), attach: !!c?.querySelector('button.attach svg'), send: !!c?.querySelector('button.send svg'),
+      belowText: c?.querySelector('.row.below')?.textContent.includes('bytes') };
+  })()`);
+  for (const [k, v] of Object.entries(bub)) if (!v) throw new Error(`O17: ${k} is missing: ${JSON.stringify(bub)}`);
+  const tabs = await s.eval("[...document.querySelectorAll('.session-pane [role=tab]')].map(b => b.textContent.trim() + ':' + b.getAttribute('aria-selected')).join(',')");
+  if (tabs !== "QSO record:true,Session:false") throw new Error(`O17: the panel tabs are ${tabs}`);
+  const grid = await s.eval("[...document.querySelectorAll('.qso-card .facts dt')].map(d => d.textContent.trim()).join('|')");
+  if (grid !== "Frequency (MHz)|Band|Bandwidth|Started" && !/^Frequency.*\|Band\|Bandwidth\|/.test(grid)) throw new Error(`O17: the QSO facts are ${grid}`);
+  const btns = await s.eval("[...document.querySelectorAll('.qso-card .row button')].map(b => b.textContent.trim()).join('|')");
+  if (btns !== "Save draft|Log QSO") throw new Error(`O17: the QSO buttons are ${btns}`);
+  results.push(`PASS O17 bubble (time, tick inside), composer icons, panel tabs ${tabs}, QSO facts ${grid}, buttons ${btns}`);
+
   // ---- O15: the session header's words and the QSO record toggle.
   const sub = await s.eval(text(".peer-header .who p"));
   if (!/^Connected · .* · since [0-9][0-9]:[0-9][0-9] UTC$/.test(sub)) throw new Error(`O15: the status line is "${sub}"`);
@@ -279,4 +301,4 @@ try {
   kill(app);
 }
 for (const r of results) console.log(r);
-process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 16 ? 1 : 0);
+process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 17 ? 1 : 0);

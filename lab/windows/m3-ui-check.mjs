@@ -699,7 +699,7 @@ try {
   if (px !== "16.8px") throw new Error(`120% text should be 16.8px, is ${px}`);
   // Status is still said with an icon and a word (not hue alone): Transcript's table.
   const transcriptSrc = readFileSync(join(repo, "apps", "desktop", "src", "components", "Transcript.vue"), "utf8");
-  for (const [state, icon] of [["delivered", "✓"], ["uncertain", "?"], ["failed", "✕"]]) {
+  for (const [state, icon] of [["delivered", "✓✓"], ["uncertain", "?"], ["failed", "✕"]]) {
     if (!new RegExp(`${state}: \{ icon: "${icon}"`).test(transcriptSrc)) throw new Error(`the ${state} status lost its icon`);
   }
   await sleep(900); // the save is debounced

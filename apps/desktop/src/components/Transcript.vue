@@ -21,7 +21,7 @@ const STATUS: Record<string, { icon: string; tone: string }> = {
   queued: { icon: "◷", tone: "muted" },
   submitting: { icon: "↑", tone: "muted" },
   awaiting_receipt: { icon: "…", tone: "muted" },
-  delivered: { icon: "✓", tone: "ok" },
+  delivered: { icon: "✓✓", tone: "ok" },
   failed: { icon: "✕", tone: "err" },
   uncertain: { icon: "?", tone: "warn" },
   received: { icon: "", tone: "muted" },
@@ -31,6 +31,8 @@ const status = (m: ChatMessage) => {
   return s ? { ...s, text: t(`transcript.status.${m.state}`) } : { icon: "", tone: "muted", text: m.state };
 };
 const when = (m: ChatMessage) => (m.receivedUtc ?? m.createdUtc).slice(11, 16) + " UTC";
+/** Not yet on the air: drawn with a dashed border and a progress bar (the canvas's sending bubble). */
+const sending = (m: ChatMessage) => m.direction === "out" && ["queued", "submitting", "awaiting_receipt"].includes(m.state);
 
 const shown = computed(() => {
   const q = props.filter?.trim().toLowerCase();
@@ -170,11 +172,17 @@ watch(
           :class="['msg', it.m.direction]"
         >
           <div v-if="it.day" class="day label">{{ it.day }}</div>
-          <div class="who mono small">{{ it.m.direction === "out" ? t("transcript.you") : it.m.peer }} · {{ when(it.m) }}</div>
-          <div class="body">{{ it.m.body }}</div>
-          <div v-if="it.m.direction === 'out'" :class="['status', status(it.m).tone]">
-            <span aria-hidden="true">{{ status(it.m).icon }}</span> {{ status(it.m).text }}
-            <button v-if="it.m.state === 'uncertain' || it.m.state === 'failed'" class="quiet retry" @click="retry(it.m)">{{ t("transcript.retry") }}</button>
+          <div class="who mono small">{{ it.m.direction === "out" ? t("transcript.you") : it.m.peer }}</div>
+          <div :class="['bubble', { sending: sending(it.m) }]">
+            <div class="body">{{ it.m.body }}</div>
+            <div class="meta">
+              <span class="when mono">{{ when(it.m) }}</span>
+              <span v-if="it.m.direction === 'out'" :class="['status', status(it.m).tone]">
+                <span aria-hidden="true">{{ status(it.m).icon }}</span> {{ status(it.m).text }}
+                <button v-if="it.m.state === 'uncertain' || it.m.state === 'failed'" class="quiet retry" @click="retry(it.m)">{{ t("transcript.retry") }}</button>
+              </span>
+            </div>
+            <div v-if="sending(it.m)" class="progress-bar" role="presentation"><span></span></div>
           </div>
           <details v-if="it.m.state === 'uncertain'" class="why small muted">
             <summary>{{ t("transcript.whyUncertain") }}</summary>
@@ -197,12 +205,19 @@ watch(
 .day { text-align: center; margin: var(--space) 0; }
 .msg.out .day { margin-right: 0; }
 .who { color: var(--text-2); margin-bottom: 4px; }
-.body {
-  display: inline-block; text-align: left; white-space: pre-wrap; overflow-wrap: anywhere;
-  background: var(--bubble-in); padding: 10px 14px; border-radius: 18px 18px 18px 6px; line-height: 1.6;
+.bubble {
+  display: inline-block; text-align: left; max-width: 100%; box-sizing: border-box;
+  background: var(--bubble-in); padding: 10px 14px 6px; border-radius: 18px 18px 18px 6px; border: 1px solid transparent;
 }
-.msg.out .body { background: var(--bubble-out); border-radius: 18px 18px 6px 18px; }
-.status { font-size: calc(12px * var(--font-scale)); margin-top: 4px; display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; align-items: center; }
+.msg.out .bubble { background: var(--bubble-out); border-radius: 18px 18px 6px 18px; }
+/* A message not yet on the air: dashed, with a slow bar. */
+.bubble.sending { border-style: dashed; border-color: var(--text-2); }
+.body { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; }
+.meta { display: flex; flex-wrap: wrap; gap: 4px 10px; justify-content: flex-end; align-items: center; margin-top: 2px; color: var(--text-2); font-size: calc(11px * var(--font-scale)); }
+.status { font-size: calc(11px * var(--font-scale)); display: inline-flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.progress-bar { height: 3px; margin: 6px -4px 2px; border-radius: 3px; background: color-mix(in srgb, var(--text-2) 25%, transparent); overflow: hidden; }
+.progress-bar span { display: block; height: 100%; width: 35%; border-radius: 3px; background: var(--accent); animation: sending-bar 1.4s ease-in-out infinite; }
+@keyframes sending-bar { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
 .retry { padding: 2px 10px; font-size: calc(12px * var(--font-scale)); }
 .why { margin-top: 4px; text-align: left; max-width: 46ch; margin-left: auto; }
 .why summary { cursor: pointer; }
