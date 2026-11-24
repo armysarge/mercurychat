@@ -229,6 +229,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         discovery: Discovery::default(),
         listen_mode: ListenMode::default(),
         broadcasts: Tracker::default(),
+        pending_message: None,
         broadcast_abort: None,
         broadcast_silent: false,
         beacon: BeaconState::new(),
@@ -406,6 +407,8 @@ struct App {
     listen_mode: ListenMode,
     /// The one CQ or beacon awaiting its outcome.
     broadcasts: Tracker,
+    /// The operator's broadcast message, queued and not yet transmitted.
+    pending_message: Option<String>,
     broadcast_abort: Option<BroadcastAbort>,
     /// The closed port cannot take another beacon until an explicit retry or recovery.
     broadcast_silent: bool,
@@ -1255,9 +1258,9 @@ impl App {
             Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
         };
         self.send_broadcast(BroadcastKind::Beacon, payload)?;
-        // What was sent stays in the activity log, for the Broadcasts page.
-        let line = self.discovery.note("message", format!("Message sent: {}", text.trim()));
-        self.emit(line);
+        // It is only "sent" once the modem has keyed it: the activity log (and the
+        // Broadcasts page) hear of it when the beacon is transmitted.
+        self.pending_message = Some(text.trim().to_string());
         Ok(())
     }
 
@@ -1297,7 +1300,20 @@ impl App {
                 self.beacon.submitted();
             }
             let silent = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
-            let line = self.discovery.note("broadcast", activity_text(kind, &outcome));
+            let line = match (kind, &outcome) {
+                // The operator's message went out: one row for it, not a generic beacon line too.
+                (BroadcastKind::Beacon, BroadcastOutcome::Transmitted) if self.pending_message.is_some() => {
+                    let text = self.pending_message.take().unwrap_or_default();
+                    self.discovery.note("message", format!("Message sent: {text}"))
+                }
+                _ => {
+                    // Not confirmed: the message did not (provably) go out, and is not listed as sent.
+                    if kind == BroadcastKind::Beacon && matches!(outcome, BroadcastOutcome::NotConfirmed { .. }) {
+                        self.pending_message = None;
+                    }
+                    self.discovery.note("broadcast", activity_text(kind, &outcome))
+                }
+            };
             self.emit(AppEvent::Broadcast { kind, outcome });
             self.emit(line);
             if silent {
@@ -1541,8 +1557,9 @@ impl App {
             let chosen = self.store.setting(&audio_chosen_key(&p.id)).ok().flatten().is_some();
             let chosen = Arc::new(std::sync::atomic::AtomicBool::new(chosen));
             let rig = crate::app::RigConfig::load(&self.store, &p.id);
-            let rigctld = (rig.freq_control == crate::app::FreqControl::ManagedRigctld)
-                .then(|| std::net::SocketAddr::from(([127, 0, 0, 1], ports.rigctld)));
+            let rigctld =
+                matches!(rig.freq_control, crate::app::FreqControl::ManagedRigctld | crate::app::FreqControl::CatFile)
+                    .then(|| std::net::SocketAddr::from(([127, 0, 0, 1], ports.rigctld)));
             opts.builtin = Some(crate::app::builtin::BuiltInRun {
                 bundle,
                 dir: stations.join(&p.id).join("mercury"),

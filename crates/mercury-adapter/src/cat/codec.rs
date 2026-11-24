@@ -100,6 +100,10 @@ pub fn decode_freq(coding: FreqCoding, chars: &str, step_hz: u64) -> Result<u64,
     if step_hz == 0 || chars.is_empty() {
         return err("no frequency in the reply");
     }
+    // Line noise can arrive as non-ASCII text; slicing it by bytes would panic.
+    if !chars.is_ascii() {
+        return err("the reply holds characters that are not a frequency");
+    }
     let n = match coding {
         FreqCoding::Text => {
             chars.trim().parse::<u64>().map_err(|_| CodecError(format!("{chars:?} is not a frequency")))?
@@ -178,6 +182,13 @@ mod tests {
         assert!(decode_freq(FreqCoding::Bcd, "00A0071400", 1).is_err());
         assert!(decode_freq(FreqCoding::Text, "FA0140", 1).is_err());
         assert!(decode_freq(FreqCoding::Bcd, "004", 1).is_err());
+    }
+
+    #[test]
+    fn non_ascii_in_a_reply_is_an_error_not_a_panic() {
+        // Line noise turned into the replacement character by a lossy text conversion.
+        assert!(decode_freq(FreqCoding::Bcd, "00\u{FFFD}071400", 1).is_err());
+        assert!(decode_freq(FreqCoding::Bcd, "\u{FFFD}\u{FFFD}", 1).is_err());
     }
 
     #[test]

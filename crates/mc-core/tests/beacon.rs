@@ -577,8 +577,12 @@ lines",
         assert!(e.tlvs.contains(&mch_protocol::beacon::Tlv::Status("QRV 14.074, 73 de ZS6PS".into())), "{:?}", e.tlvs);
         // And the message stays in the activity log, for the Broadcasts page.
         let CommandOk::Activity { entries } = h.call(AppCommand::Activity).await.unwrap() else { panic!("activity") };
+        let said: Vec<_> = entries.iter().filter(|e| e.kind == "message").collect();
+        assert_eq!(said.len(), 1, "{entries:?}");
+        assert_eq!(said[0].text, "Message sent: QRV 14.074, 73 de ZS6PS");
+        // One transmission is one row: the generic beacon line is not added beside it.
         assert!(
-            entries.iter().any(|e| e.kind == "message" && e.text == "Message sent: QRV 14.074, 73 de ZS6PS"),
+            !entries.iter().any(|e| e.kind == "broadcast" && e.text.to_lowercase().starts_with("beacon transmitted")),
             "{entries:?}"
         );
     }

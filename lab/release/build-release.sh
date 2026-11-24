@@ -55,7 +55,7 @@ npm --prefix apps/desktop run build
 # ---- 2. Windows NSIS installer
 wb=$(win "$bundle/windows-x64")
 MC_BUNDLE_MANIFEST="$wb/MANIFEST.sha256" cargo tauri build --bundles nsis \
-  --config "{\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"resources\":{\"$wb/\":\"modem/\"}}}"
+  --config "{\"build\":{\"beforeBuildCommand\":\"\"},\"bundle\":{\"resources\":{\"$wb/\":\"modem/\"}}}" \n  -- --no-default-features   # no simulator in a release (M5 §5.6)
 cp target/release/bundle/nsis/*.exe "$out/"
 
 # ---- 3. the .deb

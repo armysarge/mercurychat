@@ -285,3 +285,21 @@ fn the_cat_engine_needs_a_radio_and_a_port_and_keys_like_the_managed_rigctld() {
         mercury_ptt_for(&RigConfig { freq_control: FreqControl::ManagedRigctld, ..c.clone() }, managed),
     );
 }
+
+/// A pasted port is written into Mercury's ini: a line break in it would add a line of its own.
+#[test]
+fn ports_with_control_characters_are_rejected() {
+    for field in ["serialPort", "pttPort", "tcpAddr"] {
+        let mut c = RigConfig::default();
+        match field {
+            "serialPort" => c.cat.serial_port = "COM3\n[main]\nbind_address=0.0.0.0".into(),
+            "pttPort" => c.ptt.ptt_port = "COM4\r\nx=1".into(),
+            _ => c.cat.tcp_addr = "10.0.0.5:4532\n".into(),
+        }
+        let errs = c.validate();
+        assert!(errs.iter().any(|e| e.field == field), "{field}: {errs:?}");
+    }
+    let mut ok = RigConfig::default();
+    ok.cat.serial_port = "COM3".into();
+    assert!(ok.validate().is_empty());
+}

@@ -32,7 +32,10 @@ cat > /build/release.json <<JSON
 JSON
 cat /build/release.json
 export MC_BUNDLE_MANIFEST=/build/modem/MANIFEST.sha256 CARGO_NET_OFFLINE=true
-cargo tauri build --bundles deb --config /build/release.json
+cargo tauri build --bundles deb --config /build/release.json -- --no-default-features   # no simulator in a release (M5 §5.6)
+
+# A release carries no simulator: its fake station must not be in the binary.
+if grep -aq "SIM1 station notes" "$CARGO_TARGET_DIR/release/mercurychat"; then echo "release binary contains the simulator" >&2; exit 1; fi
 
 dir=$CARGO_TARGET_DIR/release
 mkdir -p /out/linux-amd64

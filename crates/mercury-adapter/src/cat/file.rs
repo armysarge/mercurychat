@@ -43,6 +43,9 @@ fn bad<T>(s: impl Into<String>) -> Result<T, FileError> {
 }
 
 /// The rig modes a file can set, as rigctld names them.
+/// The longest reply a file may describe, in characters.
+const MAX_REPLY_CHARS: usize = 256;
+
 pub const MODES: [(&str, &str); 8] = [
     ("USB", "mode_usb"),
     ("PKTUSB", "mode_usb_data"),
@@ -271,6 +274,16 @@ fn build(name: &str, kv: &[(String, String)]) -> Result<Radio, FileError> {
         start: cmds("start")?,
         exit: cmds("exit")?,
     };
+    // The frequency must lie inside the reply the file describes.
+    if radio.read_len == 0 || radio.read_len > MAX_REPLY_CHARS || radio.read_digits == 0 {
+        return bad(format!("read_len must be 1 to {MAX_REPLY_CHARS} and read_digits at least 1"));
+    }
+    match radio.read_start.checked_add(radio.read_digits) {
+        Some(end) if end <= radio.read_len => {}
+        _ => {
+            return bad("the frequency does not lie inside the reply (read_start + read_digits is more than read_len)")
+        }
+    }
     // A radio that cannot set a frequency is no radio: try one.
     radio.set_freq_bytes(14_074_000)?;
     Ok(radio)
@@ -447,6 +460,25 @@ PTTOn=FEF
         assert_eq!(commands("FE94,FD01", false).unwrap().len(), 2);
         assert_eq!(commands("[ALLOW_COMMA]MD0,2;", true).unwrap(), vec![b"MD0,2;".to_vec()]);
         assert_eq!(commands("", false).unwrap(), Vec::<Vec<u8>>::new());
+    }
+
+    #[test]
+    fn a_reply_layout_that_does_not_fit_is_refused_not_trusted() {
+        let ours = builtin().into_iter().find(|r| r.name == "Icom IC-7300").unwrap().to_text();
+        for (key, bad) in [
+            ("read_start", "18446744073709551615"),
+            ("read_len", "100000"),
+            ("read_digits", "30"),
+            ("read_start", "20"),
+        ] {
+            let text: String = ours
+                .lines()
+                .map(|l| if l.starts_with(key) { format!("{key} = {bad}\n") } else { format!("{l}\n") })
+                .collect();
+            let l = parse(&text);
+            assert!(l.radios.is_empty(), "{key} = {bad} was accepted");
+            assert!(!l.skipped.is_empty());
+        }
     }
 
     #[test]

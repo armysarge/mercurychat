@@ -86,10 +86,13 @@ function modemDone(p: StationProfile) {
 // ---- Rig step: the transmit test only on an explicit press (SET-02).
 const keyLeft = ref(0);
 let keyTimer: ReturnType<typeof setInterval> | null = null;
+/** A key request is in progress or the radio is keyed: a second click does nothing. */
+let keying = false;
 async function unkey() {
   if (keyTimer) clearInterval(keyTimer);
   keyTimer = null;
   keyLeft.value = 0;
+  keying = false;
   try {
     await call({ type: "tune", on: false });
   } catch (e) {
@@ -97,13 +100,18 @@ async function unkey() {
   }
 }
 async function keyRadio() {
+  // A second click while the radio is keyed (or being keyed) starts nothing more.
+  if (keying) return;
+  keying = true;
   error.value = "";
   try {
     await call({ type: "tune", on: true });
   } catch (e) {
     error.value = describeError(e);
+    keying = false;
     return;
   }
+  if (keyTimer) clearInterval(keyTimer);
   keyLeft.value = 3;
   keyTimer = setInterval(() => {
     keyLeft.value -= 1;

@@ -79,6 +79,24 @@ pub fn to_dial(shown: u64, offset_hz: i32) -> Result<u64, AppError> {
     Ok(dial as u64)
 }
 
+/// The built-in CAT engine's task. Stopping it is graceful and awaited by
+/// whoever needs the radio's port next: the receiver of [`CatEngine::stop`]
+/// answers once the radio is unkeyed and its port is closed. Dropping it stops
+/// the engine too, without anyone waiting.
+struct CatEngine {
+    stop: Option<tokio::sync::oneshot::Sender<tokio::sync::oneshot::Sender<()>>>,
+}
+
+impl CatEngine {
+    fn stop(mut self) -> tokio::sync::oneshot::Receiver<()> {
+        let (ack, done) = tokio::sync::oneshot::channel();
+        if let Some(s) = self.stop.take() {
+            let _ = s.send(ack);
+        }
+        done
+    }
+}
+
 struct AbortOnDrop(AbortHandle);
 impl Drop for AbortOnDrop {
     fn drop(&mut self) {
@@ -168,7 +186,7 @@ pub(super) struct RigSide {
     daemon: Option<RigctldDaemon>,
     daemon_bridge: Option<AbortOnDrop>,
     /// MercuryChat's own CAT engine, while a profile uses one (it owns the radio's port).
-    cat_engine: Option<AbortOnDrop>,
+    cat_engine: Option<CatEngine>,
     /// The rigctld program (tests); `None`: look for it.
     rigctld_program: Option<Option<PathBuf>>,
     managed_listen: SocketAddr,
@@ -383,8 +401,9 @@ impl App {
         // MercuryChat's own rigctld, if it started one: a new one starts once
         // it has gone (below), or it is stopped at the end.
         r.daemon_bridge = None;
-        // The old engine lets go of the radio's port before a new one opens it.
-        r.cat_engine = None;
+        // The old engine lets go of the radio's port before a new one opens it:
+        // the new engine's task waits for this to be answered.
+        let previous_engine = r.cat_engine.take().map(CatEngine::stop);
         let mut previous = r.daemon.take();
         let same_station = profile_id.is_some() && r.profile_id.as_deref() == profile_id;
         r.profile_id = profile_id.map(String::from);
@@ -438,8 +457,13 @@ impl App {
                         Some(radio) => {
                             let (port, baud) = (cfg.cat.serial_port.trim().to_string(), cfg.cat.baud);
                             let failed = out_tx.clone();
+                            let (stop, stop_rx) = tokio::sync::oneshot::channel::<tokio::sync::oneshot::Sender<()>>();
+                            let previous = previous_engine;
                             // The engine runs for as long as this profile does.
-                            let engine = tokio::spawn(async move {
+                            tokio::spawn(async move {
+                                if let Some(prev) = previous {
+                                    let _ = tokio::time::timeout(Duration::from_secs(3), prev).await;
+                                }
                                 let opened = tokio::task::spawn_blocking(move || {
                                     mercury_adapter::cat::serial::SerialRadio::open(&port, baud)
                                 })
@@ -455,13 +479,23 @@ impl App {
                                     Err(e) => Err(e.to_string()),
                                 };
                                 match started {
-                                    Ok(_server) => std::future::pending::<()>().await,
+                                    Ok(server) => {
+                                        // Until stopped (or dropped), then the radio goes back as found.
+                                        let ack = stop_rx.await.ok();
+                                        server.shutdown().await;
+                                        if let Some(ack) = ack {
+                                            let _ = ack.send(());
+                                        }
+                                    }
                                     Err(reason) => {
                                         let _ = failed.send(RigMsg::Link(RigLink::Lost { reason })).await;
+                                        if let Ok(ack) = stop_rx.await {
+                                            let _ = ack.send(());
+                                        }
                                     }
                                 }
                             });
-                            r.cat_engine = Some(AbortOnDrop(engine.abort_handle()));
+                            r.cat_engine = Some(CatEngine { stop: Some(stop) });
                             Some(RigClient::spawn_every(listen.to_string(), read_every, cmd_rx, out_tx))
                         }
                     }
@@ -541,7 +575,7 @@ impl App {
         self.rig.task = None;
         self.rig.tx = None;
         self.rig.daemon_bridge = None;
-        self.rig.cat_engine = None;
+        let cat = self.rig.cat_engine.take().map(CatEngine::stop);
         let mut daemon = self.rig.daemon.take();
         if keyed {
             if let Some(d) = daemon.take() {
@@ -551,6 +585,10 @@ impl App {
         tokio::spawn(async move {
             if let Some(d) = daemon {
                 d.shutdown().await;
+            }
+            // The radio is unkeyed and its port closed before the app says it is done.
+            if let Some(c) = cat {
+                let _ = tokio::time::timeout(Duration::from_secs(3), c).await;
             }
             let _ = reply.send(Ok(CommandOk::Done));
         });

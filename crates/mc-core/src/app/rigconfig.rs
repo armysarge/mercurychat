@@ -419,6 +419,14 @@ impl RigConfig {
         if self.cat.wait_ms > 1000 {
             errs.push(field("waitMs", "The wait time must be 0 to 1000 ms"));
         }
+        // These go into Mercury's ini and rigctld's command line: one line, no control characters.
+        for (name, value) in
+            [("serialPort", &self.cat.serial_port), ("pttPort", &self.ptt.ptt_port), ("tcpAddr", &self.cat.tcp_addr)]
+        {
+            if value.chars().any(char::is_control) {
+                errs.push(field(name, "This must be one line of plain text"));
+            }
+        }
         if !(1..=4).contains(&self.ptt.cm108_gpio) {
             errs.push(field("cm108Gpio", "The CM108 GPIO pin must be 1 to 4"));
         }

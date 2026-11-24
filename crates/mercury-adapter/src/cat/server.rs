@@ -35,12 +35,28 @@ pub trait Port: Send {
     fn transact(&mut self, cmd: &[u8], reply: Reply) -> io::Result<Vec<u8>>;
 }
 
+/// The engine's lock, even after a panic inside it: a poisoned lock must never
+/// stop a PTT off from reaching the radio.
+fn lock(e: &Mutex<Engine>) -> std::sync::MutexGuard<'_, Engine> {
+    e.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// What a released engine holds in place of the radio's port.
+struct Closed;
+
+impl Port for Closed {
+    fn transact(&mut self, _: &[u8], _: Reply) -> io::Result<Vec<u8>> {
+        Err(io::Error::other("the radio's port is closed"))
+    }
+}
+
 /// The radio on a [`Port`], with what is known of it.
 pub struct Engine {
     radio: Radio,
     port: Box<dyn Port>,
     mode: Option<(String, i32)>,
     ptt: bool,
+    released: bool,
 }
 
 /// rigctld's error numbers.
@@ -52,7 +68,7 @@ const EPROTO: i32 = -8;
 impl Engine {
     /// Sends the radio's start commands.
     pub fn new(radio: Radio, port: Box<dyn Port>) -> Engine {
-        let mut e = Engine { radio, port, mode: None, ptt: false };
+        let mut e = Engine { radio, port, mode: None, ptt: false, released: false };
         let start = e.radio.start.clone();
         for c in &start {
             let _ = e.port.transact(c, Reply::None);
@@ -90,9 +106,29 @@ impl Engine {
         if cmds.is_empty() {
             return Err(ENAVAIL);
         }
+        // Keyed from the first command on: a partial key is still unkeyed on release.
+        if on {
+            self.ptt = true;
+        }
         self.send_all(&cmds)?;
         self.ptt = on;
         Ok(())
+    }
+
+    /// Hand the radio back as it was found (unkeyed, with its exit commands)
+    /// and let go of its port. Safe to call twice.
+    pub fn release(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        let exit = self.radio.exit.clone();
+        let off = self.radio.ptt_off.clone();
+        if self.ptt {
+            let _ = self.send_all(&off);
+        }
+        let _ = self.send_all(&exit);
+        self.port = Box::new(Closed);
     }
 
     fn set_mode(&mut self, mode: &str, passband: i32) -> Result<(), i32> {
@@ -193,13 +229,7 @@ impl Engine {
 
 impl Drop for Engine {
     fn drop(&mut self) {
-        // Hand the radio back as it was found: unkeyed, and with its exit commands.
-        let exit = self.radio.exit.clone();
-        let off = self.radio.ptt_off.clone();
-        if self.ptt {
-            let _ = self.send_all(&off);
-        }
-        let _ = self.send_all(&exit);
+        self.release();
     }
 }
 
@@ -233,16 +263,32 @@ impl CatServer {
         Ok(CatServer { addr, engine, tasks })
     }
 
+    /// Stop serving and wait until it is done: every client ends, the radio is
+    /// unkeyed and given its exit commands, and its port is closed. Only then
+    /// is it safe to open the port again.
+    pub async fn shutdown(self) {
+        let tasks: Vec<JoinHandle<()>> = self.tasks.lock().unwrap().drain(..).collect();
+        for t in &tasks {
+            t.abort();
+        }
+        for t in tasks {
+            let _ = t.await;
+        }
+        let e = self.engine.clone();
+        // Waits for a transaction still in flight, then releases the port.
+        let _ = tokio::task::spawn_blocking(move || lock(&e).release()).await;
+    }
+
     /// The radio's frequency, read through the engine (the app's own reads
     /// share the line with Mercury's).
     pub async fn freq(&self) -> Result<u64, i32> {
         let e = self.engine.clone();
-        tokio::task::spawn_blocking(move || e.lock().unwrap().get_freq()).await.map_err(|_| EIO)?
+        tokio::task::spawn_blocking(move || lock(&e).get_freq()).await.map_err(|_| EIO)?
     }
 
     pub async fn set_freq(&self, hz: u64) -> Result<(), i32> {
         let e = self.engine.clone();
-        tokio::task::spawn_blocking(move || e.lock().unwrap().set_freq(hz)).await.map_err(|_| EIO)?
+        tokio::task::spawn_blocking(move || lock(&e).set_freq(hz)).await.map_err(|_| EIO)?
     }
 }
 
@@ -271,7 +317,7 @@ async fn client(sock: tokio::net::TcpStream, engine: Arc<Mutex<Engine>>) {
             Ok(_) => {}
         }
         let (e, l) = (engine.clone(), line.clone());
-        match tokio::task::spawn_blocking(move || e.lock().unwrap().answer(&l)).await {
+        match tokio::task::spawn_blocking(move || lock(&e).answer(&l)).await {
             Ok(Some(text)) => {
                 if w.write_all(text.as_bytes()).await.is_err() {
                     return;
@@ -490,6 +536,50 @@ mod tests {
         assert_eq!(n, 0);
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(!log.lock().unwrap().keyed, "the engine went with the server and unkeyed the radio");
+    }
+
+    /// A panic in the radio's code must not leave it keyed for good: the next
+    /// PTT off still goes out.
+    #[tokio::test]
+    async fn a_panic_in_the_engine_does_not_stop_ptt_off() {
+        struct Flaky(bool);
+        impl Port for Flaky {
+            fn transact(&mut self, _: &[u8], _: Reply) -> io::Result<Vec<u8>> {
+                if !self.0 {
+                    self.0 = true;
+                    panic!("a bug in a reply parser");
+                }
+                Ok(vec![])
+            }
+        }
+        let e = Engine::new(radio("Icom IC-7300"), Box::new(Flaky(false)));
+        let server = CatServer::start("127.0.0.1:0".parse().unwrap(), e).await.unwrap();
+        let mut c = TcpStream::connect(server.addr).await.unwrap();
+        c.write_all(b"F 7105000\n").await.unwrap();
+        let mut buf = [0u8; 64];
+        let _ = c.read(&mut buf).await; // the connection ends with the panic
+        let mut d = TcpStream::connect(server.addr).await.unwrap();
+        d.write_all(b"T 0\n").await.unwrap();
+        let n =
+            tokio::time::timeout(std::time::Duration::from_secs(2), d.read(&mut buf)).await.expect("answered").unwrap();
+        assert_eq!(&buf[..n], b"RPRT 0\n");
+    }
+
+    /// Stopping the server is awaited: when it returns, the radio is unkeyed and
+    /// its port is closed, so a new engine can open it at once.
+    #[tokio::test]
+    async fn shutdown_returns_with_the_radio_unkeyed_and_its_port_released() {
+        let (e, log) = icom();
+        let server = CatServer::start("127.0.0.1:0".parse().unwrap(), e).await.unwrap();
+        let addr = server.addr;
+        let mut c = TcpStream::connect(addr).await.unwrap();
+        c.write_all(b"T 1\n").await.unwrap();
+        let mut buf = [0u8; 16];
+        let _ = c.read(&mut buf).await.unwrap();
+        assert!(log.lock().unwrap().keyed);
+        server.shutdown().await;
+        assert!(!log.lock().unwrap().keyed, "unkeyed before shutdown returned");
+        assert!(TcpStream::connect(addr).await.is_err(), "no longer listening");
     }
 
     #[tokio::test]
