@@ -203,6 +203,45 @@ MSYS_NO_PATHCONV=1 docker run --rm "${M[@]}" mercurychat-lab:m0 bash /scripts/bu
 - **Release builds** use `build-bundle.sh --latest`: the newest Mercury release and Hamlib release from GitHub (`resolve-latest.sh`), cloned inside the container, and never into the fork. A patch that no longer applies, or a failed check, stops the build. `test-latest.sh <old commit>` tests this without the network.
 - **Contracts** on the bundle's own Mercury: `lab/docker/contract/check-mercury.sh --bundle E:/mc-lab-out/m5/bundle/linux-amd64`.
 
+## 3e. The built-in lab (M5)
+
+`lab/docker/rig/run-builtin-lab.sh` runs the real MercuryChat service, headless (`crates/mc-core/examples/builtin_lab.rs`), with its own Mercury and rigctld from the Linux bundle: Hamlib's dummy rig and crossed PulseAudio null sinks, no RF. Four checks:
+- both stations listen on 127.0.0.1 only;
+- a session carries a 4 KiB file byte-exact;
+- a service killed with `kill -9` leaves no Mercury or rigctld behind;
+- a control port another process holds is named, never adopted.
+
+The commands and what each check proves are in [`docker/rig/M5-checks.md`](docker/rig/M5-checks.md). Expected: `4 of 4` in `summary.txt`.
+
+## 3f. Release builds and clean installs (M5)
+
+`bash lab/release/build-release.sh` builds a release into `E:/mc-lab-out/m5/release/<version>/`:
+1. the built-in modem with `build-bundle.sh --latest` (the newest Mercury and Hamlib), Linux and Windows, with their exact source;
+2. the Windows installer (NSIS, per user, the modem in `modem\`);
+3. the `.deb` (package `mercury-chat`), built in `mercurychat-app-build:jammy` (Ubuntu 22.04) so it installs on Ubuntu 22.04 and 24.04 and Debian 12, with the modem in `/usr/lib/mercurychat`;
+4. the Arch package (`mercurychat`), the `.deb`'s files repackaged by `packaging/arch/PKGBUILD` in `mercurychat-arch-build`;
+5. `THIRD-PARTY.md` at the bundle's versions, the source zips (MercuryChat, the patched Mercury, Hamlib), `LICENSE` and `SHA256SUMS`.
+
+`--pinned` uses the lab pins instead of the latest releases; `--bundle DIR` reuses a modem already built.
+
+The images, once:
+
+```bash
+docker build -f lab/docker/Dockerfile.app-jammy -t mercurychat-app-build:jammy lab/docker   # copies the Rust toolchain from mercurychat-app-build:amd64
+docker build -f lab/docker/Dockerfile.arch -t mercurychat-arch-build lab/docker
+```
+
+**Clean installs:** `bash lab/release/clean-install.sh <image> <package> [<older package>]` installs a `.deb` or Arch package on a bare image and fails unless all of these hold:
+- I1 it installs from the distro's own repositories;
+- I2 `mercury -h` and `rigctld --version` run, with every library resolved;
+- I3 `mercurychat --version` runs headless;
+- I4 the app reports `bundle: verified` and `MANIFEST.sha256` checks;
+- I5 upgrade_keeps_data: N, a marker in the data folder, N+1 over it, the marker kept (without an older package, N is the same package repacked as 0.0.1).
+
+Run it on `ubuntu:22.04`, `ubuntu:24.04`, `debian:bookworm` and `archlinux:latest`. On Windows, `lab/windows/sandbox-install.wsb` does the same for the installer in Windows Sandbox: put the installer in `E:\mc-lab-out\m5\sandbox\in` and open the `.wsb`; the result is in `E:\mc-lab-out\m5\sandbox\out\result.txt`.
+
+**Licences:** `node lab/release/third-party.mjs` writes `THIRD-PARTY.md` and the list Settings → About → Licences shows, from `cargo metadata` and the desktop package-lock, plus Mercury and Hamlib. `apps/desktop/scripts/third-party.test.mjs` (in the gate) fails when the two differ or the list is stale.
+
 ## 4. Desktop shell
 
 ```bash
@@ -224,6 +263,24 @@ MSYS_NO_PATHCONV=1 docker run --rm -v "$PWD:/src:ro" -v mc-app-build-arm64:/buil
 ```
 
 Use `ARCH=amd64` / `build-app-linux.sh amd64` for the x86-64 package.
+These packages are the Pi packaging signal. Release packages are built as in §3f.
+
+### M5 window checks
+
+Build the debug app with its pages, and the fakes, first:
+
+```bash
+npm --prefix apps/desktop run build && cargo build -p mercurychat --features tauri/custom-protocol && cargo build -p mercury-adapter --bins
+```
+
+Each check takes `<mercurychat.exe> <empty data dir>` (and a PNG folder where shown), launches the window on its own DevTools port, and prints one PASS or FAIL line per check:
+- `m5-ui-check.mjs`: the built-in modem with a fake bundle (`MC_BUNDLE_DIR`, debug builds only): versions shown, a taken port, the diagnostics preview, About → Licences;
+- `m5-wizard-check.mjs … <png dir>`: the first-run wizard, resumed after a restart, with nothing transmitted;
+- `m5-operate-check.mjs … <png dir>`: the Operate screens after the design canvas, and the station panel that drops from the header's station pill;
+- `m5-responsive.mjs … <png dir>`: every main view at 768×1024, 1024×768 and 1366×768, failing on any sideways scroll (`responsive.mjs`);
+- `m5-a11y-check.mjs … <png dir>`: Tab order and traps, accessible names, AA contrast in the dark and light themes, and 150 %/200 % zoom (`a11y.mjs`).
+
+`m2-ui-check.mjs` predates M3's Receive only and no longer passes; the M3, M3c, M4 and M5 checks cover its ground.
 
 ## 5. Raspberry Pi
 

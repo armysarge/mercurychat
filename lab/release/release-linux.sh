@@ -13,7 +13,8 @@ test -f apps/desktop/dist/index.html || { echo "FAIL apps/desktop/dist missing: 
 test -f /bundle/MANIFEST.sha256 || { echo "FAIL no built-in modem at /bundle" >&2; exit 2; }
 export CARGO_TARGET_DIR=/build/target CARGO_HOME=/build/cargo-home
 mkdir -p "$CARGO_HOME/registry"
-[ -d "$CARGO_HOME/registry/cache" ] || cp -r /hostreg/cache /hostreg/index "$CARGO_HOME/registry/"
+# Refreshed every run (-u copies only what is newer): a copy taken once goes stale when a crate is added.
+cp -ru /hostreg/cache /hostreg/index "$CARGO_HOME/registry/"
 if ! command -v cargo-tauri >/dev/null; then
   cargo install tauri-cli --version 2.12.4 --locked --root /tools
 fi

@@ -12,7 +12,8 @@ cd /build/src-builtin
 export CARGO_TARGET_DIR=/build/target
 export CARGO_HOME=/build/cargo-home-m5
 mkdir -p "$CARGO_HOME/registry"
-[ -d "$CARGO_HOME/registry/cache" ] || cp -r /hostreg/cache /hostreg/index "$CARGO_HOME/registry/"
+# Refreshed every run (-u copies only what is newer): a copy taken once goes stale when a crate is added.
+cp -ru /hostreg/cache /hostreg/index "$CARGO_HOME/registry/"
 cargo build --offline --release -p mc-core --example builtin_lab
 mkdir -p /out
 cp "$CARGO_TARGET_DIR/release/examples/builtin_lab" /out/builtin_lab

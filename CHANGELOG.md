@@ -1,5 +1,22 @@
 # Planning changes
 
+## 0.11 — 24 November 2026 (M5 packaging and beta, 0.5.0-beta.1)
+
+- Built M5 on branch `m5`. **Built-in modem:** MercuryChat ships its own Mercury and Hamlib rigctld and runs them itself. Their private `mercury.ini` binds 127.0.0.1 and lets no web page drive the modem, ports are checked before start (a taken port is named, never adopted), and both programs are tied to the app's life: none is left behind, even after a crash.
+- **Always the latest modem in a release:** release builds take the newest Mercury and Hamlib releases (`build-bundle.sh --latest`); the lab uses pins (Hamlib 4.7.2, Mercury 1.9.25 33efac4 + 0001 + 0002). Every shipped program is checked at start against a SHA-256 manifest compiled into the app, and their versions are shown next to every mention of Mercury and Hamlib.
+- **My own Mercury:** a profile can still use an existing Mercury, with "Check the connection" per endpoint. Release builds leave out the simulator.
+- **First-run wizard:** welcome, station, modem, audio (a receive check and "Key the radio for 3 s"), rig (serial ports listed from the system, a read-only CAT test), how you operate, a tour and done. It resumes after a restart, every step but three can be skipped and revisited from Settings, and the new station stays in Receive only until "How you operate" is passed.
+- **Exports:** the logbook as ADIF 3.1.4 (mode DYNAMIC, with an application field MERCURY; checked by a Log4OM-ready sample) or CSV, and a conversation as text.
+- **Diagnostics file:** a zip of the app's logs, the last crash report, Mercury's and rigctld's log tails, the versions and the settings without email or passwords, listed before it is saved. Never a message, a file or the database.
+- **Operate, after the owner's design canvas:** a station pill in the header (callsign, frequency, band, mode and bandwidth) opens the station panel, which replaces the strip under the header; a status pill says where the modem is; an idle station home (dial, bands, spectrum, CQ and Beacon cards); round initials avatars; messenger bubbles.
+- **Packages:** a per-user Windows installer, a `.deb` (`mercury-chat`) for Ubuntu 22.04/24.04 and Debian 12, and an Arch package (`mercurychat`), each with the modem; `mercurychat --version` reports the versions and the modem check headless. Each release carries `THIRD-PARTY.md`, the GPL-3.0 `LICENSE`, the source of MercuryChat, the patched Mercury and Hamlib, and `SHA256SUMS`. Settings → About → Licences lists every component.
+- **Accessibility:** a new window check covers Tab order, accessible names, AA contrast in both themes and 150 %/200 % zoom. It found an empty button on the wizard and window controls pushed off the header at 150 %; both are fixed.
+- **Checks:**
+  - clean installs (install, the modem runs, headless version, manifest, upgrade keeps data) pass on Ubuntu 22.04, Ubuntu 24.04, Debian 12 and Arch;
+  - the contract suite on the bundle's own Mercury: 42 passed;
+  - the window checks: wizard 22, Operate 18, a11y 88, m5-ui 7, responsive 18, m4 7, m3c 7, m3 36.
+- Still open: the Windows installer in Windows Sandbox (the owner), the wizard, CAT and PTT through the built-in rigctld and a session on a real radio (M6), a Log4OM import of the sample, a screen reader, CachyOS, the security and optimization audit before the beta is published, and the version scheme (`0.5.0-beta.1` sorts after `0.5.0` as a `.deb`). Details: docs/M5-progress.md.
+
 ## 0.10 — 23 November 2026 (M4 files)
 
 - Built M4 on branch `m4`. **Files in a session (FIL-01…05):** send a file with "Send file" or by dropping it on the conversation; the other station accepts, declines or asks for more time within 2 minutes. Each file has a card in the conversation, and the new Files view lists them all. A received file is never opened by MercuryChat: "Show in folder" only shows where it is.

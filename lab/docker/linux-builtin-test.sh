@@ -11,5 +11,6 @@ export CARGO_TARGET_DIR=/build/target
 # The host's crate cache, copied in once: no downloads.
 export CARGO_HOME=/build/cargo-home-m5
 mkdir -p $CARGO_HOME/registry
-[ -d $CARGO_HOME/registry/cache ] || cp -r /hostreg/cache /hostreg/index $CARGO_HOME/registry/
+# Refreshed every run (-u copies only what is newer): a copy taken once goes stale when a crate is added.
+cp -ru /hostreg/cache /hostreg/index $CARGO_HOME/registry/
 cargo test --offline -p mc-core --features sim --test builtin 2>&1 | tail -25
