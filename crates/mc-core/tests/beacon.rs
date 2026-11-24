@@ -480,9 +480,11 @@ mod service {
         let net = FakeNet::start().await;
         let dir = tempfile::tempdir().unwrap();
         let (h, mut rx) = ready(dir.path(), profile(&net, None)).await;
-        tokio::time::pause();
         done(&h, AppCommand::SetBeacon { on: true }).await;
         assert!(beacon(&h).await.active);
+        // The clock runs for real until the modem is back: with it paused, the
+        // five re-attach attempts (1 to 8 s apart) all ran within a few ms, before
+        // the fake Mercury had let go of the killed connection (CI on Linux).
         net.kill_client(0); // Mercury closes our sockets
         state(&mut rx, ModemState::Recovering).await;
         let b = beacon(&h).await;
@@ -491,6 +493,7 @@ mod service {
         state(&mut rx, ModemState::Ready).await;
         let b = beacon(&h).await;
         assert!(!b.active && b.preferred && b.next_due_utc.is_none(), "{b:?}");
+        tokio::time::pause();
         advance(35 * MIN).await;
         assert_eq!(sent(&net), 0, "a recovered modem is not beaconing until you say so");
         // Arming again is explicit and works.

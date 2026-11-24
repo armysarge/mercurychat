@@ -2,7 +2,7 @@
 // THIRD-PARTY.md and apps/desktop/src/thirdParty.json (Settings → About →
 // Licences), M5 Task 12: every component a release ships, with its licence.
 //   - Rust crates: the normal (not build or dev) dependencies of the
-//     `mercurychat` package, from `cargo metadata --offline`, both platforms;
+//     `mercurychat` package, from `cargo metadata` (every platform: it may fetch what the cache lacks);
 //   - the window's npm packages: apps/desktop/package-lock.json, dev ones left out;
 //   - the built-in modem by hand: Mercury (and the FreeDV code in it), Hamlib,
 //     at the versions in BUILD.txt ($MC_BUNDLE_BUILD, a release) or the lab pins;
@@ -19,7 +19,7 @@ const check = process.argv.includes("--check");
 
 function rustCrates() {
   const meta = JSON.parse(
-    execFileSync("cargo", ["metadata", "--format-version", "1", "--offline", "--locked"], { cwd: root, maxBuffer: 64 << 20 }).toString(),
+    execFileSync("cargo", ["metadata", "--format-version", "1", "--locked"], { cwd: root, maxBuffer: 64 << 20 }).toString(),
   );
   const byId = new Map(meta.packages.map((p) => [p.id, p]));
   const nodes = new Map(meta.resolve.nodes.map((n) => [n.id, n]));
