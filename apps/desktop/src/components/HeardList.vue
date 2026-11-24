@@ -56,6 +56,8 @@ function provenance(r: Reading<number>): string {
   return t("heard.fromAged", { source: r.source, at, age: (r.ageMs / 1000).toFixed(1) });
 }
 const mhz = (hz: number) => (hz / 1e6).toFixed(3);
+/** An SNR with its sign (+3.5, −2.0), one decimal. */
+const signed = (db: number) => (db > 0 ? "+" : "") + db.toFixed(1);
 
 /** The station a QSY suggestion is being written to (B5), or "": set from the station menu. */
 const suggesting = computed({ get: () => qsyTo.callsign, set: (v: string) => (qsyTo.callsign = v) });
@@ -120,7 +122,7 @@ async function pick(h: HeardStation) {
           </span>
           <span class="line small muted meta">
             <span v-if="h.grid" class="mono grid" :title="t('heard.gridTitle')">{{ h.grid }}</span>
-            <span v-if="h.snr" class="mono snr" :title="provenance(h.snr)">{{ t("heard.snr", { db: h.snr.value.toFixed(1) }) }}</span>
+            <span v-if="h.snr" class="mono snr" :title="provenance(h.snr)">{{ t("heard.snr", { db: signed(h.snr.value) }) }}</span>
             <span v-if="h.freq" class="mono freq" :title="provenance(h.freq)">{{ t("heard.mhz", { mhz: mhz(h.freq.value) }) }}</span>
             <span v-if="h.band" class="mono band">{{ h.band }}</span>
             <span v-if="h.offsetHz" class="mono offset" :title="provenance(h.offsetHz)">{{ t("heard.offset", { hz: h.offsetHz.value.toFixed(1) }) }}</span>
@@ -186,5 +188,6 @@ async function pick(h: HeardStation) {
 .star[aria-pressed="false"] { color: var(--text-2); }
 .note { border-top: 1px solid var(--border); padding-top: var(--space); }
 .empty { padding: calc(var(--space) * 0.5); }
+.snr { color: var(--accent); font-weight: 600; }
 </style>
 

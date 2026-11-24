@@ -56,6 +56,8 @@ function preview(c: Conversation): string {
   return c.draft ? t("conversations.draft") + ": " + c.draft.replace(/\s+/g, " ") : "";
 }
 const mhz = (hz: number) => (hz / 1e6).toFixed(3);
+/** An SNR with its sign (+3.5, −2.0), one decimal. */
+const signed = (db: number) => (db > 0 ? "+" : "") + db.toFixed(1);
 
 /** Messages matching the search, newest first (two characters or more). */
 const hits = ref<ChatMessage[]>([]);
@@ -142,6 +144,7 @@ function openEntry() {
               <span v-if="c.uncertain" class="warn">{{ t("conversations.uncertain", c.uncertain) }}</span>
               <span v-if="c.draft && c.lastBody">{{ t("conversations.draft") }}</span>
               <template v-if="heardOf(c.peer)">
+                <span v-if="heardOf(c.peer)?.snr" class="mono snr" :title="t('heard.snrTitle')">{{ t("heard.snr", { db: signed(heardOf(c.peer)?.snr?.value ?? 0) }) }}</span>
                 <span v-if="heardOf(c.peer)?.freq" class="mono">{{ mhz(heardOf(c.peer)?.freq?.value ?? 0) }}</span>
                 <span v-if="heardOf(c.peer)?.band" class="mono">{{ heardOf(c.peer)?.band }}</span>
                 <span>{{ t("conversations.heardTimes", heardOf(c.peer)?.count ?? 0) }}</span>
@@ -205,4 +208,5 @@ function openEntry() {
 .search-hits { display: grid; gap: 4px; border-top: 1px solid var(--border); padding-top: var(--space); }
 .hit { overflow-wrap: anywhere; }
 .note { border-top: 1px solid var(--border); padding-top: var(--space); }
+.snr { color: var(--accent); font-weight: 600; }
 </style>
