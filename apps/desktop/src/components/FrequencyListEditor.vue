@@ -139,10 +139,10 @@ const mhz = (hz: number) => t("freqList.mhz", { mhz: (hz / 1e6).toFixed(4) });
       </label>
       <fieldset class="purposes">
         <legend>{{ t("freqList.purpose") }}</legend>
-        <label v-for="p in PURPOSES" :key="p"><input type="checkbox" :checked="form.purpose.includes(p)" @change="togglePurpose(p, ($event.target as HTMLInputElement).checked)" /> {{ t(`freqList.purposeOpt.${p}`) }}</label>
+        <label v-for="p in PURPOSES" :key="p"><span class="switch"><input type="checkbox" role="switch" :checked="form.purpose.includes(p)" @change="togglePurpose(p, ($event.target as HTMLInputElement).checked)" /><span class="track" aria-hidden="true"></span></span> {{ t(`freqList.purposeOpt.${p}`) }}</label>
       </fieldset>
       <label class="wide">{{ t("freqList.notes") }} <input v-model="form.notes" class="entry-notes" maxlength="500" /></label>
-      <label v-if="freqText && !formBand"><input v-model="form.outOfBand" type="checkbox" class="entry-oob" /> {{ t("freqList.outOfBand") }}</label>
+      <label v-if="freqText && !formBand"><span class="switch"><input v-model="form.outOfBand" type="checkbox" role="switch" class="entry-oob" /><span class="track" aria-hidden="true"></span></span> {{ t("freqList.outOfBand") }}</label>
       <div class="buttons">
         <button type="submit" class="entry-save">{{ form.id ? t("freqList.update") : t("freqList.add") }}</button>
         <button v-if="form.id" type="button" class="quiet" @click="cancel">{{ t("freqList.cancel") }}</button>

@@ -541,9 +541,14 @@ async fn first_start_is_silent_until_a_card_is_chosen() {
 
     let end = Instant::now() + Duration::from_secs(10);
     while st.audio().await.inputs.is_empty() {
-        assert!(Instant::now() < end, "Mercury's device lists");
+        assert!(Instant::now() < end, "the cards listed by mercury -z (owner, 24 Nov)");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+    // Mercury on null lists no cards: these came from `mercury -z`, on this
+    // computer's usual system, with the system defaults preselected.
+    let a = st.audio().await;
+    assert_eq!(a.system, mc_core::app::PREFERRED_SYSTEM, "{a:?}");
+    assert_eq!((a.input.as_str(), a.output.as_str()), ("in1", "out1"), "{a:?}");
     assert_eq!(st.h.call(set_audio()).await.unwrap(), CommandOk::Done);
     snap_until(&st.h, 10, "the card chosen", |s| s.builtin_detail.is_none()).await;
 

@@ -68,7 +68,7 @@ try {
   await sleep(1500);
   rmSync(dataDir, { recursive: true, force: true });
   app = launch(exe, dataDir, port);
-  s = await firstUse(port, "My own Mercury", 40000);
+  s = await firstUse(port, "External Mercury", 40000);
   await s.eval(watchErrors);
   const plain = await missingCard("", "N1");
   results.push(`PASS N1 first-use: "${plain}"`);

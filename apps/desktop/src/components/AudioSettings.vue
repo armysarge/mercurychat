@@ -80,12 +80,6 @@ async function apply() {
     <p v-else-if="!view?.available" class="muted audio-unavailable">{{ t("waterfall.howLost") }}</p>
     <template v-else>
       <div class="grid">
-        <label v-if="systems.length > 1">
-          {{ t("audioSettings.system") }}
-          <select v-model="system" class="audio-system" @change="touched = true">
-            <option v-for="s in systems" :key="s" :value="s">{{ s }}</option>
-          </select>
-        </label>
         <label>
           {{ t("audioSettings.input") }}
           <select v-model="input" class="audio-input" @change="touched = true">
@@ -98,13 +92,28 @@ async function apply() {
             <option v-for="d in view.outputs" :key="d.id" :value="d.id">{{ d.name }}</option>
           </select>
         </label>
-        <label>
-          {{ t("audioSettings.channel") }}
-          <select v-model="channel" class="audio-channel" @change="touched = true">
-            <option v-for="c in CHANNELS" :key="c" :value="c">{{ t(`audioSettings.channelOpt.${c}`) }}</option>
-          </select>
-        </label>
       </div>
+      <!-- Owner, 24 Nov: the sound system is chosen for you (this computer's
+           usual one) and the input channel is almost always Left: both under
+           Advanced, for the rare radio that needs them. -->
+      <details class="advanced">
+        <summary>{{ t("audioSettings.advanced") }}</summary>
+        <div class="grid">
+          <label v-if="systems.length > 1">
+            {{ t("audioSettings.system") }}
+            <select v-model="system" class="audio-system" @change="touched = true">
+              <option v-for="s in systems" :key="s" :value="s">{{ s }}</option>
+            </select>
+          </label>
+          <label>
+            {{ t("audioSettings.channel") }}
+            <select v-model="channel" class="audio-channel" @change="touched = true">
+              <option v-for="c in CHANNELS" :key="c" :value="c">{{ t(`audioSettings.channelOpt.${c}`) }}</option>
+            </select>
+          </label>
+        </div>
+        <p class="muted small">{{ t("audioSettings.advancedHint") }}</p>
+      </details>
       <div class="buttons">
         <button class="audio-apply" @click="apply">{{ t("audioSettings.apply") }}</button>
         <span v-if="sent" class="small muted" role="status">{{ t("audioSettings.sent") }}</span>
@@ -121,4 +130,7 @@ async function apply() {
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16em), 1fr)); gap: 6px 12px; }
 .grid label { display: grid; gap: 2px; }
 .buttons { display: flex; gap: var(--space); align-items: center; }
+.grid select { width: 100%; min-width: 0; }
+.advanced summary { cursor: pointer; color: var(--text-2); }
+.advanced[open] { display: grid; gap: 6px; }
 </style>

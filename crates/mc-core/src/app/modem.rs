@@ -53,6 +53,8 @@ pub struct ModemOptions {
     pub sim_rig: bool,
     /// The active profile's file settings, for the station (M4).
     pub files: FileOptions,
+    /// Mercury's busy detector on attach ("Listen before transmit"); set per task by the actor.
+    pub busy_detect: bool,
     /// A built-in profile's Mercury (M5 §5.4); set per task by the actor.
     pub builtin: Option<BuiltInRun>,
 }
@@ -103,6 +105,8 @@ pub enum ModemCmd {
     },
     /// Call CQ once. Carried out only by an idle modem; refused elsewhere.
     Cq,
+    /// Turn Mercury's busy detector on or off (idle or mid-link: it is a setting).
+    BusyDetect(bool),
     /// Send one wrapped payload on the broadcast port. Idle only, as `Cq`.
     Broadcast {
         kind: BroadcastKind,
@@ -605,6 +609,7 @@ async fn attach(
     let mut cfg = StationConfig::defaults(call, endpoint, station_dir);
     cfg.hello_timeout = opts.radio_hello_timeout.unwrap_or(crate::station::RADIO_HELLO_TIMEOUT);
     opts.files.apply(&mut cfg);
+    cfg.busy_detect = opts.busy_detect;
     let mut station = match open_station(cfg).await {
         Ok(s) => s,
         Err(e) => return r.fault(format!("station data: {e}")).await,
@@ -1116,6 +1121,12 @@ async fn serve(
                 r.send(ReportKind::Tune(result)).await;
                 continue;
             }
+            Idle::Cmd(Some(ModemCmd::BusyDetect(on))) => {
+                if let Err(e) = st.set_busy_detect(on).await {
+                    tracing::warn!("BUSYDETECT {on}: {e}");
+                }
+                continue;
+            }
             Idle::Cmd(Some(ModemCmd::ReopenBroadcast)) => {
                 if broadcast.port().is_none() {
                     broadcast.open(true).await;
@@ -1440,6 +1451,7 @@ async fn link(
                         }
                     }
                     Some(ModemCmd::Tune(TuneArg::Off)) => send_wire(Command::Tune(TuneArg::Off)),
+                    Some(ModemCmd::BusyDetect(on)) => send_wire(Command::BusyDetect(on)),
                     Some(ModemCmd::Peer(m)) => {
                         if ending || aborted || link.chats.try_send(SessionCommand::Peer(m)).is_err() {
                             tracing::warn!("a peer message was dropped: the session is ending or not taking it");

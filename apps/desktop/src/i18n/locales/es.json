@@ -10,7 +10,7 @@
   "nav": {
     "label": "Secciones",
     "operate": "Operar",
-    "conversations": "Chats",
+    "conversations": "Historial",
     "settings": "Ajustes",
     "diagnostics": "Diagnóstico",
     "logbook": "Libro de guardia",
@@ -33,8 +33,11 @@
     "mercury": "Mercury {version}, integrado",
     "hamlib": "Hamlib {version}, integrado",
     "integrityOk": "Todos los archivos están como se compilaron.",
-    "none": "Esta versión no tiene módem integrado: use Mi propio Mercury.",
-    "note": "Antes de iniciarlos, MercuryChat comprueba Mercury y rigctld con la lista hecha al compilar esta versión."
+    "none": "Esta versión no tiene módem integrado: use Mercury externo.",
+    "note": "Antes de iniciarlos, MercuryChat comprueba Mercury y rigctld con la lista hecha al compilar esta versión.",
+    "lbtTitle": "Canal",
+    "lbt": "Escuchar antes de transmitir",
+    "lbtHint": "Mercury comprueba que el canal esté libre antes de llamar, y la fila Canal del inicio de la estación muestra Libre u Ocupado."
   },
   "mode": {
     "noStation": "Sin estación",
@@ -103,7 +106,7 @@
     "peers": "Contactos",
     "call": "Llamar",
     "cancel": "Cancelar",
-    "disconnect": "Desconectar",
+    "disconnect": "Colgar",
     "abort": "Interrumpir (entrega incierta)",
     "session": "Sesión",
     "progressAria": "Progreso de la conexión",
@@ -115,7 +118,9 @@
     "otherSession": "Sesión con {peer} en curso.",
     "export": "Exportar",
     "exportHint": "Guarda esta conversación como archivo de texto, con horas UTC. Los archivos se listan por nombre, no se incluyen.",
-    "exported": "Se exportó {n} mensaje con {peer}. | Se exportaron {n} mensajes con {peer}."
+    "exported": "Se exportó {n} mensaje con {peer}. | Se exportaron {n} mensajes con {peer}.",
+    "subtitleLive": "Conectado · {app} · MCH/1 · {direction} · desde {since} UTC",
+    "qsoRecord": "Registro de QSO"
   },
   "composer": {
     "placeholder": "Mensaje para {peer}",
@@ -127,7 +132,7 @@
     "tooLong": "Un mensaje puede tener como máximo {max} bytes."
   },
   "conversations": {
-    "title": "Chats",
+    "title": "Historial",
     "history": "Historial",
     "callsign": "Indicativo",
     "callsignExample": "p. ej. ZS1ABC",
@@ -230,7 +235,7 @@
     "callsign": "Tu indicativo",
     "useSimulator": "Usar el simulador",
     "simulatorUnavailable": "Simulador: no disponible en esta versión",
-    "existingTitle": "Mi propio Mercury",
+    "existingTitle": "Mercury externo",
     "existingBody": "Un módem Mercury que ya está en marcha, en este ordenador o en otro que indiques. MercuryChat se conecta a sus puertos de control y de datos; responde a las llamadas entrantes salvo que actives Solo recepción.",
     "host": "Host",
     "controlPort": "Puerto de control",
@@ -244,7 +249,7 @@
     "builtInTitleNoVersion": "Mercury integrado",
     "recommended": "Recomendado",
     "builtInBody": "El módem Mercury y Hamlib que vienen con MercuryChat. MercuryChat los inicia y los detiene, solo en este ordenador. Elija la tarjeta de sonido después, en Ajustes → Audio.",
-    "builtInMissing": "No está en esta copia de MercuryChat. Mercury y Hamlib integrados vienen con las versiones del instalador (el instalador de Windows, el .deb y el paquete de Arch). Instale una de ellas, o use abajo un Mercury que ejecute usted mismo.",
+    "builtInMissing": "No está en esta copia de MercuryChat. Mercury y Hamlib integrados vienen con las versiones del instalador (el instalador de Windows, el .deb y el paquete de Arch). Instala una de ellas, o usa abajo un Mercury que ejecutes tú mismo.",
     "advanced": "Avanzado: puertos",
     "uiPort": "Puerto de la interfaz de Mercury",
     "rigctldPort": "Puerto de rigctld",
@@ -930,7 +935,8 @@
     "flrigHint": "FLRig solo ajusta frecuencia y modo; elija un método de PTT aparte.",
     "hamlibBuiltIn": "rigctld: Hamlib {version}, integrado",
     "testOwn": "Guardar y probar (solo lectura)",
-    "testOwnHint": "Guarda y luego lee la radio a través del rigctld propio de MercuryChat. No se cambia nada en la radio."
+    "testOwnHint": "Guarda y luego lee la radio a través del rigctld propio de MercuryChat. No se cambia nada en la radio.",
+    "laterInSettings": "Más tarde, en Ajustes → Equipo: niveles de TX y de sintonía, la lista de frecuencias, un desplazamiento de frecuencia, cada cuánto se lee el equipo, el modo de datos y el registro CAT."
   },
   "freqList": {
     "title": "Lista de frecuencias",
@@ -1000,7 +1006,9 @@
     "sent": "Enviado a Mercury",
     "ok": "El audio de Mercury funciona.",
     "bad": "El audio de Mercury falló: {error}",
-    "hint": "Mercury reinicia su audio con estos dispositivos y solo los conserva si funcionan."
+    "hint": "Mercury reinicia su audio con estos dispositivos y solo los conserva si funcionan.",
+    "advanced": "Avanzado",
+    "advancedHint": "El sistema de sonido es el habitual de este equipo. Cambia el canal de entrada solo si tu radio envía el audio por el canal derecho."
   },
   "info": {
     "refused": {
@@ -1087,13 +1095,14 @@
     "intro": "Su baliza lleva su indicativo y su localizador. Marque más para enviar una baliza ampliada; debe caber en el modo de escucha.",
     "name": "Nombre ({value})",
     "qth": "QTH ({value})",
-    "status": "Línea de estado (hasta 40 bytes)",
-    "left": "Quedan {n} bytes",
-    "over": "{n} bytes de más para el modo de escucha",
+    "status": "Línea de estado",
+    "left": "Espacio libre en tu baliza: {n} bytes",
+    "over": "Tu baliza tiene {n} bytes de más para el modo de escucha",
     "longLeftOut": "Un nombre o QTH de más de 24 bytes no se incluye en la baliza; no se recorta.",
     "save": "Guardar contenido de la baliza",
     "saved": "Contenido de la baliza guardado.",
-    "tooBig": "No cabe: {n} bytes de más."
+    "tooBig": "No cabe: {n} bytes de más.",
+    "statusBytes": "{n} de {max} bytes para la línea de estado"
   },
   "files": {
     "title": "Archivos",
@@ -1179,7 +1188,7 @@
     "settings": {
       "title": "Archivos",
       "maxIncoming": "Archivo entrante más grande (KiB)",
-      "maxNote": "De 1 a 1024 KiB; las ofertas mayores se rechazan antes de que las vea.",
+      "maxNote": "De 1 KiB a 256 MiB (262144 KiB). Las ofertas mayores se rechazan antes de que las veas. El límite real es el tiempo en el aire: a unos 100 B/s, 1 MiB tarda unas 3 horas.",
       "receiveDir": "Carpeta de recepción",
       "receiveDefault": "La carpeta propia de la estación",
       "choose": "Elegir…",
@@ -1241,7 +1250,7 @@
     },
     "audio": {
       "title": "Tarjeta de sonido",
-      "body": "Elige la tarjeta de sonido de la radio para Mercury: su entrada (desde la radio) y su salida (hacia la radio). MercuryChat nunca elige el dispositivo predeterminado por ti.",
+      "body": "Elige la tarjeta de sonido de la radio para Mercury: su entrada (desde la radio) y su salida (hacia la radio). Las tarjetas habituales del equipo vienen preseleccionadas; Mercury no abre ninguna hasta que pulses Aplicar.",
       "rxTitle": "Prueba de recepción",
       "rxBody": "Las señales de la radio aparecen aquí cuando la entrada es la correcta. Una banda plana y oscura significa que no llega audio a Mercury.",
       "txTitle": "Prueba de transmisión",
@@ -1305,7 +1314,11 @@
     "savedFrequencies": "Frecuencias guardadas…",
     "cqTitle": "Llamar CQ",
     "cqBody": "Pide a cualquier estación a la escucha que responda. El CQ solo sale con el módem en reposo.",
-    "cqNow": "Llamar CQ ahora"
+    "cqNow": "Llamar CQ ahora",
+    "tuneHint": "Gira un dígito, o haz clic y escribe, para sintonizar el equipo.",
+    "noRigHint": "Configura el control del equipo en Ajustes → Equipo para sintonizar desde aquí.",
+    "pickFreq": "Frecuencia guardada",
+    "pickPlaceholder": "Elige una frecuencia guardada…"
   },
   "licences": {
     "title": "Licencias",
@@ -1331,10 +1344,10 @@
     "export": "Exportar conversación…",
     "close": "Cerrar conversación",
     "dismiss": "Descartar",
-    "search": "Buscar en esta conversación"
+    "search": "Buscar en el historial"
   },
   "header": {
     "beaconIn": "Baliza en {time}",
-    "beaconInTitle": "Próxima baliza periódica. Cámbiela en la tarjeta Baliza de la estación."
+    "beaconInTitle": "Próxima baliza periódica. Cámbiala en la tarjeta Baliza de la estación."
   }
 }

@@ -22,7 +22,7 @@ import RigSettings from "../components/RigSettings.vue";
 import StationInfo from "../components/StationInfo.vue";
 import ThemePicker from "../components/ThemePicker.vue";
 import { DRAFT_LOCALES, LANGUAGE_SETTINGS, NATIVE_NAMES, type Locale } from "../i18n/locale";
-import { activeProfile, mirror, setFinaliseOnDisconnect, snapshot } from "../store";
+import { activeProfile, mirror, setBusyDetect, setFinaliseOnDisconnect, snapshot } from "../store";
 import Switch from "../components/Switch.vue";
 import { builtin, settingsTabRequest } from "../builtin";
 import type { WizardStep } from "../bindings/WizardStep";
@@ -240,6 +240,13 @@ async function chooseFinalise(on: boolean) {
           <p class="muted small">{{ t("modem.note") }}</p>
         </template>
         <p v-else class="muted">{{ t("modem.none") }}</p>
+      </section>
+      <section class="card stack listen-before-tx" aria-labelledby="h-lbt">
+        <h2 id="h-lbt">{{ t("modem.lbtTitle") }}</h2>
+        <label class="switch-row">
+          <span>{{ t("modem.lbt") }}<span class="hint">{{ t("modem.lbtHint") }}</span></span>
+          <Switch input-class="busy-detect" :checked="snapshot?.busyDetect ?? true" :disabled="!activeProfile" @change="setBusyDetect(($event.target as HTMLInputElement).checked)" />
+        </label>
       </section>
     </div>
     <div v-show="tab === 'rig'" id="panel-rig" class="panel" role="tabpanel" aria-labelledby="tab-rig">

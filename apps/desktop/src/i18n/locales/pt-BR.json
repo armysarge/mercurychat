@@ -10,7 +10,7 @@
   "nav": {
     "label": "Seções",
     "operate": "Operar",
-    "conversations": "Conversas",
+    "conversations": "Histórico",
     "settings": "Configurações",
     "diagnostics": "Diagnóstico",
     "logbook": "Logbook",
@@ -33,8 +33,11 @@
     "mercury": "Mercury {version}, integrado",
     "hamlib": "Hamlib {version}, integrado",
     "integrityOk": "Todos os arquivos estão como foram compilados.",
-    "none": "Esta versão não tem modem integrado: use Meu próprio Mercury.",
-    "note": "Antes de iniciá-los, o MercuryChat confere o Mercury e o rigctld com a lista feita ao compilar esta versão."
+    "none": "Esta versão não tem modem integrado: use Mercury externo.",
+    "note": "Antes de iniciá-los, o MercuryChat confere o Mercury e o rigctld com a lista feita ao compilar esta versão.",
+    "lbtTitle": "Canal",
+    "lbt": "Ouvir antes de transmitir",
+    "lbtHint": "O Mercury confere se o canal está livre antes de chamar, e a linha Canal do início da estação mostra Livre ou Ocupado."
   },
   "mode": {
     "noStation": "Nenhuma estação",
@@ -103,7 +106,7 @@
     "peers": "Contatos",
     "call": "Chamar",
     "cancel": "Cancelar",
-    "disconnect": "Desconectar",
+    "disconnect": "Desligar",
     "abort": "Interromper (entrega incerta)",
     "session": "Sessão",
     "progressAria": "Progresso da conexão",
@@ -115,7 +118,9 @@
     "otherSession": "Sessão com {peer} em andamento.",
     "export": "Exportar",
     "exportHint": "Salva esta conversa como arquivo de texto, com horários UTC. Os arquivos são listados pelo nome, não incluídos.",
-    "exported": "{n} mensagem exportada com {peer}. | {n} mensagens exportadas com {peer}."
+    "exported": "{n} mensagem exportada com {peer}. | {n} mensagens exportadas com {peer}.",
+    "subtitleLive": "Conectado · {app} · MCH/1 · {direction} · desde {since} UTC",
+    "qsoRecord": "Registro do QSO"
   },
   "composer": {
     "placeholder": "Mensagem para {peer}",
@@ -127,7 +132,7 @@
     "tooLong": "Uma mensagem pode ter no máximo {max} bytes."
   },
   "conversations": {
-    "title": "Conversas",
+    "title": "Histórico",
     "history": "Histórico",
     "callsign": "Indicativo",
     "callsignExample": "ex.: ZS1ABC",
@@ -230,7 +235,7 @@
     "callsign": "Seu indicativo",
     "useSimulator": "Usar o simulador",
     "simulatorUnavailable": "Simulador: indisponível nesta versão",
-    "existingTitle": "Meu próprio Mercury",
+    "existingTitle": "Mercury externo",
     "existingBody": "Um modem Mercury que já está em execução, neste computador ou em outro que você indicar. O MercuryChat se conecta às portas de controle e de dados dele; atende as chamadas recebidas, a menos que você ative Somente recepção.",
     "host": "Host",
     "controlPort": "Porta de controle",
@@ -930,7 +935,8 @@
     "flrigHint": "O FLRig só ajusta frequência e modo; escolha um método de PTT separado.",
     "hamlibBuiltIn": "rigctld: Hamlib {version}, integrado",
     "testOwn": "Salvar e testar (somente leitura)",
-    "testOwnHint": "Salva e depois lê o rádio pelo rigctld do próprio MercuryChat. Nada é alterado no rádio."
+    "testOwnHint": "Salva e depois lê o rádio pelo rigctld do próprio MercuryChat. Nada é alterado no rádio.",
+    "laterInSettings": "Depois, em Configurações → Rádio: níveis de TX e de sintonia, a lista de frequências, um deslocamento de frequência, a frequência de leitura do rádio, o modo de dados e o registro CAT."
   },
   "freqList": {
     "title": "Lista de frequências",
@@ -1000,7 +1006,9 @@
     "sent": "Enviado ao Mercury",
     "ok": "O áudio do Mercury está funcionando.",
     "bad": "O áudio do Mercury falhou: {error}",
-    "hint": "O Mercury reinicia o áudio com estes dispositivos e só os mantém se funcionarem."
+    "hint": "O Mercury reinicia o áudio com estes dispositivos e só os mantém se funcionarem.",
+    "advanced": "Avançado",
+    "advancedHint": "O sistema de som é o padrão deste computador. Mude o canal de entrada só se o seu rádio enviar o áudio pelo canal direito."
   },
   "info": {
     "refused": {
@@ -1087,13 +1095,14 @@
     "intro": "Seu beacon leva seu indicativo e seu locator. Marque mais campos para enviar um beacon estendido; ele precisa caber no modo de escuta.",
     "name": "Nome ({value})",
     "qth": "QTH ({value})",
-    "status": "Linha de status (até 40 bytes)",
-    "left": "Restam {n} bytes",
-    "over": "{n} bytes a mais para o modo de escuta",
+    "status": "Linha de status",
+    "left": "Espaço livre no seu beacon: {n} bytes",
+    "over": "Seu beacon tem {n} bytes a mais para o modo de escuta",
     "longLeftOut": "Um nome ou QTH com mais de 24 bytes fica fora do beacon, sem ser cortado.",
     "save": "Salvar conteúdo do beacon",
     "saved": "Conteúdo do beacon salvo.",
-    "tooBig": "Não cabe: {n} bytes a mais."
+    "tooBig": "Não cabe: {n} bytes a mais.",
+    "statusBytes": "{n} de {max} bytes para a linha de status"
   },
   "files": {
     "title": "Arquivos",
@@ -1179,7 +1188,7 @@
     "settings": {
       "title": "Arquivos",
       "maxIncoming": "Maior arquivo recebido (KiB)",
-      "maxNote": "De 1 a 1024 KiB; ofertas maiores são recusadas antes de você vê-las.",
+      "maxNote": "De 1 KiB a 256 MiB (262144 KiB). Ofertas maiores são recusadas antes de você vê-las. O limite real é o tempo no ar: a cerca de 100 B/s, 1 MiB leva cerca de 3 horas.",
       "receiveDir": "Pasta de recebimento",
       "receiveDefault": "A pasta da própria estação",
       "choose": "Escolher…",
@@ -1241,7 +1250,7 @@
     },
     "audio": {
       "title": "Placa de som",
-      "body": "Escolha a placa de som do rádio para o Mercury: a entrada (vinda do rádio) e a saída (para o rádio). O MercuryChat nunca escolhe o dispositivo padrão por você.",
+      "body": "Escolha a placa de som do rádio para o Mercury: a entrada (do rádio) e a saída (para o rádio). As placas habituais do computador vêm pré-selecionadas; o Mercury não abre nenhuma até você tocar em Aplicar.",
       "rxTitle": "Teste de recepção",
       "rxBody": "Os sinais do rádio aparecem aqui quando a entrada está certa. Uma faixa escura e plana significa que nenhum áudio chega ao Mercury.",
       "txTitle": "Teste de transmissão",
@@ -1305,7 +1314,11 @@
     "savedFrequencies": "Frequências salvas…",
     "cqTitle": "Chamar CQ",
     "cqBody": "Peça a qualquer estação na escuta que responda. O CQ só sai com o modem ocioso.",
-    "cqNow": "Chamar CQ agora"
+    "cqNow": "Chamar CQ agora",
+    "tuneHint": "Role um dígito, ou clique e digite, para sintonizar o rádio.",
+    "noRigHint": "Configure o controle do rádio em Configurações → Rádio para sintonizar daqui.",
+    "pickFreq": "Frequência salva",
+    "pickPlaceholder": "Escolha uma frequência salva…"
   },
   "licences": {
     "title": "Licenças",
@@ -1331,7 +1344,7 @@
     "export": "Exportar conversa…",
     "close": "Fechar conversa",
     "dismiss": "Dispensar",
-    "search": "Pesquisar nesta conversa"
+    "search": "Pesquisar no histórico"
   },
   "header": {
     "beaconIn": "Beacon em {time}",

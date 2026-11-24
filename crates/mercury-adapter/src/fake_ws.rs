@@ -40,6 +40,10 @@ struct Shared {
     audio_result: Option<(bool, String)>,
     /// Set once a `set_audio_config` has been carried out.
     audio_now: Option<(bool, String)>,
+    /// The device lists of a real sound system, while `hello` lists none (a
+    /// Mercury started on null audio): what `set_audio_config` opens and then
+    /// republishes, as Mercury does once it is on a real system.
+    devices: Option<Vec<String>>,
 }
 
 impl Default for Shared {
@@ -55,6 +59,7 @@ impl Default for Shared {
             hello: vec![],
             audio_result: None,
             audio_now: None,
+            devices: None,
         }
     }
 }
@@ -117,7 +122,13 @@ fn answer_command(s: &mut Shared, text: &str) -> Vec<String> {
         Some("set_audio_config") => {
             let result = s.audio_result.clone().unwrap_or_else(|| audio_opens(s, &cmd));
             s.audio_now = Some(result.clone());
-            audio_lists_after(s, &cmd, result.0)
+            let frames = audio_lists_after(s, &cmd, result.0);
+            // Off null audio for good: later clients see the real lists.
+            if result.0 && s.devices.is_some() && cmd["value4"].as_str().is_some_and(|x| !x.is_empty() && x != "null") {
+                s.hello = frames.clone();
+                s.devices = None;
+            }
+            frames
         }
         _ => vec![],
     }
@@ -131,7 +142,9 @@ fn audio_opens(s: &Shared, cmd: &serde_json::Value) -> (bool, String) {
     for (kind, key, plane) in [("capture_dev_list", "value", "capture"), ("playback_dev_list", "value2", "playback")] {
         let Some(id) = cmd[key].as_str().filter(|id| !id.is_empty()) else { continue };
         let listed = s
-            .hello
+            .devices
+            .as_ref()
+            .unwrap_or(&s.hello)
             .iter()
             .filter_map(|h| serde_json::from_str::<serde_json::Value>(h).ok())
             .find(|v| v["type"] == kind);
@@ -146,13 +159,27 @@ fn audio_opens(s: &Shared, cmd: &serde_json::Value) -> (bool, String) {
 }
 
 fn audio_lists_after(s: &Shared, cmd: &serde_json::Value, ok: bool) -> Vec<String> {
-    s.hello
-        .iter()
+    // Leaving null audio for a real system: that system's lists, and the system itself.
+    let leaving_null =
+        ok && s.devices.is_some() && cmd["value4"].as_str().is_some_and(|x| !x.is_empty() && x != "null");
+    let lists = if leaving_null { s.devices.as_ref().unwrap() } else { &s.hello };
+    let others = s.hello.iter().filter(|h| !h.contains("_dev_list"));
+    let frames: Vec<&String> = if leaving_null {
+        lists.iter().filter(|h| h.contains("_dev_list")).chain(others).collect()
+    } else {
+        s.hello.iter().collect()
+    };
+    frames
+        .into_iter()
         .filter_map(|h| {
             let mut v: serde_json::Value = serde_json::from_str(h).ok()?;
             let key = match v["type"].as_str()? {
                 "capture_dev_list" => "value",
                 "playback_dev_list" => "value2",
+                "audio_system" if leaving_null => {
+                    v["selected"] = cmd["value4"].clone();
+                    return Some(v.to_string());
+                }
                 _ => return Some(h.clone()),
             };
             if ok {
@@ -228,6 +255,12 @@ impl FakeWs {
     /// device lists, audio system and input channel.
     pub fn set_hello(&self, frames: Vec<String>) {
         self.shared.lock().unwrap().hello = frames;
+    }
+
+    /// A Mercury on null audio: `hello` lists no devices; these are the real
+    /// system's lists that `set_audio_config` opens and then publishes.
+    pub fn set_devices(&self, frames: Vec<String>) {
+        self.shared.lock().unwrap().devices = Some(frames);
     }
 
     /// What a `set_audio_config` brings (default: healthy).

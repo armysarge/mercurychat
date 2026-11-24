@@ -71,6 +71,11 @@ finaliseOnDisconnect: boolean,
  */
 adifMode: string, 
 /**
+ * Mercury's busy detector, "Listen before transmit" (owner, 24 Nov: on by
+ * default): the channel reads Clear or Busy, and Mercury waits for clear.
+ */
+busyDetect: boolean, 
+/**
  * The interface language the operator chose: `system`, `en`, `es`,
  * `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
  */

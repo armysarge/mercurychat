@@ -544,6 +544,12 @@ export async function setAdifMode(mode: string) {
   mirror.patch({ adifMode: mode.trim().toUpperCase() });
 }
 
+/** Mercury's busy detector, "Listen before transmit" (owner, 24 Nov: on by default). */
+export async function setBusyDetect(on: boolean) {
+  await call({ type: "setBusyDetect", on });
+  mirror.patch({ busyDetect: on });
+}
+
 export const macros = reactive({ list: [] as MacroDef[], error: "" });
 
 export async function loadMacros() {

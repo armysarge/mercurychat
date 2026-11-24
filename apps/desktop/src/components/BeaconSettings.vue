@@ -36,6 +36,8 @@ onMounted(() => void load());
 watch(() => activeProfile.value?.id, () => void load());
 
 const statusOrNull = () => status.value.trim() || null;
+/** The status line's own limit (40 bytes), counted apart from the whole beacon's room (owner, 24 Nov). */
+const statusBytes = computed(() => new TextEncoder().encode(status.value.trim()).length);
 const leftText = computed(() => {
   const n = left.value;
   if (n === null) return "";
@@ -74,9 +76,10 @@ async function save() {
   <section v-if="activeProfile" class="card stack beacon-settings" aria-labelledby="h-beacon-settings">
     <h2 id="h-beacon-settings">{{ t("beaconSettings.title") }}</h2>
     <p class="muted small">{{ t("beaconSettings.intro") }}</p>
-    <label class="check"><input v-model="name" type="checkbox" name="beacon-name" /> {{ t("beaconSettings.name", { value: activeProfile.name ?? "" }) }}</label>
-    <label class="check"><input v-model="qth" type="checkbox" name="beacon-qth" /> {{ t("beaconSettings.qth", { value: activeProfile.qth ?? "" }) }}</label>
+    <label class="check"><span class="switch"><input v-model="name" type="checkbox" role="switch" name="beacon-name" /><span class="track" aria-hidden="true"></span></span> {{ t("beaconSettings.name", { value: activeProfile.name ?? "" }) }}</label>
+    <label class="check"><span class="switch"><input v-model="qth" type="checkbox" role="switch" name="beacon-qth" /><span class="track" aria-hidden="true"></span></span> {{ t("beaconSettings.qth", { value: activeProfile.qth ?? "" }) }}</label>
     <label>{{ t("beaconSettings.status") }} <input v-model="status" name="beacon-status" maxlength="40" autocomplete="off" /></label>
+    <p :class="['small', 'status-bytes', statusBytes > 40 ? 'err' : 'muted']">{{ t("beaconSettings.statusBytes", { n: statusBytes, max: 40 }) }}</p>
     <p v-if="left !== null" :class="['small', 'beacon-left', left < 0 ? 'err' : 'muted']" role="status" :data-left="left">{{ leftText }}</p>
     <p class="muted small">{{ t("beaconSettings.longLeftOut") }}</p>
     <p v-if="error" class="err" role="alert">{{ error }}</p>

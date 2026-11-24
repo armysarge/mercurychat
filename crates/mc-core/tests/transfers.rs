@@ -465,7 +465,8 @@ async fn settings_bounds() {
         }
         other => panic!("{other:?}"),
     }
-    for bad in [500, 2 << 20] {
+    // Owner, 24 Nov: no 1 MiB cap; only the 256 MiB memory guard is a bound.
+    for bad in [500, (256 << 20) + 1] {
         let settings = FileSettings { max_incoming: bad, receive_dir: None, photo_default: PhotoSize::Medium };
         let e = a.call(AppCommand::SetFileSettings { settings }).await.unwrap_err();
         assert!(matches!(e, AppError::Validation { .. }), "{bad}: {e:?}");

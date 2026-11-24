@@ -3,10 +3,13 @@
 //! is idle, with Mercury's own verdict written to the activity log.
 
 use super::{conflict, App};
-use crate::app::audio::{AudioWait, AUDIO_CONFIRM, CHANNELS};
+use crate::app::audio::{AudioProbe, AudioWait, AUDIO_CONFIRM, CHANNELS, PREFERRED_SYSTEM};
 use crate::app::contract::{AppError, CommandOk};
 use crate::app::rig::{Activity, RigRefusal};
+use crate::profile::ModemTarget;
 use mercury_adapter::telemetry::{TelemetryCmd, TelemetryLink, TelemetryMsg};
+use std::sync::atomic::Ordering;
+use std::time::Duration;
 use tokio::time::Instant;
 
 fn invalid(field: &str, message: &str) -> AppError {
@@ -18,8 +21,41 @@ fn token_ok(s: &str) -> bool {
 }
 
 impl App {
-    pub(super) fn audio_settings(&self) -> Result<CommandOk, AppError> {
+    pub(super) fn audio_settings(&mut self) -> Result<CommandOk, AppError> {
+        self.audio.collect_probe();
+        self.start_audio_probe();
         Ok(CommandOk::Audio(self.audio.view()))
+    }
+
+    /// Owner, 24 Nov: list the sound cards before one is chosen. A built-in
+    /// Mercury runs on null audio until then (M5 §5.5: no card opened), and
+    /// lists nothing; `mercury -z -x <this computer's usual system>` lists the
+    /// cards and exits, opening none. Off the actor; the next request shows it.
+    fn start_audio_probe(&mut self) {
+        if !self.audio.wants_probe() {
+            return;
+        }
+        let builtin = matches!(self.active_profile().map(|p| p.modem), Some(ModemTarget::BuiltIn { .. }));
+        let Some(bundle) = self.bundle.clone().filter(|_| builtin) else { return };
+        if self.audio.probing.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let (slot, probing) = (self.audio.incoming.clone(), self.audio.probing.clone());
+        tokio::spawn(async move {
+            let found = async {
+                let exe =
+                    tokio::task::spawn_blocking(move || bundle.verify(crate::bundle::MERCURY_EXE)).await.ok()?.ok()?;
+                let mut cmd = mercury_adapter::child::command(&exe);
+                cmd.args(["-z", "-x", PREFERRED_SYSTEM]).stdout(std::process::Stdio::piped());
+                let out = tokio::time::timeout(Duration::from_secs(10), cmd.output()).await.ok()?.ok()?;
+                Some(AudioProbe::from_listing(PREFERRED_SYSTEM, &String::from_utf8_lossy(&out.stdout)))
+            }
+            .await;
+            if let (Some(p), Ok(mut g)) = (found, slot.lock()) {
+                *g = Some(p);
+            }
+            probing.store(false, Ordering::SeqCst);
+        });
     }
 
     pub(super) fn set_audio(

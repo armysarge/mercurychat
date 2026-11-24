@@ -13,7 +13,8 @@ import { useI18n } from "vue-i18n";
 import { claimSpectrum } from "../spectrumDemand";
 import { snapshot } from "../store";
 
-const props = defineProps<{ shown: boolean }>();
+/** `large`: the station home's full-width form (owner, 24 Nov: bigger), open unless closed there. */
+const props = defineProps<{ shown: boolean; large?: boolean }>();
 const { t } = useI18n();
 
 type Frame = { fftSize: number; sampleRate: number; bins: number[] };
@@ -22,12 +23,13 @@ const DB_MAX = -20;
 /** Waterfall rows kept (and drawn): one per forwarded frame. */
 const ROWS = 120;
 
-const KEY = "mc.waterfallOpen";
+const KEY = props.large ? "mc.waterfallOpenHome" : "mc.waterfallOpen";
 const open = ref((() => {
   try {
-    return localStorage.getItem(KEY) === "1";
+    const v = localStorage.getItem(KEY);
+    return props.large ? v !== "0" : v === "1";
   } catch {
-    return false;
+    return !!props.large;
   }
 })());
 watch(open, (v) => {
@@ -191,7 +193,7 @@ const AXIS_DB = [-20, -70, -120];
 </script>
 
 <template>
-  <div :class="['waterfall', { open }]">
+  <div :class="['waterfall', { open, large }]">
     <div class="head">
       <span class="label">{{ t("strip.spectrum") }}</span>
       <button class="quiet wf-toggle small" :aria-expanded="open" :aria-controls="bodyId" @click="open = !open">
@@ -229,6 +231,13 @@ const AXIS_DB = [-20, -70, -120];
 .panel { position: relative; margin: 0; width: 200px; height: 44px; }
 canvas { width: 100%; height: 100%; display: block; background: var(--canvas); border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box; }
 .waterfall-canvas { image-rendering: pixelated; }
+/* The station home's form: the panels stacked, the full width of the card. */
+.waterfall.large { flex-direction: column; align-items: stretch; height: auto; }
+.waterfall.large .head { flex-direction: row; align-items: center; justify-content: space-between; }
+.waterfall.large .panels { flex-direction: column; gap: 8px; }
+.waterfall.large .panel { width: 100%; height: 120px; }
+.waterfall.large .panel + .panel { height: 180px; }
+.waterfall.large .x, .waterfall.large .y { font-size: 10px; }
 .x, .y { position: absolute; pointer-events: none; font-size: 9px; line-height: 1; color: var(--text-2); opacity: 0.85; }
 .x { left: 3px; right: 3px; bottom: 2px; display: flex; justify-content: space-between; }
 .y { top: 2px; bottom: 12px; left: 3px; display: flex; flex-direction: column; justify-content: space-between; }

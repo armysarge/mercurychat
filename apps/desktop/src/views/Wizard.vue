@@ -83,7 +83,7 @@ function modemDone(p: StationProfile) {
   return save({ ...state.value, draftProfileId: p.id, step: next("modem", pathOf(p)) });
 }
 
-// ---- Audio: the transmit test only on an explicit press (SET-02).
+// ---- Rig step: the transmit test only on an explicit press (SET-02).
 const keyLeft = ref(0);
 let keyTimer: ReturnType<typeof setInterval> | null = null;
 async function unkey() {
@@ -225,6 +225,14 @@ const titleOf = (s: WizardStep) => t(`wizard.steps.${s}`);
           <p class="muted small">{{ t("wizard.audio.rxBody") }}</p>
           <Waterfall :shown="true" />
         </section>
+      </template>
+
+      <!-- 5. Rig (built-in) -->
+      <template v-else-if="step === 'rig'">
+        <h1>{{ t("wizard.rig.title") }}</h1>
+        <p class="muted">{{ t("wizard.rig.body") }}</p>
+        <div class="rig-grid"><RigSettings basic /></div>
+        <!-- Owner, 24 Nov: the transmit test belongs with the rig (PTT is set here). -->
         <section class="card stack tx-test">
           <h2>{{ t("wizard.audio.txTitle") }}</h2>
           <p class="muted small">{{ t("wizard.audio.txBody") }}</p>
@@ -234,13 +242,6 @@ const titleOf = (s: WizardStep) => t(`wizard.steps.${s}`);
             <span v-if="keyLeft > 0" class="mono" role="timer" aria-live="assertive">{{ t("wizard.audio.left", { n: keyLeft }) }}</span>
           </div>
         </section>
-      </template>
-
-      <!-- 5. Rig (built-in) -->
-      <template v-else-if="step === 'rig'">
-        <h1>{{ t("wizard.rig.title") }}</h1>
-        <p class="muted">{{ t("wizard.rig.body") }}</p>
-        <div class="rig-grid"><RigSettings /></div>
       </template>
 
       <!-- 6. How you operate -->

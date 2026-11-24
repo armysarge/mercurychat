@@ -30,6 +30,11 @@
 //      chips; SIM1 under "Live now" during the session with the last message
 //      as its preview and a 40 px avatar; Call CQ / Beacon now at the foot,
 //      held during the session with the reason, usable after hanging up
+//   O15 the session header (canvas): "Connected · ... · since HH:MM UTC",
+//      "Hang up", and a "QSO record" toggle whose aria-pressed follows the panel
+//   O16 Heard starts empty at every start; the station heard this run is
+//      listed; the Listen before transmit switch is on by default and off after
+//      turning it off (Settings -> Modem)
 //   O12 the rail in the canvas's order; Heard on it counts new stations and
 //      opens the Heard list (the count clears)
 // Usage: node lab/windows/m5-operate-check.mjs <mercurychat.exe> <empty data dir> <png out dir> [port]
@@ -92,7 +97,9 @@ try {
   const station = await s.eval(text("header .station-pill"));
   const status = await s.eval(text("header .state"));
   if (!station.includes(CALL)) throw new Error(`O2: the station pill says "${station}"`);
-  if (!/Simulator/i.test(status)) throw new Error(`O2: the status pill does not say where the modem is: "${status}"`);
+  // Owner, 24 Nov: the modem's kind is not in the title bar; it is in the capsule's tooltip.
+  if (/Simulator/i.test(status)) throw new Error(`O2: the title bar still names the modem: "${status}"`);
+  if (!/Simulator/i.test(await s.eval("document.querySelector('header .state').title"))) throw new Error("O2: the capsule's tooltip does not say where the modem is");
   results.push(`PASS O2 header: station "${station}"; status "${status}"`);
   await fits("operate-idle");
 
@@ -186,9 +193,20 @@ try {
   await until(s, `!${menu}`, "Escape closing the header menu");
   results.push(`PASS O9 session header: Hang up and Abort in view; "…" holds ${headItems.join(", ")}`);
 
+  // ---- O15: the session header's words and the QSO record toggle.
+  const sub = await s.eval(text(".peer-header .who p"));
+  if (!/^Connected · .* · since [0-9][0-9]:[0-9][0-9] UTC$/.test(sub)) throw new Error(`O15: the status line is "${sub}"`);
+  const hang = await s.eval(text(".peer-header button.disconnect"));
+  if (hang !== "Hang up") throw new Error(`O15: the hang-up button says "${hang}"`);
+  const qso = "document.querySelector('.peer-header button.toggle-session')";
+  if ((await s.eval(`${qso}.textContent.trim()`)) !== "QSO record") throw new Error("O15: the panel toggle is not \"QSO record\"");
+  if ((await s.eval(`${qso}.getAttribute('aria-pressed')`)) !== "false") throw new Error("O15: the toggle says pressed with the panel closed");
+
   // ---- O4: the session panel with the QSO record.
-  await s.eval("document.querySelector('button.toggle-session').click()");
+  await s.eval(`${qso}.click()`);
   await until(s, "!!document.querySelector('.session-pane.open .qso-card, .session-pane .qso-card')", "the QSO record");
+  if ((await s.eval(`${qso}.getAttribute('aria-pressed')`)) !== "true") throw new Error("O15: the toggle does not say pressed with the panel open");
+  results.push(`PASS O15 session header: "${sub}"; "Hang up"; "QSO record" toggle pressed with the panel`);
   await sleep(500);
   results.push(`PASS O4 session panel: "${(await s.eval(text(".session-pane"))).slice(0, 120)}…"`);
   await fits("operate-session-panel");
@@ -238,6 +256,21 @@ try {
   await until(s, `['ready','listening'].includes(${pill}) && !!document.querySelector('.station-home')`, "the station home after a restart", 30000);
   if (await s.eval("!!document.querySelector('.peer-header')")) throw new Error("O11: the restart opened a conversation");
   results.push("PASS O11 restart with history: the station home, no conversation opened");
+
+  // ---- O16: Heard is empty after the restart until something is heard; Listen before transmit.
+  await s.eval("document.querySelector('.rail [data-rail=heard]').click()");
+  await until(s, "document.querySelector('#side-tab-heard')?.getAttribute('aria-selected') === 'true'", "the Heard list");
+  const early = await s.eval("document.querySelectorAll('.heard .row[data-callsign]').length");
+  if (early !== 0) throw new Error(`O16: Heard lists ${early} stations at start, before anything was heard`);
+  await until(s, "!!document.querySelector('.heard .row[data-callsign=\"SIM1\"]')", "SIM1 heard again this run", 75000);
+  await s.eval("document.querySelector('.rail [data-rail=settings]').click()");
+  await until(s, "!!document.getElementById('tab-modem')", "Settings");
+  await s.eval("document.getElementById('tab-modem').click()");
+  await until(s, "!!document.querySelector('input.busy-detect')", "the Listen before transmit switch");
+  if (!(await s.eval("document.querySelector('input.busy-detect').checked"))) throw new Error("O16: Listen before transmit is off by default");
+  await s.eval("document.querySelector('input.busy-detect').click()");
+  await until(s, "document.querySelector('input.busy-detect').checked === false", "the switch off");
+  results.push("PASS O16 Heard empty at start, SIM1 listed once heard; Listen before transmit on by default, off when switched");
 } catch (e) {
   results.push(...fit);
   results.push(`FAIL ${e.message}`);
@@ -246,4 +279,4 @@ try {
   kill(app);
 }
 for (const r of results) console.log(r);
-process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 14 ? 1 : 0);
+process.exit(results.some((r) => r.startsWith("FAIL")) || results.length < 16 ? 1 : 0);

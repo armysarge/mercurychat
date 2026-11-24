@@ -73,6 +73,8 @@ button.danger { background: transparent; color: var(--danger); border-color: var
 .switch input:disabled + .track { opacity: 0.5; }
 .switch input:disabled { cursor: default; }
 @media (prefers-reduced-motion: reduce) { .switch .track, .switch .track::after { transition: none; } }
+/* A label holding a switch and its words (owner, 24 Nov: every on/off option is a switch). */
+label:has(> .switch) { display: flex; flex-direction: row; align-items: center; gap: 10px; cursor: pointer; }
 
 /* A settings row with a switch: the words on the left, the switch lined up on
    the right; a hint, when there is one, under the words. */

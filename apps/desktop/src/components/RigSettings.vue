@@ -16,6 +16,7 @@ import {
   BAUDS,
   DATA_MODES,
   defaultRigConfig,
+  withBuiltInDefault,
   FREQ_CONTROLS,
   LINE_STATES,
   LINKS,
@@ -33,6 +34,8 @@ import Switch from "./Switch.vue";
 import { builtin } from "../builtin";
 
 const { t } = useI18n();
+/** `basic`: the wizard's form (owner, 24 Nov: the bare basics); the rest is named as "later in Settings". */
+defineProps<{ basic?: boolean }>();
 const STEPS = ["connect", "caps", "frequency", "mode", "ptt", "owner"] as const;
 const REGIONS = [1, 2, 3];
 const HAMLIB_RELEASES = "https://github.com/Hamlib/Hamlib/releases";
@@ -85,7 +88,7 @@ async function load() {
   try {
     const r = await call({ type: "rigSettings" });
     if (r.type === "rigSettings") {
-      config.value = r.config;
+      config.value = withBuiltInDefault(r.config);
       region.value = r.region;
       schedule.value = r.schedule;
     }
@@ -294,7 +297,7 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
               {{ t("rigSettings.pttPort") }}
               <input v-model="config.ptt.pttPort" class="rig-ptt-port" list="serial-ports" spellcheck="false" :placeholder="t('rigSettings.pttPortHint')" @focus="loadSerialPorts" />
             </label>
-            <label class="check"><input v-model="config.ptt.invert" type="checkbox" class="rig-ptt-invert" /> {{ t("rigSettings.invert") }}</label>
+            <label class="check"><span class="switch"><input v-model="config.ptt.invert" type="checkbox" role="switch" class="rig-ptt-invert" /><span class="track" aria-hidden="true"></span></span> {{ t("rigSettings.invert") }}</label>
           </div>
           <label v-if="boxes.has('cm108')" class="row">
             <span>{{ t("rigSettings.cm108Gpio") }}</span>
@@ -399,7 +402,7 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
           </ol>
         </fieldset>
 
-        <details class="box cat-log" @toggle="logOpen = ($event.target as HTMLDetailsElement).open">
+        <details v-if="!basic" class="box cat-log" @toggle="logOpen = ($event.target as HTMLDetailsElement).open">
           <summary>{{ t("rigSettings.catLog") }}</summary>
           <pre class="log small">{{ catLog.length ? catLog.join("\n") : t("rigSettings.logEmpty") }}</pre>
           <button class="rig-log-copy" :disabled="!catLog.length" @click="copyLog">{{ copied ? t("rigSettings.copied") : t("rigSettings.copy") }}</button>
@@ -416,11 +419,11 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
           <p v-if="activeProfile?.modem.kind === 'builtIn' && builtin?.available" class="hamlib-builtin muted small">
             {{ t("rigSettings.hamlibBuiltIn", { version: builtin.hamlib || "?" }) }}
           </p>
-          <label class="switch-row">
+          <label v-if="!basic" class="switch-row">
             <span>{{ t("rigSettings.restore") }}</span>
             <Switch input-class="rig-restore" :checked="config.restoreOnStartup" @change="config.restoreOnStartup = ($event.target as HTMLInputElement).checked" />
           </label>
-          <div class="grid3">
+          <div v-if="!basic" class="grid3">
             <label>
               {{ t("rigSettings.offset") }}
               <input v-model.number="config.offsetHz" class="rig-offset" type="number" step="1" />
@@ -501,8 +504,9 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
       </div>
     </div>
   </section>
-  <BandLevelsEditor v-if="activeProfile" />
-  <FrequencyListEditor v-if="activeProfile" class="span-all" />
+  <BandLevelsEditor v-if="activeProfile && !basic" />
+  <FrequencyListEditor v-if="activeProfile && !basic" class="span-all" />
+  <p v-if="basic" class="muted small later-in-settings span-all">{{ t("rigSettings.laterInSettings") }}</p>
   <ScheduleEditor v-if="activeProfile" :initial="schedule" />
 </template>
 
@@ -510,7 +514,10 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
 .cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: calc(var(--space) * 2); align-items: start; }
 .box { border: 1px solid var(--border); border-radius: var(--radius); padding: var(--space) calc(var(--space) * 1.5); margin: 0; display: grid; gap: 6px; }
 .box legend { padding: 0 4px; font-weight: 600; }
-.row { display: grid; grid-template-columns: minmax(8em, auto) 1fr; gap: 8px; align-items: center; }
+.row { display: grid; grid-template-columns: minmax(0, 10em) minmax(0, 1fr); gap: 8px; align-items: center; }
+/* Fields take their box's width and shrink with it (owner, 24 Nov: the wizard's rig form at tablet widths). */
+.box input:not([type="checkbox"]):not([type="radio"]), .box select { width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; }
+@media (max-width: 1100px) { .row { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(7.5em, 1fr)); gap: 6px 10px; }
 .grid3 label { display: grid; gap: 2px; }
 .check { display: flex; gap: 6px; align-items: center; align-self: end; }

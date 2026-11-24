@@ -110,7 +110,7 @@ async function exportNow() {
         {{ t("logbook.export.mode") }}
         <input v-model="adifMode" class="adif-mode mono" maxlength="20" spellcheck="false" autocomplete="off" :aria-invalid="!!modeError" @change="saveAdifMode" />
       </label>
-      <label class="check"><input v-model="finalisedOnly" type="checkbox" class="export-final" /> {{ t("logbook.export.finalisedOnly") }}</label>
+      <label class="check"><span class="switch"><input v-model="finalisedOnly" type="checkbox" role="switch" class="export-final" /><span class="track" aria-hidden="true"></span></span> {{ t("logbook.export.finalisedOnly") }}</label>
       <button class="export-logbook" :disabled="exporting || !logbook.qsos.length" @click="exportNow">{{ t("logbook.export.button") }}</button>
       <span v-if="exportNote" class="ok small" role="status">{{ exportNote }}</span>
       <span v-if="exportError" class="err small" role="alert">{{ exportError }}</span>

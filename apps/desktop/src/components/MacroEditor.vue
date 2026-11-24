@@ -78,7 +78,7 @@ async function remove(id: string) {
       <span v-if="errors.name" class="field-error">{{ errors.name }}</span>
       <label>{{ t("macros.body") }} <textarea v-model="draft.body" name="body" rows="3"></textarea></label>
       <span v-if="errors.body" class="field-error">{{ errors.body }}</span>
-      <label class="check"><input v-model="draft.quick" type="checkbox" name="quick" /> {{ t("macros.quick") }}</label>
+      <label class="check"><span class="switch"><input v-model="draft.quick" type="checkbox" role="switch" name="quick" /><span class="track" aria-hidden="true"></span></span> {{ t("macros.quick") }}</label>
       <span class="muted small">{{ t("macros.quickHint") }}</span>
       <div class="row">
         <button type="submit" class="primary">{{ t("macros.save") }}</button>

@@ -58,7 +58,7 @@ const num = (e: Event) => Number((e.target as HTMLInputElement).value);
     </label>
     <label v-if="caps?.canSplit" class="row split">
       <span>{{ t("rigPanel.split") }}</span>
-      <input type="checkbox" :checked="!!rigView?.split" :disabled="!!why('split')" :title="why('split')" @change="setSplit(($event.target as HTMLInputElement).checked)" />
+      <span class="switch"><input type="checkbox" role="switch" :checked="!!rigView?.split" :disabled="!!why('split')" :title="why('split')" @change="setSplit(($event.target as HTMLInputElement).checked)" /><span class="track" aria-hidden="true"></span></span>
     </label>
     <label v-if="caps?.canSetPower" class="row">
       <span>{{ t("rigPanel.rfPower") }}</span>

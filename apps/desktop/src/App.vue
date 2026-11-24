@@ -288,7 +288,6 @@ onUnmounted(() => {
       <!-- The modem's state, the one place it is said (owner, 17 Nov): a long detail is cut with an ellipsis; hover shows it all. -->
       <span class="state" :data-tone="stateTone" role="status" aria-live="polite" :title="stateTitle" data-tauri-drag-region>
         <span :class="['pill', modemState]"><span class="dot" aria-hidden="true"></span>{{ modemLabel }}</span>
-        <span v-if="where" class="where small">{{ where }}</span>
         <span v-if="detail" class="detail muted small">{{ detail }}</span>
       </span>
       <span class="utc mono small muted" :aria-label="t('app.utcAria')" data-tauri-drag-region>{{ utc }}</span>
@@ -391,7 +390,6 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .chevron { color: var(--text-2); }
 .state .pill { display: inline-flex; align-items: center; gap: 6px; }
 .state .pill .dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
-.state .where { color: var(--text-2); min-width: 0; max-width: 30ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .station-mode { display: inline-flex; align-items: center; gap: var(--space); }
 .mode-word { font-weight: 600; color: var(--success); }
 .mode-word.rx { color: var(--warning); }
@@ -406,7 +404,6 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .state[data-tone="warn"] { background: color-mix(in srgb, var(--warning) 12%, var(--surface)); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
 .state[data-tone="danger"] { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
 .state .pill { border: 0; padding: 0; }
-.state .where::before { content: "· "; }
 .beacon-in { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); white-space: nowrap; }
 .beacon-in b { color: var(--text); font-weight: 600; }
 .beacon-in svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
@@ -446,7 +443,7 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 }
 @media (max-width: 1099px) {
   /* 150 % zoom on a 1366 px screen is 911 px: the window controls must still show (Task 13). */
-  .detail, .state .where, .alpha, .utc { display: none; }
+  .detail, .alpha, .utc { display: none; }
   header { gap: var(--space); }
 }
 /* Up to 960 px the sidebar is a drawer (Sidebar.vue): the grid loses its column. */

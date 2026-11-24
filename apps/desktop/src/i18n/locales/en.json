@@ -9,7 +9,7 @@
   "nav": {
     "label": "Sections",
     "operate": "Operate",
-    "conversations": "Conversations",
+    "conversations": "History",
     "settings": "Settings",
     "diagnostics": "Diagnostics",
     "logbook": "Logbook",
@@ -32,8 +32,11 @@
     "mercury": "Mercury {version}, built in",
     "hamlib": "Hamlib {version}, built in",
     "integrityOk": "Every shipped file is as built.",
-    "none": "This build has no built-in modem: use My own Mercury.",
-    "note": "Before starting them, MercuryChat checks Mercury and rigctld against the list made when this version was built."
+    "none": "This build has no built-in modem: use External Mercury.",
+    "note": "Before starting them, MercuryChat checks Mercury and rigctld against the list made when this version was built.",
+    "lbtTitle": "Channel",
+    "lbt": "Listen before transmit",
+    "lbtHint": "Mercury checks the channel is clear before it calls, and the Channel row on the station home shows Clear or Busy."
   },
   "mode": {
     "noStation": "No station",
@@ -102,7 +105,7 @@
     "peers": "Peers",
     "call": "Call",
     "cancel": "Cancel",
-    "disconnect": "Disconnect",
+    "disconnect": "Hang up",
     "abort": "Abort (delivery uncertain)",
     "session": "Session",
     "progressAria": "Connection progress",
@@ -114,7 +117,9 @@
     "otherSession": "Session with {peer} in progress.",
     "export": "Export",
     "exportHint": "Save this conversation as a text file, with UTC times. Files are listed by name, not included.",
-    "exported": "Exported {n} message with {peer}. | Exported {n} messages with {peer}."
+    "exported": "Exported {n} message with {peer}. | Exported {n} messages with {peer}.",
+    "subtitleLive": "Connected · {app} · MCH/1 · {direction} · since {since} UTC",
+    "qsoRecord": "QSO record"
   },
   "composer": {
     "placeholder": "Message to {peer}",
@@ -126,7 +131,7 @@
     "tooLong": "A message can be at most {max} bytes."
   },
   "conversations": {
-    "title": "Conversations",
+    "title": "History",
     "history": "History",
     "callsign": "Callsign",
     "callsignExample": "e.g. ZS1ABC",
@@ -229,7 +234,7 @@
     "callsign": "Your callsign",
     "useSimulator": "Use simulator",
     "simulatorUnavailable": "Simulator: not available in this build",
-    "existingTitle": "My own Mercury",
+    "existingTitle": "External Mercury",
     "existingBody": "A Mercury modem already running, on this computer or one you name. MercuryChat attaches to its control and data ports; it answers incoming calls unless you turn on Receive only.",
     "host": "Host",
     "controlPort": "Control port",
@@ -929,7 +934,8 @@
     "flrigHint": "FLRig sets frequency and mode only; choose a separate PTT method.",
     "hamlibBuiltIn": "rigctld: Hamlib {version}, built in",
     "testOwn": "Save and test (read only)",
-    "testOwnHint": "Saves, then reads from the rig through MercuryChat's own rigctld. Nothing on the rig is changed."
+    "testOwnHint": "Saves, then reads from the rig through MercuryChat's own rigctld. Nothing on the rig is changed.",
+    "laterInSettings": "Later, in Settings → Rig: TX and Tune levels, the frequency list, a frequency offset, how often the rig is read, the data mode and the CAT log."
   },
   "freqList": {
     "title": "Frequency list",
@@ -999,7 +1005,9 @@
     "sent": "Sent to Mercury",
     "ok": "Mercury's audio is working.",
     "bad": "Mercury's audio failed: {error}",
-    "hint": "Mercury restarts its audio with these devices and keeps them only if they work."
+    "hint": "Mercury restarts its audio with these devices and keeps them only if they work.",
+    "advanced": "Advanced",
+    "advancedHint": "The sound system is this computer's usual one. Change the input channel only if your radio sends its audio on the right channel."
   },
   "info": {
     "refused": {
@@ -1086,13 +1094,14 @@
     "intro": "Your beacon carries your callsign and locator. Tick more to send an extended beacon; it must fit the listen mode.",
     "name": "Name ({value})",
     "qth": "QTH ({value})",
-    "status": "Status line (up to 40 bytes)",
-    "left": "{n} bytes left",
-    "over": "{n} bytes too many for the listen mode",
+    "status": "Status line",
+    "left": "Room left in your beacon: {n} bytes",
+    "over": "Your beacon is {n} bytes too long for the listen mode",
     "longLeftOut": "A name or QTH over 24 bytes is left out of the beacon, not cut.",
     "save": "Save beacon content",
     "saved": "Beacon content saved.",
-    "tooBig": "Does not fit: {n} bytes too many."
+    "tooBig": "Does not fit: {n} bytes too many.",
+    "statusBytes": "{n} of {max} bytes for the status line"
   },
   "files": {
     "title": "Files",
@@ -1178,7 +1187,7 @@
     "settings": {
       "title": "Files",
       "maxIncoming": "Largest incoming file (KiB)",
-      "maxNote": "From 1 to 1024 KiB; larger offers are declined before you see them.",
+      "maxNote": "From 1 KiB up to 256 MiB (262144 KiB). Larger offers are declined before you see them. Airtime is the real limit: at about 100 B/s, 1 MiB takes around 3 hours.",
       "receiveDir": "Receive folder",
       "receiveDefault": "The station's own folder",
       "choose": "Choose…",
@@ -1240,7 +1249,7 @@
     },
     "audio": {
       "title": "Sound card",
-      "body": "Choose the radio's sound card for Mercury: its input (from the radio) and output (to the radio). MercuryChat never picks the default device for you.",
+      "body": "Choose the radio's sound card for Mercury: its input (from the radio) and output (to the radio). Your computer's usual cards are preselected; Mercury opens none until you press Apply.",
       "rxTitle": "Receive check",
       "rxBody": "Signals from the radio show here once the input is right. A flat, dark band means no audio is reaching Mercury.",
       "txTitle": "Transmit test",
@@ -1304,7 +1313,11 @@
     "savedFrequencies": "Saved frequencies…",
     "cqTitle": "Call CQ",
     "cqBody": "Ask any station listening to answer. CQ goes out only while the modem is idle.",
-    "cqNow": "Call CQ now"
+    "cqNow": "Call CQ now",
+    "tuneHint": "Scroll a digit, or click it and type, to tune the rig.",
+    "noRigHint": "Set up rig control in Settings → Rig to tune from here.",
+    "pickFreq": "Saved frequency",
+    "pickPlaceholder": "Choose a saved frequency…"
   },
   "licences": {
     "title": "Licences",
@@ -1330,7 +1343,7 @@
     "export": "Export conversation…",
     "close": "Close conversation",
     "dismiss": "Dismiss",
-    "search": "Search this conversation"
+    "search": "Search history"
   },
   "header": {
     "beaconIn": "Beacon in {time}",

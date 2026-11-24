@@ -2,7 +2,7 @@
 // DevTools protocol (simulator only: no RF, no audio device). SIM1 accepts
 // any file after about 2 s; with MC_SIM_PEER_OFFERS=1 it offers notes.txt
 // 5 s into a session and then a 640-px photo (sim::serve_peer_with).
-//   F6 Settings → Files refuses 2 MiB (2048 KiB) and keeps 64 KiB
+//   F6 Settings → Files refuses more than 256 MiB (262145 KiB) and keeps 64 KiB (no 1 MiB cap, owner 24 Nov)
 //   F2 SIM1 offers notes.txt: Accept → Complete, "Show in folder" present
 //      (not clicked: it would open the file manager)
 //   F3 SIM1 offers its photo: Decline → Declined on the card
@@ -116,21 +116,21 @@ try {
   await s.eval(click("Use simulator"));
   await until(s, ready, "the workspace", 30000);
 
-  // ---- F6. Settings → Files: 2 MiB is refused, 64 KiB is kept
+  // ---- F6. Settings → Files: over 256 MiB is refused, 64 KiB is kept
   await s.eval(`${rail("Settings")}.click()`);
   await until(s, "!!document.getElementById('tab-files')", "Settings");
   await s.eval("document.getElementById('tab-files').click()");
   await until(s, "!!document.querySelector('form.file-settings input[name=max-kib]')", "the file settings");
-  await s.eval(setInput("form.file-settings input[name=max-kib]", "2048"));
+  await s.eval(setInput("form.file-settings input[name=max-kib]", "262145"));
   await s.eval("document.querySelector('form.file-settings button[type=submit]').click()");
-  await until(s, "!!document.querySelector('form.file-settings .err')", "the refusal of 2 MiB");
+  await until(s, "!!document.querySelector('form.file-settings .err')", "the refusal of 256 MiB and over");
   const refusal = await s.eval("document.querySelector('form.file-settings .err').textContent.trim()");
   const stored = await s.eval(`${invoke({ type: "fileSettings" })}`);
-  if (stored.maxIncoming !== 65536) throw new Error(`F6: 2 MiB was stored: ${JSON.stringify(stored)}`);
+  if (stored.maxIncoming !== 65536) throw new Error(`F6: 262145 KiB was stored: ${JSON.stringify(stored)}`);
   await s.eval(setInput("form.file-settings input[name=max-kib]", "64"));
   await s.eval("document.querySelector('form.file-settings button[type=submit]').click()");
   await until(s, "!!document.querySelector('form.file-settings .saved')", "64 KiB saved");
-  results.push(`PASS F6 settings: 2048 KiB refused ("${refusal}"), 64 KiB saved`);
+  results.push(`PASS F6 settings: 262145 KiB refused ("${refusal}"), 64 KiB saved`);
 
   // ---- F2. SIM1 offers notes.txt: Accept → Complete, Show in folder present
   await connectSim1();
@@ -162,7 +162,7 @@ try {
   await until(s, "!document.querySelector('form.send-file')", "the dialog closed on Send");
   await until(s, `${card("out", "hello.txt")}?.dataset.state === 'complete'`, "hello.txt complete on SIM1", 30000);
   results.push(`PASS F1 send: size ${facts.size}, on the air ${facts.wire}, airtime ${facts.airtime}; SIM1 took it -> complete`);
-  await s.eval(click("Disconnect")).catch(() => {});
+  await s.eval(click("Hang up")).catch(() => {});
   await noErrors("F1-F3, F6");
 
   // ---- F5. a minor-0 SIM1: Send file is disabled, with the reason
@@ -171,7 +171,7 @@ try {
   const off = await s.eval("(() => { const b = document.querySelector('button.send-file-open'); return [b.disabled, b.title, document.getElementById('send-file-why')?.textContent.trim()]; })()");
   if (!off[0] || off[1] !== "not supported by this station" || off[2] !== "not supported by this station") throw new Error(`F5: ${JSON.stringify(off)}`);
   results.push(`PASS F5 minor 0: Send file disabled, "${off[1]}"`);
-  await s.eval(click("Disconnect")).catch(() => {});
+  await s.eval(click("Hang up")).catch(() => {});
   await noErrors("F5");
 
   // ---- F4. a slow link: Cancel mid-send
@@ -186,7 +186,7 @@ try {
   await until(s, `${card("out", "big.bin")}?.dataset.state === 'cancelled'`, "big.bin cancelled", 30000);
   const at = await s.eval(`${card("out", "big.bin")}.querySelector('.state').textContent.trim()`);
   results.push(`PASS F4 cancel mid-send: the card says "${at}"`);
-  await s.eval(click("Disconnect")).catch(() => {});
+  await s.eval(click("Hang up")).catch(() => {});
   await noErrors("F4");
   results.push("PASS F7 console: no errors from the first screen to the end");
 } catch (e) {

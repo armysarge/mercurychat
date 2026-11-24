@@ -16,6 +16,10 @@
 //   W5 the Modem and Rig steps name the built-in Mercury and Hamlib versions
 //   W6 every step fits 768 and 1024 px wide (responsive.mjs), screenshots kept
 //   W7 no console errors from the first screen to the end
+//   W8 (owner, 24 Nov) the bare basics: the Sound card step has no transmit
+//      test and no sound-system picker; the Rig step starts on the built-in
+//      rigctld, holds the transmit test, and leaves TX/Tune levels, the
+//      frequency list, the offset and the CAT log to Settings (named there)
 // Usage: node lab/windows/m5-wizard-check.mjs <mercurychat.exe> <empty data dir> <png out dir> [port]
 // Build first (debug: MC_BUNDLE_DIR is read only by debug builds):
 //   cargo build -p mercury-adapter --bins
@@ -151,13 +155,23 @@ try {
   results.push("PASS W3 restart on the Sound card step: resumed there, the station still Ready (Receive only)");
 
   // ---- Sound card: the forms and the explicit transmit test (not pressed).
-  await until(s, "!!document.querySelector('.wizard .tx-test button.key-radio') && !!document.querySelector('.wizard .rx-check')", "the sound card step");
+  await until(s, "!!document.querySelector('.wizard .rx-check')", "the sound card step");
+  if (await s.eval("!!document.querySelector('.wizard .tx-test')")) throw new Error("W8: the transmit test is still on the Sound card step");
+  if (await s.eval("!!document.querySelector('.wizard select.audio-system')?.checkVisibility()")) throw new Error("W8: the Sound card step asks for the sound system");
   await fits("audio");
   await press(".wizard .nav .next");
   await at("rig");
 
+  // ---- W8: the rig step's bare basics.
+  await until(s, "document.querySelector('.wizard select.rig-freq-control')?.value === 'managedRigctld'", "the built-in rigctld chosen by default");
+  if (!(await s.eval("!!document.querySelector('.wizard .tx-test button.key-radio')"))) throw new Error("W8: no transmit test on the Rig step");
+  const extra = await s.eval("['.band-levels', '.freq-list-editor', '.cat-log', '.rig-offset', '.rig-read-every'].filter(c => document.querySelector('.wizard ' + c))");
+  if (extra.length) throw new Error(`W8: the Rig step still shows ${extra.join(", ")}`);
+  const later = await s.eval(text(".wizard .later-in-settings"));
+  if (!/TX and Tune levels/.test(later) || !/frequency list/i.test(later)) throw new Error(`W8: the "later in Settings" note says "${later}"`);
+  results.push(`PASS W8 bare basics: transmit test on the Rig step, built-in rigctld by default; later in Settings: "${later.slice(0, 90)}…"`);
+
   // ---- W4 and W5 part 2: the rig step, our own rigctld on the dummy rig.
-  await s.eval(`(() => { const sel = document.querySelector('.wizard select.rig-freq-control'); sel.value = 'managedRigctld'; sel.dispatchEvent(new Event('change')); })()`);
   await until(s, "document.querySelectorAll('#rig-models option').length >= 4", "Hamlib's models from the bundled rigctld", 20000);
   const models = await s.eval("document.querySelectorAll('#rig-models option').length");
   const hamlib = await s.eval(text(".wizard .hamlib-builtin"));

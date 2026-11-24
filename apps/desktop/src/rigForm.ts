@@ -62,3 +62,12 @@ export function defaultRigConfig(): RigConfig {
     hamlibDir: "",
   };
 }
+
+/** Owner, 24 Nov: frequency control starts on the built-in rigctld. A station
+ *  with nothing set up yet (control "none" and no rig model) is offered it in
+ *  the form; it is stored only when the operator saves, so nothing starts by
+ *  itself. A saved choice is kept. */
+export function withBuiltInDefault(c: RigConfig): RigConfig {
+  if (c.freqControl !== "none" || c.cat.model != null) return c;
+  return { ...c, freqControl: "managedRigctld" };
+}

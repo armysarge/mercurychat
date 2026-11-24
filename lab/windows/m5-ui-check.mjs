@@ -8,7 +8,7 @@
 //   B2 a taken port is named; "Use the free set" fixes it
 //   B3 the built-in versions (BUILD.txt) appear next to each mention: the
 //      modem choice, Settings → Rig, Settings → Modem, and About
-//   B4 switching to a My own Mercury profile stops the built-in Mercury
+//   B4 switching to a External Mercury profile stops the built-in Mercury
 //      (its control port closes)
 //   B5 no console errors from the first screen to the end
 //   B6 Settings → About lists the diagnostics file's entries before saving:
@@ -135,9 +135,9 @@ try {
   const about = await s.eval(text("#panel-about .builtin-versions"));
   results.push(`PASS B3 versions: choice "${choice}"; rig "${rig}"; modem "${modem}"; about "${about}"`);
 
-  // ---- B4: My own Mercury stops the built-in one.
+  // ---- B4: External Mercury stops the built-in one.
   await settingsTab("profiles");
-  await until(s, "!!document.querySelector('#panel-profiles form.existing')", "the My own Mercury form");
+  await until(s, "!!document.querySelector('#panel-profiles form.existing')", "the External Mercury form");
   await s.eval(setInput('#panel-profiles form.existing input[name="callsign"]', "ZS6OWN"));
   await s.eval(setInput('#panel-profiles form.existing input[name="controlPort"]', "18900"));
   await s.eval(setInput('#panel-profiles form.existing input[name="dataPort"]', "18901"));

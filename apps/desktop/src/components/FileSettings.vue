@@ -1,6 +1,6 @@
 <script setup lang="ts">
-// Files settings for the active station (M4): the largest incoming file (1 to
-// 1024 KiB, 64 by default), where received files land, and the photo size a
+// Files settings for the active station (M4): the largest incoming file (from
+// 1 KiB to 256 MiB, 64 KiB by default; owner, 24 Nov: no 1 MiB cap), where received files land, and the photo size a
 // send starts at. The core checks the bounds; its refusal is shown as is.
 import { onMounted, ref, watch } from "vue";
 import { useI18n } from "vue-i18n";
@@ -55,7 +55,7 @@ async function save() {
     <form v-if="loaded" class="file-settings stack" novalidate @submit.prevent="save">
       <label class="stack">
         <span class="label">{{ t("files.settings.maxIncoming") }}</span>
-        <input v-model.number="kib" name="max-kib" type="number" min="1" max="1024" step="1" />
+        <input v-model.number="kib" name="max-kib" type="number" min="1" max="262144" step="1" />
         <span class="muted small">{{ t("files.settings.maxNote") }}</span>
       </label>
       <div class="stack">

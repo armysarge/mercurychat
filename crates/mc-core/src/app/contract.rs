@@ -84,6 +84,9 @@ pub struct AppSnapshot {
     pub finalise_on_disconnect: bool,
     /// The MODE an ADIF export writes (default DYNAMIC).
     pub adif_mode: String,
+    /// Mercury's busy detector, "Listen before transmit" (owner, 24 Nov: on by
+    /// default): the channel reads Clear or Busy, and Mercury waits for clear.
+    pub busy_detect: bool,
     /// The interface language the operator chose: `system`, `en`, `es`,
     /// `pt-BR` or `fr` (default `system`). The UI maps `system` itself.
     pub ui_language: String,
@@ -224,6 +227,10 @@ pub enum AppCommand {
     /// digits or '-', stored upper-cased; anything else is refused.
     SetAdifMode {
         mode: String,
+    },
+    /// Turn Mercury's busy detector on or off: at once, and on every attach.
+    SetBusyDetect {
+        on: bool,
     },
     /// Choose the interface language: one of `system`, `en`, `es`, `pt-BR`,
     /// `fr`. Anything else is refused. Kept in the setting `ui.language`.

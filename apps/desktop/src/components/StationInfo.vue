@@ -115,7 +115,7 @@ async function save() {
     <p class="muted small">{{ t("stationInfo.share.intro") }}</p>
     <div class="ticks">
       <label v-for="f in SHARE_FIELDS" :key="f">
-        <input type="checkbox" :name="`share-${f}`" :checked="shared.includes(f)" @change="toggleShare(f, ($event.target as HTMLInputElement).checked)" />
+        <span class="switch"><input type="checkbox" role="switch" :name="`share-${f}`" :checked="shared.includes(f)" @change="toggleShare(f, ($event.target as HTMLInputElement).checked)" /><span class="track" aria-hidden="true"></span></span>
         {{ shareLabel(f) }}
       </label>
     </div>

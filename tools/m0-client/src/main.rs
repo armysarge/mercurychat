@@ -136,6 +136,7 @@ fn station(
         timeouts: Timeouts::default(),
         proto_minor: mch_protocol::MINOR,
         capabilities: mc_core::session::default_capabilities(),
+        busy_detect: false, // the lab client keeps Mercury as configured
     })?)
 }
 

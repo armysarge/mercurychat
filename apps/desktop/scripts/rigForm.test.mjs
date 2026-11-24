@@ -47,3 +47,16 @@ test("defaults_match_the_core", () => {
   assert.deepEqual([d.cat.baud, d.cat.dataBits, d.cat.stopBits, d.cat.waitMs], [9600, 8, 1, 0]);
   assert.deepEqual([d.readEveryS, d.offsetHz, d.ptt.cm108Gpio, d.dataMode], [2, 0, 3, "PKTUSB"]);
 });
+
+// Owner, 24 Nov: frequency control starts on the built-in rigctld. A station
+// with nothing set up yet (no control, no rig model) is offered it; a saved
+// choice, "None" included once a model was picked, is kept.
+test("an_unset_rig_starts_on_the_built_in_rigctld", async () => {
+  const { withBuiltInDefault } = await import("../src/rigForm.ts");
+  assert.equal(withBuiltInDefault(defaultRigConfig()).freqControl, "managedRigctld");
+  const chosen = cfg("flrig");
+  assert.equal(withBuiltInDefault(chosen).freqControl, "flrig");
+  const noneWithModel = cfg("none");
+  noneWithModel.cat.model = 3073;
+  assert.equal(withBuiltInDefault(noneWithModel).freqControl, "none");
+});

@@ -16,6 +16,9 @@ use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::discovery::{self, Discovery};
 use super::events::{AppEvent, EventEnvelope, EventLog, ModemDetail, ModemState, SessionInfo, Since};
 use super::logbook::{self, Qso, Start, FINALISE_SETTING};
+
+/// "Listen before transmit": Mercury's busy detector (owner, 24 Nov), on unless set to "false".
+pub const BUSY_DETECT_SETTING: &str = "channel.busy_detect";
 use super::modem::{self, ModemCmd, ModemHandle, ModemOptions, ModemReport, ReportKind};
 use super::notify::{NotifyPrefs, NOTIFY_SETTING};
 use super::telemetry::{Telemetry, Tuning};
@@ -217,6 +220,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             sim_peer_broadcasts: opts.sim_peer_broadcasts,
             sim_rig: opts.sim_rig,
             files: Default::default(),
+            busy_detect: true,
             builtin: None,
         },
         reports,
@@ -754,6 +758,12 @@ impl App {
             }
             AppCommand::SetFinaliseOnDisconnect { on } => {
                 self.store.set_setting(FINALISE_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
+                Ok(CommandOk::Done)
+            }
+            AppCommand::SetBusyDetect { on } => {
+                self.store.set_setting(BUSY_DETECT_SETTING, if on { "true" } else { "false" }).map_err(storage)?;
+                self.modem_opts.busy_detect = on;
+                let _ = self.command_modem(ModemCmd::BusyDetect(on));
                 Ok(CommandOk::Done)
             }
             AppCommand::SetAdifMode { mode } => {
@@ -1497,6 +1507,7 @@ impl App {
             }
         }
         let mut opts = self.modem_opts.clone();
+        opts.busy_detect = self.busy_detect();
         if let ModemTarget::BuiltIn { ports } = &p.modem {
             let (Some(bundle), Some(stations)) = (self.bundle.clone(), self.modem_opts.stations_root.clone()) else {
                 let why = "the built-in modem is not part of this build".to_string();
@@ -1759,6 +1770,11 @@ impl App {
         qso
     }
 
+    /// "Listen before transmit": on unless the operator turned it off.
+    fn busy_detect(&self) -> bool {
+        self.store.setting(BUSY_DETECT_SETTING).ok().flatten().is_none_or(|v| v != "false")
+    }
+
     /// The stored ADIF mode, or DYNAMIC (a stored value that no longer checks counts as none).
     fn adif_mode(&self) -> String {
         self.store
@@ -1812,6 +1828,7 @@ impl App {
             current_qso: self.qso.as_ref().map(|r| Box::new(Qso::from(r))),
             finalise_on_disconnect: self.finalise_on_disconnect(),
             adif_mode: self.adif_mode(),
+            busy_detect: self.busy_detect(),
             ui_language: self.ui_language(),
             notify_prefs: NotifyPrefs::from_setting(self.store.setting(NOTIFY_SETTING).ok().flatten().as_deref()),
             rig: Box::new(self.rig.policy.view(tokio::time::Instant::now())),

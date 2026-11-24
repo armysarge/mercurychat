@@ -6,7 +6,7 @@
 // The peer, the mode and Hang up / Abort stay in the conversation header so
 // they are always reachable (docs/04 §7); while a link is up the header stays
 // even with no conversation open. The rest is in its "…" (the station menu).
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
 import Avatar from "../components/Avatar.vue";
 import Composer from "../components/Composer.vue";
@@ -19,7 +19,24 @@ import {
 } from "../store";
 
 const { t } = useI18n();
-const toggleSession = () => (app.drawer = app.drawer === "session" ? null : "session");
+/** Wide windows dock the QSO record panel; narrower ones open it as a drawer. */
+const WIDE = "(min-width: 1440px)";
+const wide = ref(window.matchMedia(WIDE).matches);
+const onWide = (e: MediaQueryListEvent) => (wide.value = e.matches);
+onMounted(() => window.matchMedia(WIDE).addEventListener("change", onWide));
+onUnmounted(() => window.matchMedia(WIDE).removeEventListener("change", onWide));
+/** The docked panel can be hidden too (canvas: the "QSO record" toggle); remembered. */
+const read = () => { try { return localStorage.getItem("mc.qsoPanelHidden") === "1"; } catch { return false; } };
+const panelHidden = ref(read());
+const panelShown = computed(() => (wide.value ? !panelHidden.value : app.drawer === "session"));
+function toggleSession() {
+  if (!wide.value) {
+    app.drawer = app.drawer === "session" ? null : "session";
+    return;
+  }
+  panelHidden.value = !panelHidden.value;
+  try { localStorage.setItem("mc.qsoPanelHidden", panelHidden.value ? "1" : "0"); } catch { /* per-viewer convenience only */ }
+}
 
 /** The header's station: the open conversation's, else a live link's (Abort stays reachable). */
 const peer = computed(() => chat.open || (canAbort.value ? session.value?.peer ?? linkPeer.value ?? "" : ""));
@@ -42,7 +59,7 @@ const subtitle = computed(() => {
   const s = session.value;
   if (s && s.peer === peer.value) {
     const direction = t(s.direction === "outgoing" ? "direction.outgoingInline" : "direction.incomingInline");
-    return t("operate.subtitle", { app: s.peerApp ?? t("operate.unknownApp"), direction });
+    return t("operate.subtitleLive", { app: s.peerApp ?? t("operate.unknownApp"), direction, since: s.sinceUtc.slice(11, 16) });
   }
   if (linkPeer.value === peer.value && peer.value) return t("operate.settingUp");
   return t("operate.historyOnly");
@@ -50,7 +67,7 @@ const subtitle = computed(() => {
 </script>
 
 <template>
-  <div class="operate">
+  <div :class="['operate', { 'panel-hidden': wide && panelHidden }]">
     <section class="chat-pane" :aria-label="t('operate.conversationAria')">
       <div v-if="peer" class="peer-header">
         <Avatar :callsign="peer" :live="live" :size="40" />
@@ -63,7 +80,7 @@ const subtitle = computed(() => {
           <button v-else-if="!inSession" class="primary" :disabled="!canCall || !chat.open" @click="placeCall">{{ t("operate.call") }}</button>
           <button class="disconnect" :disabled="!inSession" @click="disconnect">{{ t("operate.disconnect") }}</button>
           <button class="abort danger" :disabled="!canAbort" @click="abort">{{ t("operate.abort") }}</button>
-          <button class="toggle-session quiet" :aria-expanded="app.drawer === 'session'" @click="toggleSession">{{ t("operate.session") }}</button>
+          <button class="toggle-session quiet" :aria-pressed="panelShown" @click="toggleSession">{{ t("operate.qsoRecord") }}</button>
           <button
             class="more quiet"
             aria-haspopup="menu"
@@ -109,7 +126,8 @@ const subtitle = computed(() => {
 .live-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--success); margin-right: 6px; vertical-align: 1px; }
 .peer-header h1 { font-size: calc(20px * var(--font-scale)); font-weight: 600; overflow-wrap: break-word; }
 .actions { justify-content: flex-end; flex-wrap: wrap; margin-left: auto; }
-.toggle-session { display: none; }
+.operate.panel-hidden { grid-template-columns: minmax(0, 1fr); }
+.operate.panel-hidden .session-pane { display: none; }
 .more { font-size: calc(18px * var(--font-scale)); line-height: 1; padding-inline: 12px; }
 .progress { list-style: none; display: flex; flex-wrap: wrap; gap: var(--space); margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border); }
 .progress li { color: var(--text-2); }
@@ -123,7 +141,6 @@ const subtitle = computed(() => {
 
 @media (max-width: 1439px) {
   .operate { grid-template-columns: minmax(0, 1fr); }
-  .toggle-session { display: inline-block; }
   .session-pane {
     position: fixed; top: 0; right: 0; bottom: 0; width: min(320px, 92vw); z-index: 30;
     transform: translateX(100%); visibility: hidden; box-shadow: -8px 0 24px var(--shadow);

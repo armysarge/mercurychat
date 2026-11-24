@@ -31,6 +31,7 @@ node --test apps/desktop/scripts/notify.test.mjs
 node --test apps/desktop/scripts/freqStep.test.mjs
 # Settings → Rig: which boxes show, which PTT choices fit (rigForm.ts).
 node --test apps/desktop/scripts/rigForm.test.mjs
+node --test apps/desktop/scripts/heardRun.test.mjs
 # Quick messages first in the composer's macro menu (quick.ts).
 node --test apps/desktop/scripts/quick.test.mjs
 node --test apps/desktop/scripts/transfers.test.mjs

@@ -33,6 +33,13 @@ const bands = computed(() => {
   return [...seen].map(([band, id]) => ({ band, id }));
 });
 const tuneFreq = (hz: number) => void rigSet({ type: "frequency", hz });
+/** The saved frequency list as a dropdown (owner, 24 Nov): picking one tunes to it. */
+const picked = ref("");
+function pick() {
+  if (picked.value) void tuneToEntry(picked.value);
+  picked.value = "";
+}
+const entryText = (e: { name: string; freqHz: number }) => `${e.name} · ${(e.freqHz / 1e6).toFixed(3)} MHz`;
 function savedFrequencies() {
   settingsTabRequest.value = "rig";
   app.page = "settings";
@@ -50,6 +57,14 @@ function savedFrequencies() {
         <span class="tag mono">{{ shownBandwidth }}</span>
       </div>
       <p class="muted small source">{{ source }}</p>
+      <p class="small tune-hint muted">{{ rigUp && !freqRefusal ? t("home.tuneHint") : t("home.noRigHint") }}</p>
+      <label v-if="rigUi.entries.length" class="freq-pick small">
+        {{ t("home.pickFreq") }}
+        <select v-model="picked" class="saved-frequency" :disabled="!!freqRefusal" :title="freqRefusal || undefined" @change="pick">
+          <option value="" disabled>{{ t("home.pickPlaceholder") }}</option>
+          <option v-for="e in rigUi.entries" :key="e.id" :value="e.id">{{ entryText(e) }}</option>
+        </select>
+      </label>
     </div>
 
     <div class="card bands">
@@ -71,7 +86,7 @@ function savedFrequencies() {
     </div>
 
     <div class="card spectrum">
-      <Waterfall :shown="true" />
+      <Waterfall :shown="true" large />
     </div>
 
     <div class="card cq-card">
@@ -96,7 +111,9 @@ function savedFrequencies() {
 }
 .card { border-radius: 12px; min-width: 0; }
 .dial { grid-area: dial; display: grid; gap: 6px; align-content: start; }
-.dial .big { font-size: calc(34px * var(--font-scale)); line-height: 1.1; }
+.dial .big { font-size: calc(48px * var(--font-scale)); line-height: 1.1; }
+.tune-hint { margin: 0; }
+.freq-pick { display: grid; gap: 4px; color: var(--text-2); max-width: 360px; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .source { margin: 0; }
 .tag { padding: 1px 8px; border-radius: 999px; border: 1px solid var(--border-strong); color: var(--text-2); line-height: 1.5; white-space: nowrap; }

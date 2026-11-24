@@ -279,8 +279,11 @@ struct InFile {
 const REPORT_SETTLE: Duration = Duration::from_millis(250);
 /// Safety margin on top of the file and its wire bytes (M4 C3).
 const DISK_MARGIN: u64 = 1 << 20;
-/// The application's hard ceiling on a file (FIL-02).
-pub const MAX_FILE_CEILING: u64 = 1 << 20;
+/// The largest file MercuryChat handles (owner, 24 Nov: no 1 MiB product cap;
+/// each receiver sets its own limit). A memory guard, not an airtime rule:
+/// files are prepared and compressed in memory. 256 MiB is about a month on
+/// air at 100 B/s.
+pub const MAX_FILE_CEILING: u64 = 256 << 20;
 
 type Verdict = Result<(), (String, String)>;
 

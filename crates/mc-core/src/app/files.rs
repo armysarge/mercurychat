@@ -8,7 +8,7 @@ use ts_rs::TS;
 
 /// The smallest and largest incoming-file limit the operator may set.
 pub const MIN_INCOMING: u64 = 1_024;
-pub const MAX_INCOMING: u64 = 1 << 20;
+pub const MAX_INCOMING: u64 = crate::session::MAX_FILE_CEILING;
 /// An unanswered incoming offer is declined after this (03: 2 min).
 pub const OFFER_WINDOW_S: u32 = 120;
 /// Framing on top of the wire bytes, for the airtime estimate.
@@ -19,7 +19,7 @@ const FRAMING: f64 = 1.10;
 #[serde(rename_all = "camelCase")]
 #[ts(export)]
 pub struct FileSettings {
-    /// The largest incoming file, as it lands on disk (1 KiB to 1 MiB).
+    /// The largest incoming file, as it lands on disk (1 KiB to 256 MiB).
     #[ts(type = "number")]
     pub max_incoming: u64,
     /// Where received files land; `None` is the station's `files/` folder.
@@ -50,7 +50,7 @@ impl FileSettings {
     /// The field in error and why, if any.
     pub fn check(&self) -> Result<(), (&'static str, String)> {
         if !(MIN_INCOMING..=MAX_INCOMING).contains(&self.max_incoming) {
-            return Err(("maxIncoming", "Choose 1 KiB to 1 MiB".into()));
+            return Err(("maxIncoming", "Choose 1 KiB to 256 MiB".into()));
         }
         if self.receive_dir.as_ref().is_some_and(|d| d.trim().is_empty()) {
             return Err(("receiveDir", "Choose a folder, or the station's own".into()));
@@ -200,5 +200,15 @@ mod tests {
         assert!(FileSettings { max_incoming: 1023, ..ok.clone() }.check().is_err());
         assert!(FileSettings { max_incoming: MAX_INCOMING + 1, ..ok.clone() }.check().is_err());
         assert!(FileSettings { max_incoming: MAX_INCOMING, ..ok }.check().is_ok());
+    }
+
+    /// Owner, 24 Nov: no 1 MiB ceiling; the receiver chooses. Only a memory
+    /// guard remains (files are prepared in memory).
+    #[test]
+    fn the_receiver_may_take_large_files() {
+        let ok = FileSettings::default();
+        assert!(FileSettings { max_incoming: 50 << 20, ..ok.clone() }.check().is_ok());
+        assert_eq!(MAX_INCOMING, crate::session::MAX_FILE_CEILING);
+        assert_eq!(MAX_INCOMING, 256 << 20);
     }
 }

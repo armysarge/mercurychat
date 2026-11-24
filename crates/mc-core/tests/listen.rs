@@ -506,3 +506,26 @@ async fn receive_only_while_calling_sends_listen_off_when_the_call_ends() {
     assert!(listen_offs(&net) > offs, "LISTEN OFF never went out after the call");
     assert!(!net.listening(0));
 }
+
+/// Owner, 24 Nov: Mercury's busy detector ("Listen before transmit") is on by
+/// default, sent on attach, so the channel shows Clear or Busy and Mercury
+/// waits for a clear channel; the operator can turn it off, at once and for
+/// later attaches.
+#[tokio::test(flavor = "multi_thread")]
+async fn busy_detect_is_on_by_default_and_can_be_turned_off() {
+    let dir = tempfile::tempdir().unwrap();
+    let net = FakeNet::start().await;
+    let h = spawn_app(Store::open_in_memory().unwrap(), opts(dir.path()));
+    let mut rx = select(&h, existing(net.a_base)).await;
+    until(&mut rx, ModemState::Listening).await;
+    assert_eq!(count(&net, "A> BUSYDETECT ON"), 1, "{:?}", net.log());
+    assert!(snapshot(&h).await.busy_detect);
+
+    assert_eq!(h.call(AppCommand::SetBusyDetect { on: false }).await.unwrap(), CommandOk::Done);
+    let end = std::time::Instant::now() + Duration::from_secs(5);
+    while count(&net, "A> BUSYDETECT OFF") == 0 {
+        assert!(std::time::Instant::now() < end, "BUSYDETECT OFF sent: {:?}", net.log());
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    assert!(!snapshot(&h).await.busy_detect);
+}

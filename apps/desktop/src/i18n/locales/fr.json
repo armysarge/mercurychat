@@ -10,7 +10,7 @@
   "nav": {
     "label": "Sections",
     "operate": "Opérer",
-    "conversations": "Discussions",
+    "conversations": "Historique",
     "settings": "Réglages",
     "diagnostics": "Diagnostic",
     "logbook": "Carnet de trafic",
@@ -33,8 +33,11 @@
     "mercury": "Mercury {version}, intégré",
     "hamlib": "Hamlib {version}, intégré",
     "integrityOk": "Tous les fichiers livrés sont tels que compilés.",
-    "none": "Cette version n'a pas de modem intégré : utilisez Mon propre Mercury.",
-    "note": "Avant de les démarrer, MercuryChat vérifie Mercury et rigctld avec la liste établie à la compilation de cette version."
+    "none": "Cette version n'a pas de modem intégré : utilisez Mercury externe.",
+    "note": "Avant de les démarrer, MercuryChat vérifie Mercury et rigctld avec la liste établie à la compilation de cette version.",
+    "lbtTitle": "Canal",
+    "lbt": "Écouter avant d'émettre",
+    "lbtHint": "Mercury vérifie que le canal est libre avant d'appeler, et la ligne Canal de l'accueil de la station indique Libre ou Occupé."
   },
   "mode": {
     "noStation": "Aucune station",
@@ -103,7 +106,7 @@
     "peers": "Contacts",
     "call": "Appeler",
     "cancel": "Annuler",
-    "disconnect": "Déconnecter",
+    "disconnect": "Raccrocher",
     "abort": "Interrompre (livraison incertaine)",
     "session": "Session",
     "progressAria": "Progression de la connexion",
@@ -115,7 +118,9 @@
     "otherSession": "Session avec {peer} en cours.",
     "export": "Exporter",
     "exportHint": "Enregistre cette conversation en fichier texte, heures en UTC. Les fichiers sont listés par nom, pas inclus.",
-    "exported": "{n} message exporté avec {peer}. | {n} messages exportés avec {peer}."
+    "exported": "{n} message exporté avec {peer}. | {n} messages exportés avec {peer}.",
+    "subtitleLive": "Connecté · {app} · MCH/1 · {direction} · depuis {since} UTC",
+    "qsoRecord": "Fiche QSO"
   },
   "composer": {
     "placeholder": "Message à {peer}",
@@ -127,7 +132,7 @@
     "tooLong": "Un message ne peut pas dépasser {max} octets."
   },
   "conversations": {
-    "title": "Discussions",
+    "title": "Historique",
     "history": "Historique",
     "callsign": "Indicatif",
     "callsignExample": "p. ex. ZS1ABC",
@@ -230,7 +235,7 @@
     "callsign": "Votre indicatif",
     "useSimulator": "Utiliser le simulateur",
     "simulatorUnavailable": "Simulateur : indisponible dans cette version",
-    "existingTitle": "Mon propre Mercury",
+    "existingTitle": "Mercury externe",
     "existingBody": "Un modem Mercury déjà lancé, sur cet ordinateur ou un autre que vous indiquez. MercuryChat se connecte à ses ports de contrôle et de données ; il répond aux appels entrants sauf si vous activez Réception seule.",
     "host": "Hôte",
     "controlPort": "Port de contrôle",
@@ -930,7 +935,8 @@
     "flrigHint": "FLRig ne règle que la fréquence et le mode ; choisissez une méthode PTT séparée.",
     "hamlibBuiltIn": "rigctld : Hamlib {version}, intégré",
     "testOwn": "Enregistrer et tester (lecture seule)",
-    "testOwnHint": "Enregistre, puis lit la radio par le rigctld de MercuryChat. Rien n'est modifié sur la radio."
+    "testOwnHint": "Enregistre, puis lit la radio par le rigctld de MercuryChat. Rien n'est modifié sur la radio.",
+    "laterInSettings": "Plus tard, dans Réglages → Poste : niveaux TX et d'accord, la liste des fréquences, un décalage de fréquence, la fréquence de lecture du poste, le mode données et le journal CAT."
   },
   "freqList": {
     "title": "Liste de fréquences",
@@ -1000,7 +1006,9 @@
     "sent": "Envoyé à Mercury",
     "ok": "L'audio de Mercury fonctionne.",
     "bad": "Échec de l'audio de Mercury : {error}",
-    "hint": "Mercury redémarre son audio avec ces périphériques et ne les garde que s'ils fonctionnent."
+    "hint": "Mercury redémarre son audio avec ces périphériques et ne les garde que s'ils fonctionnent.",
+    "advanced": "Avancé",
+    "advancedHint": "Le système audio est celui de cet ordinateur. Ne changez le canal d'entrée que si votre poste envoie son audio sur le canal droit."
   },
   "info": {
     "refused": {
@@ -1087,13 +1095,14 @@
     "intro": "Votre balise porte votre indicatif et votre locator. Cochez d’autres champs pour une balise étendue ; elle doit tenir dans le mode d’écoute.",
     "name": "Nom ({value})",
     "qth": "QTH ({value})",
-    "status": "Ligne d’état (40 octets au plus)",
-    "left": "{n} octets restants",
-    "over": "{n} octets de trop pour le mode d’écoute",
+    "status": "Ligne d'état",
+    "left": "Place restante dans votre balise : {n} octets",
+    "over": "Votre balise dépasse de {n} octets pour le mode d'écoute",
     "longLeftOut": "Un nom ou un QTH de plus de 24 octets est omis de la balise, pas tronqué.",
     "save": "Enregistrer le contenu",
     "saved": "Contenu de la balise enregistré.",
-    "tooBig": "Ne tient pas : {n} octets de trop."
+    "tooBig": "Ne tient pas : {n} octets de trop.",
+    "statusBytes": "{n} sur {max} octets pour la ligne d'état"
   },
   "files": {
     "title": "Fichiers",
@@ -1179,7 +1188,7 @@
     "settings": {
       "title": "Fichiers",
       "maxIncoming": "Plus grand fichier reçu (Kio)",
-      "maxNote": "De 1 à 1024 Kio ; les offres plus grandes sont refusées avant de vous être montrées.",
+      "maxNote": "De 1 Kio à 256 Mio (262144 Kio). Les offres plus grandes sont refusées avant que vous les voyiez. La vraie limite est le temps d'antenne : à environ 100 o/s, 1 Mio prend près de 3 heures.",
       "receiveDir": "Dossier de réception",
       "receiveDefault": "Le dossier propre à la station",
       "choose": "Choisir…",
@@ -1241,7 +1250,7 @@
     },
     "audio": {
       "title": "Carte son",
-      "body": "Choisissez la carte son de la radio pour Mercury : son entrée (depuis la radio) et sa sortie (vers la radio). MercuryChat ne choisit jamais le périphérique par défaut à votre place.",
+      "body": "Choisissez la carte son du poste pour Mercury : son entrée (depuis le poste) et sa sortie (vers le poste). Les cartes habituelles de l'ordinateur sont présélectionnées ; Mercury n'en ouvre aucune avant que vous appuyiez sur Appliquer.",
       "rxTitle": "Contrôle de réception",
       "rxBody": "Les signaux de la radio s'affichent ici quand l'entrée est la bonne. Une bande sombre et plate signifie qu'aucun audio n'arrive à Mercury.",
       "txTitle": "Test d'émission",
@@ -1305,7 +1314,11 @@
     "savedFrequencies": "Fréquences enregistrées…",
     "cqTitle": "Appel CQ",
     "cqBody": "Demande à toute station à l’écoute de répondre. Le CQ ne part que lorsque le modem est au repos.",
-    "cqNow": "Lancer CQ"
+    "cqNow": "Lancer CQ",
+    "tuneHint": "Faites défiler un chiffre, ou cliquez et tapez, pour régler le poste.",
+    "noRigHint": "Configurez le contrôle du poste dans Réglages → Poste pour régler d'ici.",
+    "pickFreq": "Fréquence enregistrée",
+    "pickPlaceholder": "Choisissez une fréquence enregistrée…"
   },
   "licences": {
     "title": "Licences",
@@ -1331,7 +1344,7 @@
     "export": "Exporter la conversation…",
     "close": "Fermer la conversation",
     "dismiss": "Fermer",
-    "search": "Chercher dans cette conversation"
+    "search": "Chercher dans l'historique"
   },
   "header": {
     "beaconIn": "Balise dans {time}",

@@ -69,6 +69,8 @@ pub struct StationConfig {
     /// The MCH/1 minor and capabilities sessions announce (M3c B1).
     pub proto_minor: u8,
     pub capabilities: Vec<String>,
+    /// Mercury's busy detector, sent on attach (owner, 24 Nov: on by default).
+    pub busy_detect: bool,
 }
 
 impl StationConfig {
@@ -92,6 +94,7 @@ impl StationConfig {
             timeouts: Timeouts::default(),
             proto_minor: mch_protocol::MINOR,
             capabilities: crate::session::default_capabilities(),
+            busy_detect: true,
         }
     }
 }
@@ -369,6 +372,11 @@ impl Station {
             Ok(()) | Err(StationError::Wrong(_)) => {}
             Err(e) => return Err(e),
         }
+        // The busy detector is best effort too: an older Mercury may not have it.
+        match self.cmd(Command::BusyDetect(self.cfg.busy_detect)).await {
+            Ok(()) | Err(StationError::Wrong(_)) => {}
+            Err(e) => return Err(e),
+        }
         self.purge_stale_tx().await?;
         self.store.log_event("modem", &format!("attached gen {}", self.generation()))?;
         Ok(())
@@ -464,6 +472,12 @@ impl Station {
     /// is `StationError::Wrong` (no TUNE, out of range, or a link is up).
     pub async fn tune(&mut self, arg: mercury_adapter::TuneArg) -> Result<(), StationError> {
         self.cmd(Command::Tune(arg)).await
+    }
+
+    /// Turn Mercury's busy detector on or off now, and on later attaches.
+    pub async fn set_busy_detect(&mut self, on: bool) -> Result<(), StationError> {
+        self.cfg.busy_detect = on;
+        self.cmd(Command::BusyDetect(on)).await
     }
 
     pub async fn set_listen(&mut self, on: bool) -> Result<(), StationError> {

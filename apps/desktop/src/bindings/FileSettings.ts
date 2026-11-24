@@ -6,7 +6,7 @@ import type { PhotoSize } from "./PhotoSize";
  */
 export type FileSettings = { 
 /**
- * The largest incoming file, as it lands on disk (1 KiB to 1 MiB).
+ * The largest incoming file, as it lands on disk (1 KiB to 256 MiB).
  */
 maxIncoming: number, 
 /**

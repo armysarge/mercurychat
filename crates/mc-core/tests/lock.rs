@@ -85,6 +85,7 @@ fn cfg(dir: &std::path::Path) -> StationConfig {
         timeouts: Timeouts::default(),
         proto_minor: mch_protocol::MINOR,
         capabilities: mc_core::session::default_capabilities(),
+        busy_detect: true,
     }
 }
 

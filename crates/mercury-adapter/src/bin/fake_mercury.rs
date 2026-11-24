@@ -38,6 +38,22 @@ async fn main() {
         eprintln!("{line}");
     };
     say(&format!("fake-mercury: args {}", args.join(" ")));
+    // `-z`: list the sound cards of `-x` in Mercury's format and exit (no ports).
+    if args.iter().any(|a| a == "-z") {
+        let system = flag(&args, "-x").unwrap_or_else(|| "wasapi".into());
+        if system == "null" {
+            println!("Null audio subsystem selected (developer/test backend; no devices).");
+        } else {
+            println!("playback devices:");
+            println!("device: name: 'Speakers'  id: 'out1'  (system default)");
+            println!("device: name: 'USB CODEC'  id: 'out2'");
+            println!("capture devices:");
+            println!("device: name: 'Line In'  id: 'in1'  (system default)");
+            println!("device: name: 'USB CODEC'  id: 'in2'");
+        }
+        return;
+    }
+    let null_audio = flag(&args, "-x").as_deref() == Some("null");
 
     let port = |f: &str, default: u16| flag(&args, f).and_then(|v| v.parse::<u16>().ok()).unwrap_or(default);
     let (control, bcast, ui) = (port("-p", 8300), port("-b", 8100), port("-U", 10000));
@@ -56,12 +72,25 @@ async fn main() {
         }
     };
     ws.set_status(Some(r#"{"type":"status","audio_ok":true,"audio_error":""}"#));
-    ws.set_hello(vec![
+    let lists: Vec<String> = vec![
         r#"{"type":"capture_dev_list","selected":"in1","list":[{"name":"Line In","id":"in1"},{"name":"USB CODEC","id":"in2"}]}"#.into(),
         r#"{"type":"playback_dev_list","selected":"out1","list":[{"name":"Speakers","id":"out1"},{"name":"USB CODEC","id":"out2"}]}"#.into(),
-        r#"{"type":"audio_system","selected":"wasapi","list":["wasapi"]}"#.into(),
-        r#"{"type":"input_channel","selected":"left","list":["left","right","stereo"]}"#.into(),
-    ]);
+    ];
+    if null_audio {
+        // As Mercury on `-x null`: no devices listed until a real system is applied.
+        ws.set_devices(lists);
+        ws.set_hello(vec![
+            r#"{"type":"capture_dev_list","selected":"","list":[]}"#.into(),
+            r#"{"type":"playback_dev_list","selected":"","list":[]}"#.into(),
+            r#"{"type":"audio_system","selected":"null","list":["null","wasapi","dsound","pulse","alsa"]}"#.into(),
+            r#"{"type":"input_channel","selected":"left","list":["left","right","stereo"]}"#.into(),
+        ]);
+    } else {
+        let mut hello = lists;
+        hello.push(r#"{"type":"audio_system","selected":"wasapi","list":["wasapi"]}"#.into());
+        hello.push(r#"{"type":"input_channel","selected":"left","list":["left","right","stereo"]}"#.into());
+        ws.set_hello(hello);
+    }
     if let Some(text) = flag(&args, "--audio-fail") {
         ws.set_audio_result(false, &text);
     }

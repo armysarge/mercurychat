@@ -13,6 +13,7 @@ import type { Reading } from "../bindings/Reading";
 import Avatar from "./Avatar.vue";
 import QsyPropose from "./QsyPropose.vue";
 import { describeTuning, extras, tuneSuggested } from "../extras";
+import { APP_START, heardThisRun } from "../heardRun";
 import { openAt, openFrom, qsyTo } from "../stationMenu";
 import { activeProfile, app, chat, discovery, discoveryError, inSession, linkPeer, openPeer, setFavourite } from "../store";
 
@@ -30,9 +31,11 @@ onUnmounted(() => clearInterval(clock));
 
 const shown = computed(() => {
   const q = query.value.trim().toUpperCase();
-  return discovery.heard.filter((h) => {
+  // Owner, 24 Nov: the list starts empty at every start (the record is kept
+  // for "last heard" elsewhere); favourites keep their own filter.
+  return heardThisRun(discovery.heard, APP_START, filter.value).filter((h) => {
     if (q && !h.callsign.includes(q) && !(h.grid ?? "").toUpperCase().includes(q)) return false;
-    if (filter.value === "favourite") return h.favourite;
+    if (filter.value === "favourite") return true;
     return filter.value === "all" || h.source === filter.value;
   });
 });
@@ -148,7 +151,7 @@ async function pick(h: HeardStation) {
         >{{ h.favourite ? "★" : "☆" }}</button>
       </li>
     </ul>
-    <p v-else-if="discovery.heard.length" class="muted small">{{ t("heard.noMatch") }}</p>
+    <p v-else-if="heardThisRun(discovery.heard, APP_START, 'all').length" class="muted small">{{ t("heard.noMatch") }}</p>
     <div v-else class="empty stack">
       <p class="muted small">{{ t("sidebar.heardEmpty") }}</p>
       <p class="muted small note">{{ t("heard.notReachable") }}</p>
