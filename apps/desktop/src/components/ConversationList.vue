@@ -12,9 +12,8 @@ import type { ChatMessage } from "../bindings/ChatMessage";
 import type { Conversation } from "../bindings/Conversation";
 import type { HeardSource } from "../bindings/HeardSource";
 import {
-  activeProfile, chat, discovery, discoveryError, linkPeer, modemState, openPeer, searchHistory, sendBeaconNow, sendCq, session,
+  activeProfile, chat, discovery, linkPeer, openPeer, searchHistory, session,
 } from "../store";
-import Avatar from "./Avatar.vue";
 import { openAt, openFrom } from "../stationMenu";
 
 const { t } = useI18n();
@@ -57,13 +56,6 @@ function preview(c: Conversation): string {
   return c.draft ? t("conversations.draft") + ": " + c.draft.replace(/\s+/g, " ") : "";
 }
 const mhz = (hz: number) => (hz / 1e6).toFixed(3);
-
-/** Call CQ / Beacon now: only while the modem is idle; the reason otherwise. */
-const idle = computed(() => modemState.value === "ready" || modemState.value === "listening");
-const why = computed(() => {
-  if (!activeProfile.value || idle.value) return "";
-  return livePeer.value ? t("conversations.footBusy", { peer: livePeer.value }) : t("strip.idleOnly");
-});
 
 /** Messages matching the search, newest first (two characters or more). */
 const hits = ref<ChatMessage[]>([]);
@@ -136,8 +128,7 @@ function openEntry() {
       <h3 v-if="sec.title" class="label">{{ t(sec.title) }}</h3>
       <ul class="list" :aria-label="sec.title ? t(sec.title) : t('conversations.listAria')">
         <li v-for="c in sec.rows" :key="c.peer" class="conv-row" :data-callsign="c.peer" @contextmenu="openAt($event, c.peer, 'chats')">
-          <button :class="['item', 'with-avatar', { active: c.peer === chat.open }]" :aria-current="c.peer === chat.open ? 'true' : undefined" @click="open(c.peer)">
-            <Avatar :callsign="c.peer" :live="c.peer === linkPeer" :size="40" />
+          <button :class="['item', { active: c.peer === chat.open }]" :aria-current="c.peer === chat.open ? 'true' : undefined" @click="open(c.peer)">
             <span class="row top">
               <b class="mono">{{ c.peer }}</b>
               <span v-if="c.peer === linkPeer" class="small ok">{{ t("conversations.onLink") }}</span>
@@ -184,14 +175,6 @@ function openEntry() {
     <p v-if="searchError" class="err small" role="alert">{{ searchError }}</p>
     <p v-if="!shown.length" class="muted small">{{ query || chip !== "all" ? t("conversations.noMatch") : t("conversations.none") }}</p>
     <p class="note small muted">{{ t("conversations.note") }}</p>
-    <div class="foot">
-      <div class="foot-buttons">
-        <button class="foot-cq" :disabled="!activeProfile || !idle" :title="t('strip.idleOnly')" @click="sendCq">{{ t("conversations.footCq") }}</button>
-        <button class="foot-beacon" :disabled="!activeProfile || !idle" :title="t('strip.idleOnly')" @click="sendBeaconNow">{{ t("conversations.footBeacon") }}</button>
-      </div>
-      <p v-if="why" class="why small muted">{{ why }}</p>
-      <p v-if="discoveryError.cq || discoveryError.beacon" class="err small" role="alert">{{ discoveryError.cq || discoveryError.beacon }}</p>
-    </div>
   </div>
 </template>
 
@@ -201,17 +184,16 @@ function openEntry() {
 .search-box { position: relative; display: block; }
 .search-box svg { position: absolute; left: 10px; top: 50%; width: 16px; height: 16px; transform: translateY(-50%); fill: none; stroke: var(--text-2); stroke-width: 1.8; stroke-linecap: round; pointer-events: none; }
 .search { width: 100%; padding-left: 32px; border-radius: 10px; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; }
-.chip { min-height: 0; padding: 4px 12px; border-radius: 999px; font-size: calc(12px * var(--font-scale)); }
-.chip[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+/* One segmented control: the filters share a rounded track, the chosen one is filled. */
+.chips { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+.chip { flex: 1 1 0; min-height: 0; min-width: 0; padding: 5px 4px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font-size: calc(12px * var(--font-scale)); font-weight: 600; white-space: nowrap; }
+.chip:hover:not([aria-pressed="true"]) { background: var(--raised); color: var(--text); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
 .new-chat label { display: grid; gap: 4px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
 .section { display: grid; gap: 4px; }
 .section .label { margin: 0; font-size: calc(11px * var(--font-scale)); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .item { width: 100%; text-align: left; display: grid; gap: 2px; padding: 8px 10px; border-color: transparent; background: transparent; border-radius: 12px; }
-.item.with-avatar { grid-template-columns: auto minmax(0, 1fr); column-gap: 12px; }
-.with-avatar > .avatar { grid-row: 1 / span 3; align-self: center; }
-.with-avatar > .row, .with-avatar > .meta, .with-avatar > .preview { grid-column: 2; }
 .item.active { border-color: color-mix(in srgb, var(--accent) 60%, var(--border)); background: var(--raised); }
 .conv-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px; }
 .more { min-height: 0; padding: 4px 8px; border-color: transparent; font-size: calc(16px * var(--font-scale)); line-height: 1; color: var(--text-2); }
@@ -223,7 +205,4 @@ function openEntry() {
 .search-hits { display: grid; gap: 4px; border-top: 1px solid var(--border); padding-top: var(--space); }
 .hit { overflow-wrap: anywhere; }
 .note { border-top: 1px solid var(--border); padding-top: var(--space); }
-.foot { display: grid; gap: 6px; border-top: 1px solid var(--border); padding-top: var(--space); }
-.foot-buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.why { margin: 0; }
 </style>

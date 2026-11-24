@@ -93,7 +93,7 @@ try {
   const sim1 = "document.querySelector('.heard .row[data-callsign=\"SIM1\"] button.pick')";
   await until(s, sim1, "SIM1 heard", 20000);
   await s.eval(`${sim1}.click()`);
-  await until(s, "!!document.querySelector('.peer-header .avatar')", "SIM1's conversation");
+  await until(s, "!!document.querySelector('.peer-header h1')", "SIM1's conversation");
   await s.eval(click("Call"));
   await until(s, `${pill} === 'connected'`, "connected to SIM1", 25000);
   await s.eval(compose("Keyboard and contrast check. 73"));

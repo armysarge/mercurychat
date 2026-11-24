@@ -149,7 +149,7 @@ try {
   await s.eval(`${more}.click()`);
   await until(s, `!!${menu}`, "the station menu again");
   await s.eval(`${menu}.querySelector('[data-action=call]').click()`);
-  await until(s, "!!document.querySelector('.peer-header .avatar')", "SIM1's conversation with its avatar");
+  await until(s, "!!document.querySelector('.peer-header h1')", "SIM1's conversation");
   results.push(`PASS O8 station menu: ${byClick.join(", ")}; right-click and "…" open it, Escape closes it, Call from it calls SIM1`);
   await until(s, `${pill} === 'connected'`, "connected to SIM1", 25000);
   await s.eval(compose("Good afternoon from the restyle check. 73"));
@@ -173,17 +173,16 @@ try {
     search: !!document.querySelector('.conv .search-box svg') && !!document.querySelector('.conv input.search'),
     chips: [...document.querySelectorAll('.conv .chips button')].map(b => b.textContent.trim() + ':' + b.getAttribute('aria-pressed')).join(','),
     preview: ${text(".conv .live-now .conv-row[data-callsign=\"SIM1\"] .preview")},
-    avatar: document.querySelector('.conv .live-now .conv-row[data-callsign=\"SIM1\"] .avatar')?.getBoundingClientRect().width,
-    cq: document.querySelector('.conv .foot button.foot-cq')?.disabled,
-    beacon: document.querySelector('.conv .foot button.foot-beacon')?.disabled,
-    why: ${text(".conv .foot .why")},
+    noAvatar: !document.querySelector('.conv .avatar, .peer-header .avatar'),
+    noFoot: !document.querySelector('.conv .foot'),
+    track: getComputedStyle(document.querySelector('.conv .chips')).borderTopLeftRadius,
   })`);
   if (chats.title !== "Chats") throw new Error(`O14: the list's title is "${chats.title}"`);
   if (!chats.search) throw new Error("O14: no search box with its icon");
   if (chats.chips !== "All:true,Sessions:false,CQ:false,Beacons:false") throw new Error(`O14: chips ${chats.chips}`);
   if (!chats.preview.includes("Good afternoon from the restyle check")) throw new Error(`O14: SIM1's preview is "${chats.preview}"`);
-  if (Math.round(chats.avatar) !== 40) throw new Error(`O14: the avatar is ${chats.avatar} px`);
-  if (chats.cq !== true || chats.beacon !== true || !chats.why.includes("SIM1")) throw new Error(`O14: the foot during a session: ${JSON.stringify(chats)}`);
+  if (!chats.noAvatar) throw new Error("O14: initials circles are still there");
+  if (!chats.noFoot || parseFloat(chats.track) < 8) throw new Error(`O14: foot gone and filters a segmented track: ${JSON.stringify(chats)}`);
 
   // ---- O9: Hang up and Abort in view; the rest in the header's "…".
   const head = await s.eval(`({ hang: !!document.querySelector('.peer-header button.disconnect:not([disabled])'), abort: !!document.querySelector('.peer-header button.abort'), more: !!document.querySelector('.peer-header button.more') })`);
@@ -258,11 +257,10 @@ try {
   results.push("PASS O10 Close conversation: the station home again, no peer header");
 
   // ---- O14 (2): after hanging up, the foot's buttons are usable and the reason gone.
-  await until(s, "document.querySelector('.conv .foot button.foot-cq')?.disabled === false && !document.querySelector('.conv .foot .why')", "Call CQ usable after hanging up");
   await s.eval("[...document.querySelectorAll('.conv .chips button')].find(b => b.textContent.trim() === 'CQ').click()");
   await until(s, "document.querySelector('.conv .chips button[aria-pressed=true]')?.textContent.trim() === 'CQ'", "the CQ chip on");
   await s.eval("[...document.querySelectorAll('.conv .chips button')].find(b => b.textContent.trim() === 'All').click()");
-  results.push(`PASS O14 Chats list: "${chats.title}", search, chips ${chats.chips}; SIM1 live with "${chats.preview.slice(0, 50)}…", 40 px avatar; foot held ("${chats.why}") then usable`);
+  results.push(`PASS O14 Chats list: "${chats.title}", search, chips ${chats.chips}; SIM1 live with "${chats.preview.slice(0, 50)}…", no initials circles, no CQ/Beacon foot (they stay on the station home and in the header's station panel)`);
 
   results.push(...fit);
   const errs = (await s.eval("window.__uiErrors ?? []")) ?? [];

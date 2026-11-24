@@ -8,7 +8,6 @@
 // even with no conversation open. The rest is in its "…" (the station menu).
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import Avatar from "../components/Avatar.vue";
 import Composer from "../components/Composer.vue";
 import { openFrom } from "../stationMenu";
 import SessionPanel from "../components/SessionPanel.vue";
@@ -70,7 +69,6 @@ const subtitle = computed(() => {
   <div :class="['operate', { 'panel-hidden': wide && panelHidden }]">
     <section class="chat-pane" :aria-label="t('operate.conversationAria')">
       <div v-if="peer" class="peer-header">
-        <Avatar :callsign="peer" :live="live" :size="40" />
         <div class="who">
           <h1 class="mono">{{ peer }}</h1>
           <p class="muted small"><span v-if="live" class="live-dot" aria-hidden="true"></span>{{ subtitle }}</p>
