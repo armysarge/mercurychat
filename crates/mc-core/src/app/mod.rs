@@ -5,6 +5,7 @@ mod audio;
 mod beacon;
 mod broadcast;
 pub mod builtin;
+pub mod catradios;
 mod chat;
 mod contract;
 pub mod diagnostics;

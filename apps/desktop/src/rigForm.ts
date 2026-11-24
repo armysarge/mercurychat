@@ -5,10 +5,10 @@ import type { FreqControl } from "./bindings/FreqControl";
 import type { PttMethod } from "./bindings/PttMethod";
 import type { RigConfig } from "./bindings/RigConfig";
 
-export type Box = "cat" | "external" | "flrig" | "serialPtt" | "cm108";
+export type Box = "cat" | "catFile" | "external" | "flrig" | "serialPtt" | "cm108";
 
 /** The Frequency control dropdown, in order. */
-export const FREQ_CONTROLS = ["managedRigctld", "externalRigctld", "flrig", "none"] as const satisfies readonly FreqControl[];
+export const FREQ_CONTROLS = ["managedRigctld", "catFile", "externalRigctld", "flrig", "none"] as const satisfies readonly FreqControl[];
 /** The PTT dropdown, in order. */
 export const PTT_METHODS = ["cat", "serialLine", "cm108", "noPtt", "leaveMercury"] as const satisfies readonly PttMethod[];
 export const LINKS = ["serial", "tcp"] as const;
@@ -23,6 +23,7 @@ export const DATA_MODES = ["PKTUSB", "PKTLSB", "USB", "LSB", "FM", "PKTFM"] as c
 export function visibleBoxes(c: RigConfig): Set<Box> {
   const out = new Set<Box>();
   if (c.freqControl === "managedRigctld") out.add("cat");
+  if (c.freqControl === "catFile") out.add("catFile");
   if (c.freqControl === "externalRigctld") out.add("external");
   if (c.freqControl === "flrig") out.add("flrig");
   if (c.ptt.method === "serialLine") out.add("serialPtt");
@@ -32,7 +33,7 @@ export function visibleBoxes(c: RigConfig): Set<Box> {
 
 /** CAT PTT needs a rigctld: not offered with FLRig or no rig link. */
 export function pttChoices(f: FreqControl): PttMethod[] {
-  return PTT_METHODS.filter((m) => m !== "cat" || f === "managedRigctld" || f === "externalRigctld");
+  return PTT_METHODS.filter((m) => m !== "cat" || f === "managedRigctld" || f === "catFile" || f === "externalRigctld");
 }
 
 /** The core's defaults (RigConfig::default). */
@@ -43,6 +44,7 @@ export function defaultRigConfig(): RigConfig {
     flrig: { host: "127.0.0.1", port: 12345 },
     cat: {
       model: null,
+      radio: "",
       link: "serial",
       serialPort: "",
       tcpAddr: "",

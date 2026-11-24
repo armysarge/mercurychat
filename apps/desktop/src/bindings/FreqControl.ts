@@ -3,4 +3,4 @@
 /**
  * Who MercuryChat reads and sets the rig through (M3b.1 §5.1).
  */
-export type FreqControl = "none" | "managedRigctld" | "externalRigctld" | "flrig";
+export type FreqControl = "none" | "managedRigctld" | "externalRigctld" | "flrig" | "catFile";

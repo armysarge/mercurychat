@@ -1295,6 +1295,13 @@
   "url": "https://github.com/bojand/infer"
  },
  {
+  "name": "io-kit-sys",
+  "version": "0.4.1",
+  "licence": "MIT / Apache-2.0",
+  "kind": "rust",
+  "url": "https://github.com/jtakakura/io-kit-rs"
+ },
+ {
   "name": "ipnet",
   "version": "2.12.2",
   "licence": "MIT OR Apache-2.0",
@@ -1512,6 +1519,13 @@
   "url": "https://github.com/h4llow3En/mac-notification-sys"
  },
  {
+  "name": "mach2",
+  "version": "0.4.3",
+  "licence": "BSD-2-Clause OR MIT OR Apache-2.0",
+  "kind": "rust",
+  "url": "https://github.com/JohnTitor/mach2"
+ },
+ {
   "name": "markup5ever",
   "version": "0.39.0",
   "licence": "MIT OR Apache-2.0",
@@ -1615,6 +1629,13 @@
   "licence": "MIT",
   "kind": "rust",
   "url": "https://github.com/mbrubeck/rust-debug-unreachable"
+ },
+ {
+  "name": "nix",
+  "version": "0.26.4",
+  "licence": "MIT",
+  "kind": "rust",
+  "url": "https://github.com/nix-rust/nix"
  },
  {
   "name": "nix",
@@ -2352,6 +2373,13 @@
   "url": "https://github.com/chippers/serialize-to-javascript"
  },
  {
+  "name": "serialport",
+  "version": "4.10.1",
+  "licence": "MPL-2.0",
+  "kind": "rust",
+  "url": "https://github.com/serialport/serialport-rs"
+ },
+ {
   "name": "servo_arc",
   "version": "0.4.3",
   "licence": "MIT OR Apache-2.0",
@@ -2919,6 +2947,13 @@
   "url": "https://github.com/haraldh/rust_uds_windows"
  },
  {
+  "name": "unescaper",
+  "version": "0.1.10",
+  "licence": "MIT OR GPL-3.0-only",
+  "kind": "rust",
+  "url": "https://github.com/hack-ink/unescaper"
+ },
+ {
   "name": "unicode-ident",
   "version": "1.0.27",
   "licence": "(MIT OR Apache-2.0) AND Unicode-3.0",
@@ -3327,6 +3362,13 @@
  {
   "name": "windows-sys",
   "version": "0.45.0",
+  "licence": "MIT OR Apache-2.0",
+  "kind": "rust",
+  "url": "https://github.com/microsoft/windows-rs"
+ },
+ {
+  "name": "windows-sys",
+  "version": "0.52.0",
   "licence": "MIT OR Apache-2.0",
   "kind": "rust",
   "url": "https://github.com/microsoft/windows-rs"

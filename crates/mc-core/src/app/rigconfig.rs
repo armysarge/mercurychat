@@ -27,6 +27,9 @@ pub enum FreqControl {
     ExternalRigctld,
     /// FLRig, over XML-RPC: frequency and mode only.
     Flrig,
+    /// MercuryChat's own CAT engine: the radio's commands from a CAT commands
+    /// file, served to Mercury and read by the app as a rigctld (M5 Task 11e).
+    CatFile,
 }
 
 /// How Mercury keys the radio, as MercuryChat sets it (M3b.1 §5.2).
@@ -107,6 +110,8 @@ impl Default for Endpoint {
 pub struct CatSettings {
     /// Hamlib rig model number.
     pub model: Option<u32>,
+    /// The radio's name in the CAT commands file (built-in engine).
+    pub radio: String,
     pub link: CatLink,
     pub serial_port: String,
     /// `host:port` of a network radio.
@@ -125,6 +130,7 @@ impl Default for CatSettings {
     fn default() -> Self {
         CatSettings {
             model: None,
+            radio: String::new(),
             link: CatLink::Serial,
             serial_port: String::new(),
             tcp_addr: String::new(),
@@ -291,7 +297,7 @@ pub fn mercury_ptt_for(cfg: &RigConfig, managed: SocketAddr) -> Option<Telemetry
     // Through a rigctld whenever one runs: it holds the CAT port, and on
     // Windows only one program may open a COM port.
     let rigctld = match cfg.freq_control {
-        FreqControl::ManagedRigctld => Some(managed.to_string()),
+        FreqControl::ManagedRigctld | FreqControl::CatFile => Some(managed.to_string()),
         FreqControl::ExternalRigctld => Some(format!("{}:{}", cfg.external.host, cfg.external.port)),
         FreqControl::None | FreqControl::Flrig => None,
     };
@@ -418,6 +424,14 @@ impl RigConfig {
         }
         if self.ptt.method == PttMethod::Cat && matches!(self.freq_control, FreqControl::None | FreqControl::Flrig) {
             errs.push(field("pttMethod", "CAT PTT needs a rigctld: choose MercuryChat's or an external rigctld"));
+        }
+        if self.freq_control == FreqControl::CatFile {
+            if self.cat.radio.trim().is_empty() {
+                errs.push(field("radio", "Choose your radio"));
+            }
+            if self.cat.serial_port.trim().is_empty() {
+                errs.push(field("serialPort", "Enter the radio's COM port, e.g. COM3"));
+            }
         }
         if self.freq_control == FreqControl::ManagedRigctld {
             if self.cat.model.is_none() {

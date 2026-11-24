@@ -66,6 +66,34 @@ async function loadSerialPorts() {
 }
 void loadSerialPorts();
 const freqResult = ref("");
+/** The radios the built-in engine knows (built-in and imported), and what the last import did. */
+const catRadios = ref<string[]>([]);
+const importNote = ref("");
+async function loadCatRadios() {
+  try {
+    const r = await call({ type: "catRadios" });
+    if (r.type === "catRadios") catRadios.value = r.radios;
+  } catch {
+    // The list stays as it was.
+  }
+}
+async function importCatFile(e: Event) {
+  const input = e.target as HTMLInputElement;
+  const file = input.files?.[0];
+  input.value = "";
+  if (!file) return;
+  importNote.value = "";
+  try {
+    const r = await call({ type: "importCatFile", text: await file.text() });
+    if (r.type === "catImported") {
+      importNote.value = t("rigSettings.imported", { n: r.added.length }) + (r.skipped.length ? " " + t("rigSettings.importSkipped", { n: r.skipped.length }) : "");
+      await loadCatRadios();
+      if (r.added.length === 1) config.value.cat.radio = r.added[0];
+    }
+  } catch (err) {
+    importNote.value = describeError(err);
+  }
+}
 
 const boxes = computed(() => visibleBoxes(config.value));
 const pttOptions = computed(() => pttChoices(config.value.freqControl));
@@ -112,6 +140,13 @@ async function loadModels() {
     error.value = describeError(e);
   }
 }
+watch(
+  () => config.value.freqControl === "catFile",
+  (on) => {
+    if (on) void loadCatRadios();
+  },
+  { immediate: true },
+);
 watch(
   () => config.value.freqControl === "managedRigctld",
   (on) => {
@@ -310,6 +345,45 @@ const stepName = (name: string) => ((STEPS as readonly string[]).includes(name) 
             <button class="rig-ptt-stop" :disabled="!tuning" @click="pttTest(false)">{{ t("rigSettings.pttStop") }}</button>
           </div>
           <p class="muted small">{{ t("rigSettings.pttHint") }}</p>
+        </fieldset>
+
+        <fieldset v-if="boxes.has('catFile')" class="box">
+          <legend>{{ t("rigSettings.catFile") }}</legend>
+          <label class="row">
+            <span>{{ t("rigSettings.radio") }}</span>
+            <select v-model="config.cat.radio" class="rig-radio">
+              <option value="" disabled>{{ t("rigSettings.radioChoose") }}</option>
+              <option v-for="r in catRadios" :key="r" :value="r">{{ r }}</option>
+            </select>
+          </label>
+          <div class="grid3">
+            <label>
+              {{ t("rigSettings.serialPort") }}
+              <input v-model="config.cat.serialPort" class="rig-serial-port" list="serial-ports" spellcheck="false" :placeholder="t('rigSettings.serialPortExample')" @focus="loadSerialPorts" />
+            </label>
+            <label>
+              {{ t("rigSettings.baud") }}
+              <select v-model.number="config.cat.baud" class="rig-baud">
+                <option v-for="b in BAUDS" :key="b" :value="b">{{ b }}</option>
+              </select>
+            </label>
+          </div>
+          <label class="row">
+            <span>{{ t("rigSettings.importFile") }}</span>
+            <input class="rig-import" type="file" accept=".txt,.ini,.cat,.mccat,text/plain" @change="importCatFile" />
+          </label>
+          <p v-if="importNote" class="small rig-import-note" role="status">{{ importNote }}</p>
+          <p class="muted small">{{ t("rigSettings.catFileHint") }}</p>
+          <div class="buttons">
+            <button class="rig-test-own" :disabled="testing" :title="t('rigSettings.testOwnHint')" @click="saveAndTest">{{ testing ? t("rigSettings.testing") : t("rigSettings.testOwn") }}</button>
+          </div>
+          <ol v-if="steps" class="rig-test-steps small">
+            <li v-for="s in steps" :key="s.name" :class="['step', tone(s.ok)]" :data-step="s.name">
+              <span class="mark" aria-hidden="true">{{ mark(s.ok) }}</span>
+              <b>{{ stepName(s.name) }}</b>
+              <span class="detail">{{ s.detail }}</span>
+            </li>
+          </ol>
         </fieldset>
 
         <fieldset v-if="boxes.has('cat')" class="box">

@@ -917,6 +917,13 @@ impl App {
             // Answered from the loop (see `shutdown`), never here.
             AppCommand::Shutdown => Err(AppError::Internal { message: "shutdown runs on its own".into() }),
             AppCommand::CatLog => self.cat_log(),
+            AppCommand::CatRadios => Ok(CommandOk::CatRadios { radios: crate::app::catradios::names(&self.store) }),
+            AppCommand::ImportCatFile { text } => {
+                let r = crate::app::catradios::import(&mut self.store, &text).map_err(|message| {
+                    AppError::Validation { errors: vec![crate::profile::FieldError { field: "file".into(), message }] }
+                })?;
+                Ok(CommandOk::CatImported { added: r.added, skipped: r.skipped })
+            }
             AppCommand::AudioSettings => self.audio_settings(),
             AppCommand::SetAudio { system, input, output, channel } => self.set_audio(system, input, output, channel),
             AppCommand::Frequencies => self.frequencies(),

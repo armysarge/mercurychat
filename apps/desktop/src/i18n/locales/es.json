@@ -924,6 +924,7 @@
     "freqControl": "Control de frecuencia",
     "freqControlOpt": {
       "managedRigctld": "Hamlib (MercuryChat ejecuta rigctld)",
+      "catFile": "Control de radio integrado (comandos CAT)",
       "externalRigctld": "Hamlib (un rigctld que ya ejecuto)",
       "flrig": "FLRig (frecuencia y modo)",
       "none": "Ninguno"
@@ -943,7 +944,14 @@
     "hamlibBuiltIn": "rigctld: Hamlib {version}, integrado",
     "testOwn": "Guardar y probar (solo lectura)",
     "testOwnHint": "Guarda y luego lee la radio a través del rigctld propio de MercuryChat. No se cambia nada en la radio.",
-    "laterInSettings": "Más tarde, en Ajustes → Equipo: niveles de TX y de sintonía, la lista de frecuencias, un desplazamiento de frecuencia, cada cuánto se lee el equipo, el modo de datos y el registro CAT."
+    "laterInSettings": "Más tarde, en Ajustes → Equipo: niveles de TX y de sintonía, la lista de frecuencias, un desplazamiento de frecuencia, cada cuánto se lee el equipo, el modo de datos y el registro CAT.",
+    "catFile": "Control de radio integrado",
+    "radio": "Radio",
+    "radioChoose": "Elige tu radio",
+    "importFile": "Importar un archivo de comandos CAT",
+    "imported": "Se añadieron {n} radio(s).",
+    "importSkipped": "No se pudieron leer {n}.",
+    "catFileHint": "MercuryChat habla con el puerto serie de la radio con los comandos propios de la radio, así que no necesita Hamlib. ¿No está tu radio? Importa un archivo de comandos CAT."
   },
   "freqList": {
     "title": "Lista de frecuencias",

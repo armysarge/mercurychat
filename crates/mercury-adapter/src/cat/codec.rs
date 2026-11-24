@@ -72,7 +72,7 @@ pub fn encode_freq(coding: FreqCoding, hz: u64, step_hz: u64, digits: usize) -> 
         }
         FreqCoding::Bcd | FreqCoding::BcdBe => {
             let s = format!("{n:0digits$}");
-            if s.len() > digits || digits % 2 != 0 {
+            if s.len() > digits || !digits.is_multiple_of(2) {
                 return err(format!("{hz} Hz does not fit {digits} BCD digits"));
             }
             if coding == FreqCoding::BcdBe {
@@ -83,7 +83,7 @@ pub fn encode_freq(coding: FreqCoding, hz: u64, step_hz: u64, digits: usize) -> 
             Ok(pairs.into_iter().rev().collect())
         }
         FreqCoding::Bin => {
-            if digits % 2 != 0 {
+            if !digits.is_multiple_of(2) {
                 return err("a binary frequency has a whole number of bytes");
             }
             let s = format!("{n:0digits$X}");
@@ -105,7 +105,7 @@ pub fn decode_freq(coding: FreqCoding, chars: &str, step_hz: u64) -> Result<u64,
             chars.trim().parse::<u64>().map_err(|_| CodecError(format!("{chars:?} is not a frequency")))?
         }
         FreqCoding::Bcd | FreqCoding::BcdBe => {
-            if chars.len() % 2 != 0 {
+            if !chars.len().is_multiple_of(2) {
                 return err("a BCD frequency has a whole number of bytes");
             }
             let be: String = if coding == FreqCoding::Bcd {
@@ -126,7 +126,7 @@ pub fn decode_freq(coding: FreqCoding, chars: &str, step_hz: u64) -> Result<u64,
 /// A hex string as bytes ("FE 94" and "FE94" alike).
 pub fn hex_to_bytes(s: &str) -> Result<Vec<u8>, CodecError> {
     let clean: String = s.chars().filter(|c| !c.is_whitespace()).collect();
-    if clean.len() % 2 != 0 || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
+    if !clean.len().is_multiple_of(2) || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
         return err(format!("{s:?} is not whole hex bytes"));
     }
     Ok((0..clean.len()).step_by(2).map(|i| u8::from_str_radix(&clean[i..i + 2], 16).expect("checked")).collect())

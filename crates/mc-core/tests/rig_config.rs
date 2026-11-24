@@ -265,3 +265,23 @@ fn cat_ptt_needs_a_rigctld() {
         assert_eq!(errs[0].field, "pttMethod");
     }
 }
+
+/// The built-in CAT engine (M5 Task 11e): it needs a radio and a port, and
+/// Mercury keys through it exactly as through MercuryChat's own rigctld.
+#[test]
+fn the_cat_engine_needs_a_radio_and_a_port_and_keys_like_the_managed_rigctld() {
+    use mc_core::app::mercury_ptt_for;
+    let managed: std::net::SocketAddr = "127.0.0.1:4532".parse().unwrap();
+    let mut c = RigConfig { freq_control: FreqControl::CatFile, ..RigConfig::default() };
+    let fields: Vec<_> = c.validate().into_iter().map(|e| e.field).collect();
+    assert_eq!(fields, vec!["radio", "serialPort"]);
+    c.cat.radio = "Icom IC-7300".into();
+    c.cat.serial_port = "COM3".into();
+    assert!(c.validate().is_empty());
+    c.ptt.method = PttMethod::Cat;
+    assert!(c.validate().is_empty(), "CAT PTT is allowed through the engine");
+    assert_eq!(
+        mercury_ptt_for(&c, managed),
+        mercury_ptt_for(&RigConfig { freq_control: FreqControl::ManagedRigctld, ..c.clone() }, managed),
+    );
+}

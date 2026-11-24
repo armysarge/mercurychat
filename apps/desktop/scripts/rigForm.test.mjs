@@ -60,3 +60,9 @@ test("an_unset_rig_starts_on_the_built_in_rigctld", async () => {
   noneWithModel.cat.model = 3073;
   assert.equal(withBuiltInDefault(noneWithModel).freqControl, "none");
 });
+
+test("the_built_in_cat_engine_shows_its_own_box_and_allows_cat_ptt", () => {
+  assert.deepEqual(boxes(cfg("catFile")), ["catFile"]);
+  assert.ok(pttChoices("catFile").includes("cat"));
+  assert.equal(defaultRigConfig().cat.radio, "");
+});

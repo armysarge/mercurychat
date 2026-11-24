@@ -167,6 +167,8 @@ pub(super) struct RigSide {
     /// MercuryChat's own rigctld, and the task forwarding what it does.
     daemon: Option<RigctldDaemon>,
     daemon_bridge: Option<AbortOnDrop>,
+    /// MercuryChat's own CAT engine, while a profile uses one (it owns the radio's port).
+    cat_engine: Option<AbortOnDrop>,
     /// The rigctld program (tests); `None`: look for it.
     rigctld_program: Option<Option<PathBuf>>,
     managed_listen: SocketAddr,
@@ -256,6 +258,7 @@ impl Default for RigSide {
             sim: None,
             daemon: None,
             daemon_bridge: None,
+            cat_engine: None,
             rigctld_program: None,
             managed_listen: MANAGED_LISTEN.parse().unwrap(),
             builtin: None,
@@ -271,7 +274,7 @@ fn owner_check(cfg: &RigConfig, rl: Option<&RadioList>, managed: SocketAddr) -> 
     let Some(rl) = rl else { return OwnerCheck::Unknown };
     let ours = match cfg.freq_control {
         FreqControl::ExternalRigctld => format!("{}:{}", cfg.external.host, cfg.external.port),
-        FreqControl::ManagedRigctld => managed.to_string(),
+        FreqControl::ManagedRigctld | FreqControl::CatFile => managed.to_string(),
         FreqControl::Flrig | FreqControl::None => return OwnerCheck::Ok,
     };
     if rl.ptt_method != "hamlib" {
@@ -380,6 +383,8 @@ impl App {
         // MercuryChat's own rigctld, if it started one: a new one starts once
         // it has gone (below), or it is stopped at the end.
         r.daemon_bridge = None;
+        // The old engine lets go of the radio's port before a new one opens it.
+        r.cat_engine = None;
         let mut previous = r.daemon.take();
         let same_station = profile_id.is_some() && r.profile_id.as_deref() == profile_id;
         r.profile_id = profile_id.map(String::from);
@@ -421,6 +426,46 @@ impl App {
                     cmd_rx,
                     out_tx,
                 )),
+                FreqControl::CatFile => {
+                    let listen = r.listen();
+                    match crate::app::catradios::find(&self.store, &cfg.cat.radio) {
+                        None => {
+                            let reason = format!("the radio {:?} is not in the CAT commands file", cfg.cat.radio);
+                            r.cat_note(reason.clone());
+                            r.policy.on_msg(&RigMsg::Link(RigLink::Lost { reason }), Instant::now());
+                            None
+                        }
+                        Some(radio) => {
+                            let (port, baud) = (cfg.cat.serial_port.trim().to_string(), cfg.cat.baud);
+                            let failed = out_tx.clone();
+                            // The engine runs for as long as this profile does.
+                            let engine = tokio::spawn(async move {
+                                let opened = tokio::task::spawn_blocking(move || {
+                                    mercury_adapter::cat::serial::SerialRadio::open(&port, baud)
+                                })
+                                .await;
+                                let started = match opened {
+                                    Ok(Ok(p)) => {
+                                        let engine = mercury_adapter::cat::server::Engine::new(radio, Box::new(p));
+                                        mercury_adapter::cat::server::CatServer::start(listen, engine)
+                                            .await
+                                            .map_err(|e| e.to_string())
+                                    }
+                                    Ok(Err(e)) => Err(e.to_string()),
+                                    Err(e) => Err(e.to_string()),
+                                };
+                                match started {
+                                    Ok(_server) => std::future::pending::<()>().await,
+                                    Err(reason) => {
+                                        let _ = failed.send(RigMsg::Link(RigLink::Lost { reason })).await;
+                                    }
+                                }
+                            });
+                            r.cat_engine = Some(AbortOnDrop(engine.abort_handle()));
+                            Some(RigClient::spawn_every(listen.to_string(), read_every, cmd_rx, out_tx))
+                        }
+                    }
+                }
                 FreqControl::ManagedRigctld => {
                     let listen = r.listen();
                     // A built-in profile: the bundled rigctld, checked, or nothing.
@@ -496,6 +541,7 @@ impl App {
         self.rig.task = None;
         self.rig.tx = None;
         self.rig.daemon_bridge = None;
+        self.rig.cat_engine = None;
         let mut daemon = self.rig.daemon.take();
         if keyed {
             if let Some(d) = daemon.take() {
@@ -598,7 +644,7 @@ impl App {
     pub(super) fn test_rig(&mut self, mut config: RigConfig, reply: super::Reply<CommandOk>) {
         // MercuryChat's own rigctld is tested where it runs (M5 W4): a
         // built-in station's on its own port, else 127.0.0.1:4532.
-        if config.freq_control == FreqControl::ManagedRigctld {
+        if matches!(config.freq_control, FreqControl::ManagedRigctld | FreqControl::CatFile) {
             let l = self.rig.listen();
             config.external.host = l.ip().to_string();
             config.external.port = l.port();

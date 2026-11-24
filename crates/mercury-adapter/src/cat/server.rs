@@ -7,7 +7,6 @@
 //! Nothing is made up: a mode is reported only once it has been set, and
 //! anything the file cannot do answers with an error code.
 
-use super::codec::decode_freq;
 use super::file::Radio;
 use std::io;
 use std::net::SocketAddr;
@@ -208,7 +207,9 @@ impl Drop for Engine {
 pub struct CatServer {
     pub addr: SocketAddr,
     engine: Arc<Mutex<Engine>>,
-    task: JoinHandle<()>,
+    /// The accept loop and every client: all end with the server, so the
+    /// radio's port is free again once it is dropped.
+    tasks: Arc<Mutex<Vec<JoinHandle<()>>>>,
 }
 
 impl CatServer {
@@ -218,12 +219,18 @@ impl CatServer {
         let addr = listener.local_addr()?;
         let engine = Arc::new(Mutex::new(engine));
         let e = engine.clone();
-        let task = tokio::spawn(async move {
+        let tasks: Arc<Mutex<Vec<JoinHandle<()>>>> = Arc::default();
+        let t = tasks.clone();
+        let accept = tokio::spawn(async move {
             while let Ok((sock, _)) = listener.accept().await {
-                tokio::spawn(client(sock, e.clone()));
+                let conn = tokio::spawn(client(sock, e.clone()));
+                let mut t = t.lock().unwrap();
+                t.retain(|h| !h.is_finished());
+                t.push(conn);
             }
         });
-        Ok(CatServer { addr, engine, task })
+        tasks.lock().unwrap().push(accept);
+        Ok(CatServer { addr, engine, tasks })
     }
 
     /// The radio's frequency, read through the engine (the app's own reads
@@ -241,7 +248,9 @@ impl CatServer {
 
 impl Drop for CatServer {
     fn drop(&mut self) {
-        self.task.abort();
+        for t in self.tasks.lock().unwrap().drain(..) {
+            t.abort();
+        }
     }
 }
 
@@ -266,7 +275,7 @@ async fn client(sock: tokio::net::TcpStream, engine: Arc<Mutex<Engine>>) {
 #[cfg(any(test, feature = "fake"))]
 pub mod fake {
     use super::*;
-    use crate::cat::codec::{bytes_to_hex, encode_freq, hex_to_bytes};
+    use crate::cat::codec::{bytes_to_hex, decode_freq, encode_freq, hex_to_bytes};
 
     /// What the radio did, shared with the test.
     #[derive(Default, Debug)]
@@ -445,6 +454,31 @@ mod tests {
         let mut e = Engine::new(radio("Icom IC-7300"), Box::new(Dead));
         assert_eq!(e.answer("f").unwrap(), "RPRT -6\n");
         assert_eq!(e.answer("T 1").unwrap(), "RPRT -6\n");
+    }
+
+    #[tokio::test]
+    async fn dropping_the_server_ends_its_clients_and_frees_the_radio() {
+        let (e, log) = icom();
+        let server = CatServer::start("127.0.0.1:0".parse().unwrap(), e).await.unwrap();
+        let mut c = TcpStream::connect(server.addr).await.unwrap();
+        c.write_all(
+            b"T 1
+",
+        )
+        .await
+        .unwrap();
+        let mut buf = [0u8; 16];
+        let _ = c.read(&mut buf).await.unwrap();
+        assert!(log.lock().unwrap().keyed);
+        drop(server);
+        // The client is dropped with it: the read ends, and the radio is unkeyed.
+        let n = tokio::time::timeout(std::time::Duration::from_secs(2), c.read(&mut buf))
+            .await
+            .expect("closed")
+            .unwrap_or(0);
+        assert_eq!(n, 0);
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        assert!(!log.lock().unwrap().keyed, "the engine went with the server and unkeyed the radio");
     }
 
     #[tokio::test]

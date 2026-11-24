@@ -923,6 +923,7 @@
     "freqControl": "Frequency control",
     "freqControlOpt": {
       "managedRigctld": "Hamlib (MercuryChat runs rigctld)",
+      "catFile": "Built-in radio control (CAT commands)",
       "externalRigctld": "Hamlib (rigctld I already run)",
       "flrig": "FLRig (frequency and mode)",
       "none": "None"
@@ -942,7 +943,14 @@
     "hamlibBuiltIn": "rigctld: Hamlib {version}, built in",
     "testOwn": "Save and test (read only)",
     "testOwnHint": "Saves, then reads from the rig through MercuryChat's own rigctld. Nothing on the rig is changed.",
-    "laterInSettings": "Later, in Settings → Rig: TX and Tune levels, the frequency list, a frequency offset, how often the rig is read, the data mode and the CAT log."
+    "laterInSettings": "Later, in Settings → Rig: TX and Tune levels, the frequency list, a frequency offset, how often the rig is read, the data mode and the CAT log.",
+    "catFile": "Built-in radio control",
+    "radio": "Radio",
+    "radioChoose": "Choose your radio",
+    "importFile": "Import a CAT commands file",
+    "imported": "Added {n} radio(s).",
+    "importSkipped": "{n} could not be read.",
+    "catFileHint": "MercuryChat talks to the radio's serial port itself, with the radio's own commands, so Hamlib is not needed. Missing your radio? Import a CAT commands file."
   },
   "freqList": {
     "title": "Frequency list",

@@ -10,7 +10,11 @@ export type CatSettings = {
 /**
  * Hamlib rig model number.
  */
-model: number | null, link: CatLink, serialPort: string, 
+model: number | null, 
+/**
+ * The radio's name in the CAT commands file (built-in engine).
+ */
+radio: string, link: CatLink, serialPort: string, 
 /**
  * `host:port` of a network radio.
  */

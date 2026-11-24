@@ -354,6 +354,12 @@ pub enum AppCommand {
     HamlibModels {
         hamlib_dir: String,
     },
+    /// The radios MercuryChat can control itself (built-in and imported).
+    CatRadios,
+    /// Take the radios in a CAT commands file's text into the app.
+    ImportCatFile {
+        text: String,
+    },
     /// The CAT log: MercuryChat's rigctld's stderr, then MercuryChat's own rig
     /// link errors, each the last 200 lines.
     CatLog,
@@ -513,6 +519,14 @@ pub enum CommandOk {
     HamlibModels {
         models: Vec<HamlibModelView>,
         found: bool,
+    },
+    CatRadios {
+        radios: Vec<String>,
+    },
+    CatImported {
+        added: Vec<String>,
+        /// "name: why" for each radio that could not be read.
+        skipped: Vec<String>,
     },
     BuiltIn(BuiltInView),
     PortCheck {
