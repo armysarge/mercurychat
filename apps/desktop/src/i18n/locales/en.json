@@ -13,7 +13,9 @@
     "settings": "Settings",
     "diagnostics": "Diagnostics",
     "logbook": "Logbook",
-    "files": "Files"
+    "files": "Files",
+    "chats": "Chats",
+    "heard": "Heard"
   },
   "modem": {
     "unavailable": "unavailable",
@@ -142,7 +144,18 @@
     "historySearchAria": "Search this history (Ctrl+F)",
     "historySearchPlaceholder": "Search history (Ctrl+F)",
     "hitsAria": "Messages that match",
-    "hitsTitle": "{n} message found | {n} messages found"
+    "hitsTitle": "{n} message found | {n} messages found",
+    "chipAll": "All",
+    "chipSessions": "Sessions",
+    "chipCq": "CQ",
+    "chipBeacons": "Beacons",
+    "chipsAria": "Show conversations heard by",
+    "liveNow": "Live now",
+    "recent": "Recent",
+    "footBusy": "Available once {peer} hangs up",
+    "footCq": "Call CQ",
+    "footBeacon": "Beacon now",
+    "heardTimes": "heard {n}× | heard {n}×"
   },
   "transcript": {
     "loadOlder": "Load older messages",
@@ -426,7 +439,7 @@
   },
   "sidebar": {
     "label": "Contacts and heard stations",
-    "chats": "Contacts",
+    "chats": "Chats",
     "heard": "Heard",
     "heardEmpty": "No stations heard yet. Stations you hear on the air will appear here.",
     "toggle": "Contacts",
@@ -1308,5 +1321,19 @@
       "rust": "Rust crates",
       "npm": "JavaScript packages"
     }
+  },
+  "stationMenu": {
+    "label": "Actions for {callsign}",
+    "more": "More for {callsign}",
+    "open": "Open chat",
+    "call": "Call {callsign}",
+    "export": "Export conversation…",
+    "close": "Close conversation",
+    "dismiss": "Dismiss",
+    "search": "Search this conversation"
+  },
+  "header": {
+    "beaconIn": "Beacon in {time}",
+    "beaconInTitle": "Next periodic beacon. Change it in the Beacon card on the station home."
   }
 }

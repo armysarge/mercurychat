@@ -13,6 +13,7 @@ import type { Reading } from "../bindings/Reading";
 import Avatar from "./Avatar.vue";
 import QsyPropose from "./QsyPropose.vue";
 import { describeTuning, extras, tuneSuggested } from "../extras";
+import { openAt, openFrom, qsyTo } from "../stationMenu";
 import { activeProfile, app, chat, discovery, discoveryError, inSession, linkPeer, openPeer, setFavourite } from "../store";
 
 const { t } = useI18n();
@@ -54,8 +55,8 @@ function provenance(r: Reading<number>): string {
 }
 const mhz = (hz: number) => (hz / 1e6).toFixed(3);
 
-/** The station a QSY suggestion is being written to (B5), or "". */
-const suggesting = ref("");
+/** The station a QSY suggestion is being written to (B5), or "": set from the station menu. */
+const suggesting = computed({ get: () => qsyTo.callsign, set: (v: string) => (qsyTo.callsign = v) });
 /** "Tune and listen" was pressed: the card stays until dismissed. */
 const tuned = ref(false);
 async function tune(i: number) {
@@ -105,6 +106,7 @@ async function pick(h: HeardStation) {
         :key="h.callsign"
         :class="['row', { fresh: discovery.fresh[h.callsign], active: h.callsign === chat.open }]"
         :data-callsign="h.callsign"
+        @contextmenu="openAt($event, h.callsign, 'heard')"
       >
         <button class="pick" :aria-current="h.callsign === chat.open ? 'true' : undefined" @click="pick(h)">
           <Avatar :callsign="h.callsign" :live="h.callsign === linkPeer" :size="32" />
@@ -130,12 +132,12 @@ async function pick(h: HeardStation) {
           </span>
         </button>
         <button
-          class="suggest-qsy quiet small"
-          :aria-label="t('qsy.suggestAria', { callsign: h.callsign })"
-          :title="t('qsy.suggestAria', { callsign: h.callsign })"
-          :disabled="!activeProfile"
-          @click="suggesting = h.callsign"
-        >{{ t("qsy.suggest") }}</button>
+          class="more quiet"
+          aria-haspopup="menu"
+          :aria-label="t('stationMenu.more', { callsign: h.callsign })"
+          :title="t('stationMenu.more', { callsign: h.callsign })"
+          @click="openFrom($event.currentTarget as HTMLElement, h.callsign, 'heard')"
+        >…</button>
         <button
           class="star quiet"
           :aria-pressed="h.favourite"
@@ -179,7 +181,7 @@ async function pick(h: HeardStation) {
 .call { overflow-wrap: anywhere; }
 .meta { gap: 2px 8px; }
 .meta > span { white-space: nowrap; }
-.suggest-qsy { min-height: 0; padding: 4px 6px; border-color: transparent; }
+.more { min-height: 0; padding: 4px 8px; border-color: transparent; font-size: calc(16px * var(--font-scale)); line-height: 1; color: var(--text-2); }
 .beacon-fields { gap: 2px 8px; }
 .star { min-height: 0; padding: 4px 8px; border-color: transparent; font-size: calc(16px * var(--font-scale)); line-height: 1; color: var(--warning); }
 .star[aria-pressed="false"] { color: var(--text-2); }

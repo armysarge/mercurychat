@@ -63,6 +63,11 @@ pub struct Conversation {
     #[ts(type = "number")]
     pub uncertain: i64,
     pub draft: Option<String>,
+    /// The last message's text (the Chats list's preview); `None` for a
+    /// conversation that is only a draft.
+    pub last_body: Option<String>,
+    /// The last message was ours.
+    pub last_out: bool,
 }
 
 pub fn field(field: &str, message: impl Into<String>) -> Vec<FieldError> {

@@ -101,6 +101,9 @@ pub struct ConversationRow {
     pub last_utc: String,
     pub messages: i64,
     pub uncertain: i64,
+    /// The last message's text, and whether it was ours (the Chats list, M5).
+    pub last_body: String,
+    pub last_out: bool,
 }
 
 /// One MCH/1 session as recorded on the station (docs/02 section 6, sessions).
@@ -415,12 +418,22 @@ impl Store {
     /// Every peer with history, the most recent conversation first.
     pub fn conversations(&self) -> Result<Vec<ConversationRow>> {
         let mut st = self.conn.prepare(
-            "SELECT peer, max(coalesce(received_utc, created_utc)), count(*),
-                    sum(CASE WHEN state = 'uncertain' THEN 1 ELSE 0 END), max(rowid_pk) AS last
-             FROM messages GROUP BY peer ORDER BY last DESC",
+            "SELECT g.peer, g.last_utc, g.n, g.unc, m.body, m.direction = 'out'
+             FROM (SELECT peer, max(coalesce(received_utc, created_utc)) AS last_utc, count(*) AS n,
+                          sum(CASE WHEN state = 'uncertain' THEN 1 ELSE 0 END) AS unc, max(rowid_pk) AS last
+                   FROM messages GROUP BY peer) g
+             JOIN messages m ON m.rowid_pk = g.last
+             ORDER BY g.last DESC",
         )?;
         let rows = st.query_map([], |r| {
-            Ok(ConversationRow { peer: r.get(0)?, last_utc: r.get(1)?, messages: r.get(2)?, uncertain: r.get(3)? })
+            Ok(ConversationRow {
+                peer: r.get(0)?,
+                last_utc: r.get(1)?,
+                messages: r.get(2)?,
+                uncertain: r.get(3)?,
+                last_body: r.get(4)?,
+                last_out: r.get(5)?,
+            })
         })?;
         Ok(rows.collect::<std::result::Result<_, _>>()?)
     }

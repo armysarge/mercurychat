@@ -3,4 +3,13 @@
 /**
  * One peer's conversation, with the operator's unsent draft if any.
  */
-export type Conversation = { peer: string, lastUtc: string, messages: number, uncertain: number, draft: string | null, };
+export type Conversation = { peer: string, lastUtc: string, messages: number, uncertain: number, draft: string | null, 
+/**
+ * The last message's text (the Chats list's preview); `None` for a
+ * conversation that is only a draft.
+ */
+lastBody: string | null, 
+/**
+ * The last message was ours.
+ */
+lastOut: boolean, };

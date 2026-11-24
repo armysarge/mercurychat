@@ -9,7 +9,7 @@ import { info, measureIpc } from "./diag";
 import { onEvent as notifyOn, startNotifier, stopNotifier } from "./notifier";
 import { t } from "./i18n";
 import {
-  activeProfile, app, chat, detail, mirror, modemLabel, modemState, modeWord, offerFile, onAppEvent, openPeer, reloadChat, reloadDiscovery,
+  activeProfile, app, chat, detail, discovery, mirror, modemLabel, modemState, modeWord, offerFile, onAppEvent, openPeer, reloadChat, reloadDiscovery,
   reloadTransfers, session, snapshot, stopTimers, type ViewName,
 } from "./store";
 import Conversations from "./views/Conversations.vue";
@@ -22,6 +22,8 @@ import Welcome from "./views/Welcome.vue";
 import Wizard from "./views/Wizard.vue";
 import AppLogo from "./components/AppLogo.vue";
 import ContextMenu from "./components/ContextMenu.vue";
+import StationMenu from "./components/StationMenu.vue";
+import { countdown } from "./components/countdown";
 import SendFileDialog from "./components/SendFileDialog.vue";
 import Sidebar from "./components/Sidebar.vue";
 import StationStrip from "./components/StationStrip.vue";
@@ -37,14 +39,51 @@ const startupError = ref("");
 const now = ref(new Date());
 let clock: ReturnType<typeof setInterval> | undefined;
 
-const RAIL: { page: ViewName; label: string; icon: string }[] = [
-  { page: "operate", label: "nav.operate", icon: "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4" },
-  { page: "conversations", label: "nav.conversations", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
-  { page: "files", label: "nav.files", icon: "M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h5" },
-  { page: "logbook", label: "nav.logbook", icon: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6" },
-  { page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
-  { page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
+// The rail in the canvas's order (M5 Task 11c, owner): Chats and Heard (the
+// Operate page with that list beside it), Files, Logbook; Diagnostics and
+// Settings at the bottom. The Conversations page (a conversation's history
+// with its search) opens from the conversation's "…" and keeps Chats selected.
+type RailItem = { id: string; label: string; icon: string; page: ViewName; side?: "chats" | "heard" };
+const RAIL: RailItem[] = [
+  { id: "chats", page: "operate", side: "chats", label: "nav.chats", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
+  { id: "heard", page: "operate", side: "heard", label: "nav.heard", icon: "M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8" },
+  { id: "files", page: "files", label: "nav.files", icon: "M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h5" },
+  { id: "logbook", page: "logbook", label: "nav.logbook", icon: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6" },
+  { id: "diagnostics", page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
+  { id: "settings", page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
 ];
+/** "Beacon in 09:24" (the canvas's header): only while periodic beacons are on and one is due. */
+const beaconIn = computed(() => {
+  const b = snapshot.value?.beacon;
+  if (!b?.active || !b.nextDueUtc) return "";
+  const left = countdown(b.nextDueUtc, now.value.getTime());
+  return left.startsWith("00:") ? left.slice(3) : left;
+});
+/** The status capsule's tint, from the modem's state (its words say the same). */
+const stateTone = computed(() => {
+  const s = modemState.value;
+  if (s === "ready" || s === "listening" || s === "connected") return "ok";
+  if (s === "faulted") return "danger";
+  if (s === "unavailable") return "none";
+  return "warn";
+});
+const CHAT_PAGES: ViewName[] = ["operate", "conversations"];
+/** The rail item for where the operator is. */
+function railOn(r: RailItem): boolean {
+  if (r.side) return CHAT_PAGES.includes(app.page) && app.sideTab === r.side;
+  return app.page === r.page;
+}
+function goRail(r: RailItem) {
+  if (r.side) {
+    app.sideTab = r.side;
+    // Below 960 px the list is a drawer: the rail opens it.
+    if (window.matchMedia("(max-width: 960px)").matches) app.drawer = "peers";
+    else app.drawer = null;
+    app.page = "operate";
+    return;
+  }
+  go(r.page);
+}
 
 /** The rig's banners (M3b): each is dismissible only once it is safe to. */
 const rigBanners = computed(() => {
@@ -242,8 +281,12 @@ onUnmounted(() => {
         </label>
       </span>
       <span class="grow" data-tauri-drag-region></span>
+      <span v-if="beaconIn && !setup" class="beacon-in small" :title="t('header.beaconInTitle')" data-tauri-drag-region>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7" /></svg>
+        <i18n-t keypath="header.beaconIn" tag="span" scope="global"><template #time><b class="mono">{{ beaconIn }}</b></template></i18n-t>
+      </span>
       <!-- The modem's state, the one place it is said (owner, 17 Nov): a long detail is cut with an ellipsis; hover shows it all. -->
-      <span class="state" role="status" aria-live="polite" :title="stateTitle" data-tauri-drag-region>
+      <span class="state" :data-tone="stateTone" role="status" aria-live="polite" :title="stateTitle" data-tauri-drag-region>
         <span :class="['pill', modemState]"><span class="dot" aria-hidden="true"></span>{{ modemLabel }}</span>
         <span v-if="where" class="where small">{{ where }}</span>
         <span v-if="detail" class="detail muted small">{{ detail }}</span>
@@ -281,15 +324,20 @@ onUnmounted(() => {
       <nav class="rail" :aria-label="t('nav.label')">
         <button
           v-for="r in RAIL"
-          :key="r.page"
-          :class="{ selected: app.page === r.page && !setup }"
-          :aria-current="app.page === r.page ? 'page' : undefined"
+          :key="r.id"
+          :class="{ selected: railOn(r) && !setup }"
+          :data-rail="r.id"
+          :aria-current="railOn(r) ? 'page' : undefined"
           :title="t(r.label)"
           :aria-label="t(r.label)"
-          @click="go(r.page)"
+          :aria-describedby="r.id === 'heard' && discovery.unseen ? 'rail-heard-new' : undefined"
+          @click="goRail(r)"
         >
           <svg viewBox="0 0 24 24" aria-hidden="true"><path :d="r.icon" /></svg>
           {{ t(r.label) }}
+          <span v-if="r.id === 'heard' && discovery.unseen" id="rail-heard-new" class="rail-badge">
+            <span aria-hidden="true">{{ discovery.unseen }}</span><span class="sr-only">{{ t("sidebar.heardNew", discovery.unseen) }}</span>
+          </span>
         </button>
       </nav>
       <Sidebar v-if="snapshot && !setup" :class="{ open: app.drawer === 'peers' }" />
@@ -308,6 +356,7 @@ onUnmounted(() => {
     </div>
   </div>
   <ContextMenu />
+  <StationMenu />
   <SendFileDialog />
 </template>
 
@@ -348,7 +397,19 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 .mode-word.rx { color: var(--warning); }
 .toggle-sidebar { display: none; }
 .scrim { display: none; }
-.state { display: flex; align-items: center; gap: var(--space); min-width: 0; cursor: default; }
+.state {
+  display: flex; align-items: center; gap: var(--space); min-width: 0; cursor: default;
+  padding: 3px 12px 3px 10px; border-radius: 999px; border: 1px solid var(--border); background: var(--surface);
+}
+/* The canvas's tinted capsule: "● Modem ready · Simulator". */
+.state[data-tone="ok"] { background: color-mix(in srgb, var(--success) 12%, var(--surface)); border-color: color-mix(in srgb, var(--success) 35%, var(--border)); }
+.state[data-tone="warn"] { background: color-mix(in srgb, var(--warning) 12%, var(--surface)); border-color: color-mix(in srgb, var(--warning) 35%, var(--border)); }
+.state[data-tone="danger"] { background: color-mix(in srgb, var(--danger) 12%, var(--surface)); border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+.state .pill { border: 0; padding: 0; }
+.state .where::before { content: "· "; }
+.beacon-in { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); white-space: nowrap; }
+.beacon-in b { color: var(--text); font-weight: 600; }
+.beacon-in svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; }
 .detail { min-width: 0; max-width: 36ch; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .banner {
   flex: none; margin: 0; padding: 6px calc(var(--space) * 2); border-bottom: 1px solid var(--border);
@@ -372,7 +433,12 @@ header > .state { flex: 0 1 auto; min-width: 0; }
 }
 .rail button:hover { color: var(--text); }
 .rail button.selected { background: var(--raised); color: var(--accent); }
-.rail button:nth-child(4) { margin-top: auto; }
+.rail button { position: relative; }
+.rail button[data-rail="diagnostics"] { margin-top: auto; }
+.rail-badge {
+  position: absolute; top: 4px; right: 8px; min-width: 18px; padding: 0 5px; border-radius: 999px;
+  background: var(--accent); color: var(--accent-text); font-size: calc(10px * var(--font-scale)); line-height: 18px; text-align: center;
+}
 .view { min-height: 0; min-width: 0; overflow: hidden; }
 .loading { padding: calc(var(--space) * 3); }
 @media (max-width: 1279px) {
@@ -394,6 +460,6 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   .rail button { font-size: calc(9px * var(--font-scale)); }
   .alpha, .utc { display: none; }
   /* The strip right below shows the frequency: the pill keeps the callsign only. */
-  .station-pill .divider, .pill-freq { display: none; }
+  .station-pill .divider, .pill-freq, .beacon-in { display: none; }
 }
 </style>

@@ -658,6 +658,8 @@ impl App {
                             messages: c.messages,
                             uncertain: c.uncertain,
                             draft,
+                            last_body: Some(c.last_body),
+                            last_out: c.last_out,
                         }
                     })
                     .collect();
@@ -668,6 +670,8 @@ impl App {
                     messages: 0,
                     uncertain: 0,
                     draft: Some(text),
+                    last_body: None,
+                    last_out: false,
                 }));
                 list.sort_by(|a, b| b.last_utc.cmp(&a.last_utc));
                 Ok(CommandOk::Conversations { conversations: list })

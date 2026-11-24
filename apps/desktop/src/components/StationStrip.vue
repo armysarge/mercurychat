@@ -49,11 +49,7 @@ function openAudio() {
 }
 const beacon = computed(() => snapshot.value?.beacon ?? null);
 const idle = computed(() => modemState.value === "ready" || modemState.value === "listening");
-/** "7.105.000": the rig's frequency while its link is up, else Mercury's; dashes for none. */
-const freqAge = computed(() => {
-  const a = shownFreq.value?.ageMs;
-  return a === undefined || a === null ? null : (a / 1000).toFixed(1);
-});
+// The frequency's age is in its tooltip (FreqDigits), not beside it (owner, 24 Nov).
 const bandwidth = shownBandwidth;
 const mode = shownMode;
 
@@ -149,7 +145,6 @@ onUnmounted(() => narrowQuery.removeEventListener("change", onNarrow));
       <div class="group station">
         <div class="freq">
           <FreqDigits :hz="shownFreq?.hz ?? null" :age-ms="shownFreq?.ageMs ?? null" :editable="rigUp" :refusal="freqRefusal" @tune="tuneFreq" />
-          <span v-if="freqAge !== null" class="muted small mono">{{ t("telemetry.ageS", { s: freqAge }) }}</span>
         </div>
         <div class="tags small">
           <button v-if="rigUp" ref="bandBtn" class="tag chip-btn band-chip mono" :aria-expanded="bandOpen" :title="t('strip.bandMenu', { band: bandName })" @click="bandOpen = !bandOpen">{{ bandName }}</button>

@@ -490,6 +490,40 @@ async fn chat_replies_serialize_for_the_window() {
     }
 }
 
+/// The Chats list's preview (M5 Task 11c): each conversation's last message
+/// and whether it was ours; a conversation that is only a draft has none.
+#[tokio::test(flavor = "multi_thread")]
+async fn conversations_show_the_last_message() {
+    let dir = tempfile::tempdir().unwrap();
+    let app = sim(dir.path()).await;
+    send(
+        &app.h,
+        PEER,
+        "first line
+second",
+    )
+    .await
+    .unwrap();
+    app.h.call(AppCommand::SaveDraft { peer: "ZS6DRF".into(), text: "later".into() }).await.unwrap();
+    let convs = match app.h.call(AppCommand::Conversations).await.unwrap() {
+        CommandOk::Conversations { conversations } => conversations,
+        other => panic!("{other:?}"),
+    };
+    let sent = convs.iter().find(|c| c.peer == PEER).expect("the sent message's conversation");
+    assert_eq!(
+        (sent.last_body.as_deref(), sent.last_out),
+        (
+            Some(
+                "first line
+second"
+            ),
+            true
+        )
+    );
+    let draft = convs.iter().find(|c| c.peer == "ZS6DRF").expect("the draft's conversation");
+    assert_eq!((draft.last_body.as_deref(), draft.last_out), (None, false));
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn draft_survives_restart_and_is_never_sent() {
     let dir = tempfile::tempdir().unwrap();

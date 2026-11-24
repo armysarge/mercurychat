@@ -29,7 +29,7 @@ if (!exe || !dataDir) {
   process.exit(2);
 }
 const CALL = "ZS6SIM";
-const ready = `(['ready','listening'].includes(${pill})) && document.querySelector('textarea.composer')`;
+const ready = `(['ready','listening'].includes(${pill})) && document.querySelector('textarea.composer, .station-home')`;
 const rail = (name) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(name)})`;
 const invoke = (cmd) => `window.__TAURI_INTERNALS__.invoke('app_call', { cmd: ${JSON.stringify(cmd)} })`;
 const watchErrors = `(() => {
@@ -74,7 +74,7 @@ async function restart(env, what) {
 
 /** Operate, SIM1's conversation open and a session with it. */
 async function connectSim1() {
-  await s.eval(`${rail("Operate")}.click()`);
+  await s.eval(`${rail("Chats")}.click()`);
   await s.eval(heardTab);
   await until(s, sim1, "SIM1 in the Heard list", 20000);
   await s.eval(`${sim1}.click()`);

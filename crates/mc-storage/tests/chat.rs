@@ -28,6 +28,21 @@ fn conversations_order_by_latest() {
     assert!(!c[0].last_utc.is_empty());
 }
 
+/// The Chats list shows each conversation's last message (M5 Task 11c, the
+/// design canvas): its text and whether it was ours.
+#[test]
+fn conversations_carry_the_last_message() {
+    let mut s = Store::open_in_memory().unwrap();
+    out(&mut s, "ZS6AAA", 1, "first");
+    s.store_incoming_chat("ZS6AAA", &id(2), "their reply", 1).unwrap();
+    s.store_incoming_chat("ZS6BBB", &id(3), "hello", 1).unwrap();
+    out(&mut s, "ZS6BBB", 4, "and ours last");
+    let c = s.conversations().unwrap();
+    let by = |p: &str| c.iter().find(|c| c.peer == p).unwrap().clone();
+    assert_eq!((by("ZS6AAA").last_body.as_str(), by("ZS6AAA").last_out), ("their reply", false));
+    assert_eq!((by("ZS6BBB").last_body.as_str(), by("ZS6BBB").last_out), ("and ours last", true));
+}
+
 #[test]
 fn history_pages_backwards() {
     let mut s = Store::open_in_memory().unwrap();

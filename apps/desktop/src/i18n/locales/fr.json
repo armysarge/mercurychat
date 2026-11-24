@@ -14,7 +14,9 @@
     "settings": "Réglages",
     "diagnostics": "Diagnostic",
     "logbook": "Carnet de trafic",
-    "files": "Fichiers"
+    "files": "Fichiers",
+    "chats": "Discussions",
+    "heard": "Entendues"
   },
   "modem": {
     "unavailable": "indisponible",
@@ -143,7 +145,18 @@
     "historySearchAria": "Rechercher dans cet historique (Ctrl+F)",
     "historySearchPlaceholder": "Rechercher dans l'historique (Ctrl+F)",
     "hitsAria": "Messages correspondants",
-    "hitsTitle": "{n} message trouvé | {n} messages trouvés"
+    "hitsTitle": "{n} message trouvé | {n} messages trouvés",
+    "chipAll": "Toutes",
+    "chipSessions": "Sessions",
+    "chipCq": "CQ",
+    "chipBeacons": "Balises",
+    "chipsAria": "Afficher les conversations entendues par",
+    "liveNow": "En direct",
+    "recent": "Récentes",
+    "footBusy": "Disponible quand {peer} raccroche",
+    "footCq": "Appeler CQ",
+    "footBeacon": "Balise maintenant",
+    "heardTimes": "entendue {n}× | entendue {n}×"
   },
   "transcript": {
     "loadOlder": "Charger les messages plus anciens",
@@ -427,7 +440,7 @@
   },
   "sidebar": {
     "label": "Contacts et stations entendues",
-    "chats": "Contacts",
+    "chats": "Discussions",
     "heard": "Entendues",
     "heardEmpty": "Aucune station entendue pour l'instant. Les stations entendues sur l'air apparaîtront ici.",
     "toggle": "Contacts",
@@ -1309,5 +1322,19 @@
       "rust": "Crates Rust",
       "npm": "Paquets JavaScript"
     }
+  },
+  "stationMenu": {
+    "label": "Actions pour {callsign}",
+    "more": "Plus pour {callsign}",
+    "open": "Ouvrir la discussion",
+    "call": "Appeler {callsign}",
+    "export": "Exporter la conversation…",
+    "close": "Fermer la conversation",
+    "dismiss": "Fermer",
+    "search": "Chercher dans cette conversation"
+  },
+  "header": {
+    "beaconIn": "Balise dans {time}",
+    "beaconInTitle": "Prochaine balise périodique. Modifiez-la dans la carte Balise de la station."
   }
 }

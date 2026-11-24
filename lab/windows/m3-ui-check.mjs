@@ -82,7 +82,6 @@ const CALL = "ZS6SIM";
 const linkLog = join(dirname(dataDir), `${port}-links.txt`);
 rmSync(linkLog, { force: true });
 process.env.MC_OPEN_LINK_LOG = linkLog;
-const ANTENNA = "M12 8v13M9 21h6M3 8h18M6 5v6M10 4v8M14 5v6M18 6v4";
 
 /** Top-level windows of a process: [{x, y, w, h, title}], optionally after moving the largest. */
 function windows(pid, to) {
@@ -99,7 +98,7 @@ function windows(pid, to) {
 const isSplash = (t) => t.url?.includes("splash.html");
 
 /** The workspace is up: a station, the modem attached, composer on screen. */
-const ready = `(['ready','listening'].includes(${pill})) && document.querySelector('textarea.composer')`;
+const ready = `(['ready','listening'].includes(${pill})) && document.querySelector('textarea.composer, .station-home')`;
 const rail = (name) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(name)})`;
 const rectOf = (sel) => `(() => { const r = document.querySelector(${JSON.stringify(sel)}).getBoundingClientRect(); return [r.left, r.top, r.width, r.height].map(Math.round).join(','); })()`;
 const onScreen = (sel) => `(() => {
@@ -186,7 +185,7 @@ try {
   results.push('PASS receive only: first use explains automatic answering and offers "Start in Receive only"; header toggles Answering calls <-> Receive only from the core\'s state; no old Listen switch');
 
   // ---- T10a. SIM1 is heard by CQ, then by beacon with its locator (Contacts open: the Heard tab counts them)
-  await until(s, "document.querySelector('aside.sidebar [role=tab][aria-selected=true]')?.textContent.trim() === 'Contacts'", "Contacts open first");
+  await until(s, "document.querySelector('aside.sidebar [role=tab][aria-selected=true]')?.textContent.trim() === 'Chats'", "Chats open first");
   await until(s, "!!document.querySelector('#side-heard-new')", "the Heard tab's new-station count while Contacts is open", 15000);
   const count = await s.eval("document.querySelector('#side-heard-new [aria-hidden]').textContent.trim()");
   await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
@@ -398,13 +397,15 @@ try {
   await until(s, "document.getElementById('tab-rig')?.getAttribute('aria-selected') === 'true'", "the Rig tab remembered");
   results.push("PASS remembered tab: Rig is still chosen after a window reload");
   await s.eval("document.getElementById('tab-station').click()");
-  await s.eval(`${rail("Operate")}.click()`);
+  await s.eval(`${rail("Chats")}.click()`);
 
   // ---- 3. the antenna icon
-  const d = await s.eval(`${rail("Operate")}.querySelector('path').getAttribute('d')`);
-  if (d !== ANTENNA) throw new Error(`Operate icon path is ${d}`);
-  if ((await s.eval(`${rail("Operate")}.title`)) !== "Operate") throw new Error("Operate has no tooltip");
-  results.push("PASS icon: Operate rail icon is the antenna path, tooltip and aria-label \"Operate\"");
+  // M5 Task 11c (owner): the rail in the canvas's order; Chats (the Operate
+  // page with its list) has the canvas's chat icon, no longer the antenna.
+  const order = await s.eval("[...document.querySelectorAll('.rail button')].map(b => b.getAttribute('aria-label')).join('|')");
+  if (order !== "Chats|Heard|Files|Logbook|Diagnostics|Settings") throw new Error(`rail order ${order}`);
+  if ((await s.eval(`${rail("Chats")}.title`)) !== "Chats") throw new Error("Chats has no tooltip");
+  results.push(`PASS rail: ${order}, each with its tooltip and aria-label`);
 
   // ---- 4. composer
   await s.eval(setInput("input.peer", "sim1"));
@@ -435,7 +436,7 @@ try {
   await s.eval(setInput("input.search", "SIM"));
   const sideRect = await s.eval(rectOf("aside.sidebar"));
   const picked = await s.eval("document.querySelector('.item.active b').textContent");
-  const pageNames = [["Conversations", ".history"], ["Settings", ".profiles, .card"], ["Diagnostics", ".diag"], ["Operate", ".chat-pane"]];
+  const pageNames = [["Files", ".files-view"], ["Settings", ".profiles, .card"], ["Diagnostics", ".diag"], ["Chats", ".chat-pane"]];
   for (const [name, marker] of pageNames) {
     await s.eval(`${rail(name)}.click()`);
     await until(s, `document.querySelector(${JSON.stringify(marker)})`, `${name} page`);
@@ -449,17 +450,17 @@ try {
     const lw = (r) => { const [l, , w] = r.split(","); return `${l},${w}`; };
     if (lw(state.rect) !== lw(sideRect)) throw new Error(`${name}: sidebar left/width ${lw(state.rect)} != ${lw(sideRect)}`);
     if (state.search !== "SIM" || state.active !== picked) throw new Error(`${name}: search/selection lost: ${JSON.stringify(state)}`);
-    if (state.tabs !== "Contacts|Heard") throw new Error(`${name}: tabs ${state.tabs}`);
+    if (state.tabs !== "Chats|Heard") throw new Error(`${name}: tabs ${state.tabs}`);
   }
   await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Heard').click()");
   await s.eval(`${rail("Settings")}.click()`);
   await until(s, "document.querySelector('.profiles, .card')", "Settings");
   if (!(await s.eval("document.querySelector('aside.sidebar [role=tab][aria-selected=true]').textContent.trim() === 'Heard'"))) throw new Error("the Heard tab was not kept");
-  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Contacts').click()");
+  await s.eval("[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === 'Chats').click()");
   await s.eval(`${rail("Settings")}.click()`);
   await s.eval("document.querySelector('.item').click()");
   await until(s, "document.querySelector('.chat-pane')", "a chat picked on Settings opens it");
-  results.push(`PASS sidebar: one instance, rect ${sideRect}, search text and selection ${picked} kept across Operate, Conversations, Settings and Diagnostics; Heard tab kept; a chat picked on Settings opens it`);
+  results.push(`PASS sidebar: one instance, rect ${sideRect}, search text and selection ${picked} kept across Chats, Files, Settings and Diagnostics; Heard tab kept; a chat picked on Settings opens it`);
 
   // ---- 6. narrow: a drawer
   await s.send("Emulation.setDeviceMetricsOverride", { width: 900, height: 700, deviceScaleFactor: 1, mobile: false });
@@ -502,7 +503,7 @@ try {
   results.push(`PASS about: version ${about.version}, "Founded by ZS6SHZ", GPL-3.0-or-later, Mercury and Hamlib credited; Report an issue and Check for updates went to the system browser (${opened.length} URLs), no request from the window`);
 
   // ---- T11c. macros expand into the composer without sending; Insert email is its own item
-  await s.eval(`${rail("Operate")}.click()`);
+  await s.eval(`${rail("Chats")}.click()`);
   await until(s, "document.querySelector('.peer-header h1')?.textContent.trim() === 'SIM1'", "SIM1 open on Operate");
   const msgsBefore = await s.eval("document.querySelectorAll('.transcript [data-id]').length");
   await s.eval("document.querySelector('textarea.composer').value = ''; document.querySelector('textarea.composer').dispatchEvent(new Event('input'))");
@@ -643,7 +644,7 @@ try {
   await s.eval("[...document.querySelectorAll('section.notifications label')].find(l => /Virtual Audio Lab/.test(l.textContent)).querySelector('input').click()");
   await s.eval("document.querySelector('input.notify-heardAny').click()");
   await until(s, "document.querySelector('input.notify-heardAny').checked", "Any station heard turned on");
-  await s.eval(`${rail("Operate")}.click()`);
+  await s.eval(`${rail("Chats")}.click()`);
   await until(s, "window.__mcNotes.some(n => /^SIM1 heard: (CQ|Beacon)$/.test(n.title))", "a notification for SIM1's next CQ or beacon", 75000);
   const note = await s.eval("window.__mcNotes.find(n => /^SIM1 heard/.test(n.title))");
   if (quietBefore !== 0) throw new Error(`notified before it was turned on: ${quietBefore}`);
@@ -655,7 +656,10 @@ try {
   const cssVar = (n) => `getComputedStyle(document.documentElement).getPropertyValue('--${n}').trim()`;
   const bg = (sel) => `getComputedStyle(document.querySelector(${JSON.stringify(sel)})).backgroundColor`;
   // The composer's frame is a control edge: it uses the 3:1 control border, not the decorative divider.
-  await s.eval(`${rail("Operate")}.click()`);
+  await s.eval(`${rail("Chats")}.click()`);
+  // The composer shows with a conversation open (M5 Task 11c): open SIM1's.
+  await until(s, "!!document.querySelector('.conv-row[data-callsign=\"SIM1\"] .item')", "SIM1 in the Chats list");
+  await s.eval("document.querySelector('.conv-row[data-callsign=\"SIM1\"] .item').click()");
   await until(s, "!!document.querySelector('.composer-box')", `the composer on Operate (page: ${await s.eval("document.querySelector('.rail button.selected')?.getAttribute('aria-label') ?? 'none'")})`);
   if (!(await s.eval("!!document.querySelector('.composer-box')"))) throw new Error("themes: the composer box is gone");
   const frame = await s.eval(`({ edge: getComputedStyle(document.querySelector('.composer-box')).borderTopColor, strong: ${cssVar("border-strong")} })`);

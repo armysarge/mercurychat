@@ -21,7 +21,6 @@ function provenance(r: Reading<number>): string {
   return t("heard.fromAged", { source: r.source, at, age: (r.ageMs / 1000).toFixed(1) });
 }
 const mhz = (hz: number) => (hz / 1e6).toFixed(6).replace(/(\.\d{3})(\d{3})$/, "$1 $2");
-const age = (r: Reading<number>) => (r.ageMs === null ? null : (r.ageMs / 1000).toFixed(1));
 </script>
 
 <template>
@@ -61,7 +60,7 @@ const age = (r: Reading<number>) => (r.ageMs === null ? null : (r.ageMs / 1000).
       <div class="stat frequency">
         <span class="muted">{{ t("telemetry.frequency") }}</span>
         <span v-if="tel.frequency" class="mono" :title="provenance(tel.frequency)">
-          {{ t("telemetry.mhz", { mhz: mhz(tel.frequency.value) }) }}<template v-if="age(tel.frequency) !== null"> · {{ t("telemetry.ageS", { s: age(tel.frequency) }) }}</template>
+          {{ t("telemetry.mhz", { mhz: mhz(tel.frequency.value) }) }}
         </span>
         <span v-else class="muted unavailable">{{ t("telemetry.unavailable") }}</span>
       </div>

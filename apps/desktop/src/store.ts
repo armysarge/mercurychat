@@ -355,6 +355,9 @@ export async function openPeer(peer: string) {
   }
 }
 
+/** Close the open conversation (its draft is kept): the station home again. */
+export const closePeer = () => openPeer("");
+
 export async function loadOlder() {
   const first = chat.messages[0];
   if (!first || !chat.open) return;
@@ -383,7 +386,9 @@ export async function reloadChat() {
   try {
     await loadConversations();
     let peer = chat.open;
-    if (firstLoad || !peer) peer = session.value?.peer ?? linkPeer.value ?? chat.conversations[0]?.peer ?? "";
+    // At start-up only a live link's conversation opens: otherwise the station
+    // home (M5 Task 11c, owner), never the last conversation in the list.
+    if (firstLoad || !peer) peer = session.value?.peer ?? linkPeer.value ?? "";
     firstLoad = false;
     await openPeer(peer);
   } catch (e) {
