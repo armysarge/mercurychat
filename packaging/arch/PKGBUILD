@@ -11,7 +11,9 @@ pkgdesc="Radio messaging over the Mercury HF modem, with a built-in Mercury and 
 arch=('x86_64')
 url="https://github.com/armysarge/mercurychat"
 license=('GPL-3.0-or-later')
-depends=('webkit2gtk-4.1' 'libpulse' 'alsa-lib')
+# openssl-3: the bundled Mercury is built on Ubuntu 22.04 against libssl.so.3; Arch's
+# own openssl is version 4 (libssl.so.4) since late 2026, and openssl-3 keeps the .3 files.
+depends=('webkit2gtk-4.1' 'libpulse' 'alsa-lib' 'openssl-3')
 options=('!strip' '!debug')
 source=("mercurychat.deb")
 noextract=("mercurychat.deb")
