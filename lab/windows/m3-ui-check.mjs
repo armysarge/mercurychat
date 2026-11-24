@@ -359,6 +359,13 @@ try {
   await until(s, "[...document.querySelectorAll('.rig-settings legend')].some(l => l.textContent.trim() === 'FLRig')", "the FLRig box");
   const flrigPtt = await pttOpts();
   if (flrigPtt.includes("cat")) throw new Error(`FLRig offers CAT PTT: ${flrigPtt}`);
+  // The built-in CAT engine: its own box, the radios from the core, an import, and CAT PTT allowed.
+  await pickFreq("catFile");
+  await until(s, "!!document.querySelector('.rig-settings select.rig-radio option[value=\"Icom IC-7300\"]')", "the built-in radio list");
+  const catPtt = await pttOpts();
+  if (!catPtt.includes("cat")) throw new Error(`the built-in CAT engine offers no CAT PTT: ${catPtt}`);
+  if (!(await s.eval("!!document.querySelector('.rig-settings input.rig-import')"))) throw new Error("no import button for CAT files");
+  if (await s.eval("[...document.querySelectorAll('.rig-settings legend')].some(l => l.textContent.trim() === 'CAT')")) throw new Error("the Hamlib CAT box shows with the built-in engine");
   await pickFreq("externalRigctld");
   await until(s, "[...document.querySelectorAll('.rig-settings legend')].some(l => l.textContent.trim() === 'External rigctld')", "the external box back");
   results.push(`PASS rig layout: two columns at ${layout.width} px (left edges ${layout.cols.join(", ")}); sim station "externalRigctld" (${layout.legends.join(", ")}); managed shows ${managed.join(", ")}; FLRig PTT choices ${flrigPtt.join(", ")}`);
