@@ -8,6 +8,8 @@
 #      /usr/lib/mercurychat checks, and the app itself reports "bundle: verified"
 #   I5 upgrade_keeps_data: install N, write a marker in the app's data folder,
 #      install N+1 over it, the marker is still there and N+1 runs
+#   I6 a pre-release sorts before its release (0.5.0~beta.1 < 0.5.0 for dpkg,
+#      0.5.0beta.1 < 0.5.0 for pacman), so the final release upgrades over a beta
 #
 # On the host:  bash lab/release/clean-install.sh <image> <package file> [<older package file>]
 #   image     ubuntu:22.04, ubuntu:24.04, debian:12, archlinux, ...
@@ -133,6 +135,20 @@ if [ -n "$n_version" ]; then
   fi
 else
   fail "I5 upgrade_keeps_data did not run (no N installed)"
+fi
+
+# ---- I6: a pre-release sorts before its release, by the distro's own tool.
+v=$(installed_version)
+if [ $kind = deb ]; then
+  final=${v%%~*}
+  if [ "$final" = "$v" ]; then pass "I6 $v is a release"
+  elif dpkg --compare-versions "$v" lt "$final"; then pass "I6 dpkg sorts $v before $final"
+  else fail "I6 dpkg sorts $v after $final: the release would not upgrade over it"; fi
+else
+  pv=${v%-*}; final=$(sed -E 's/^([0-9.]*[0-9]).*/\1/' <<<"$pv")
+  if [ "$final" = "$pv" ]; then pass "I6 $pv is a release"
+  elif [ "$(vercmp "$pv" "$final")" = -1 ]; then pass "I6 vercmp sorts $pv before $final"
+  else fail "I6 vercmp sorts $pv after $final: the release would not upgrade over it"; fi
 fi
 
 if [ $fails -eq 0 ]; then echo "RESULT PASS"; exit 0; fi

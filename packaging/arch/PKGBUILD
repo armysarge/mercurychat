@@ -2,10 +2,10 @@
 # The Arch package (M5 Task 12): the release .deb's files, repackaged. The
 # .deb is built on Ubuntu 22.04, so its programs run on Arch's newer glibc.
 # lab/release/build-release.sh puts the .deb beside this file and sets
-# pkgver from it (a beta "0.5.0-beta.1" becomes 0.5.0beta1: Arch versions
-# take no '-').
+# pkgver from it (a beta "0.5.0-beta.1" becomes 0.5.0beta.1: Arch versions
+# take no '-', and pacman sorts 0.5.0beta.1 before 0.5.0).
 pkgname=mercurychat
-pkgver=0.5.0beta1
+pkgver=0.5.0beta.1
 pkgrel=1
 pkgdesc="Radio messaging over the Mercury HF modem, with a built-in Mercury and Hamlib"
 arch=('x86_64')

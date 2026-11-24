@@ -39,7 +39,23 @@ if grep -aq "SIM1 station notes" "$CARGO_TARGET_DIR/release/mercurychat"; then e
 
 dir=$CARGO_TARGET_DIR/release
 mkdir -p /out/linux-amd64
-cp "$dir"/bundle/deb/*.deb /out/linux-amd64/
+# A pre-release must sort before its release: in a .deb, "0.5.0-beta.1" reads as
+# version 0.5.0 revision beta.1, which dpkg puts AFTER 0.5.0, so the final release
+# would never upgrade over the beta. Debian writes a pre-release with "~"
+# (0.5.0~beta.1 < 0.5.0). Repack with that version, and name the file to match.
+for d in "$dir"/bundle/deb/*.deb; do
+  v=$(dpkg-deb -f "$d" Version)
+  if [[ $v == *-* ]]; then
+    dv=${v/-/\~}
+    rm -rf /build/repack && dpkg-deb -R "$d" /build/repack
+    sed -i "s/^Version: .*/Version: $dv/" /build/repack/DEBIAN/control
+    dpkg-deb --root-owner-group -b /build/repack "/out/linux-amd64/$(basename "${d/$v/$dv}")" >/dev/null
+    dpkg --compare-versions "$dv" lt "${dv%%~*}" || { echo "FAIL $dv does not sort before ${dv%%~*}" >&2; exit 1; }
+    echo "deb version $v -> $dv (sorts before ${dv%%~*})"
+  else
+    cp "$d" /out/linux-amd64/
+  fi
+done
 for d in /out/linux-amd64/*.deb; do
   echo "deb=$(basename "$d") sha256=$(sha256sum "$d" | cut -d' ' -f1) depends=$(dpkg-deb -f "$d" Depends)"
   dpkg-deb -c "$d" | awk '{print $1, $6}' | grep -E 'usr/(bin|lib/mercurychat)/'
