@@ -934,6 +934,8 @@ async fn reconcile(
     on: &mut bool,
     dirty: &mut bool,
 ) -> Result<Option<String>, String> {
+    // Back at idle: late bytes of the link that just ended must not start the next.
+    st.discard_stale_data(Duration::from_millis(30)).await;
     let want = !receive_only.load(Ordering::SeqCst);
     if want == *on && !*dirty {
         return Ok(None);

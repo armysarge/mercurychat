@@ -1471,7 +1471,9 @@ impl App {
     fn set_modem(&mut self, state: ModemState, detail: Option<String>) {
         self.modem = state;
         self.modem_detail = detail.clone();
-        if matches!(state, ModemState::Negotiating | ModemState::Connected) {
+        // A re-call that is still dialing has found nobody yet: its failure must
+        // leave the window open to call again, so only a connection counts for it.
+        if state == ModemState::Connected || (state == ModemState::Negotiating && !self.qsy_dialing()) {
             self.qsy_peer_seen();
         }
         // What Mercury does about calls is known only while idle; a call or a

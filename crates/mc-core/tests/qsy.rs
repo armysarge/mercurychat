@@ -200,7 +200,9 @@ async fn qsy_end_to_end() {
     assert_eq!(t.ra.mode().0, "USB");
     // A calls again on the new frequency; the new session is a new QSO linked to the first.
     let s = t.a.wait(25, "the re-call", |s| s.session.as_ref().is_some_and(|x| x.session_id != first)).await;
-    assert_eq!(s.session.unwrap().bandwidth, t.b.snap().await.session.unwrap().bandwidth);
+    // B's end of the new link comes up on its own clock, a moment after A's.
+    let b = t.b.wait(5, "B's side of the re-call", |s| s.session.is_some()).await;
+    assert_eq!(s.session.unwrap().bandwidth, b.session.unwrap().bandwidth);
     let qso = t.a.wait(5, "the new QSO", |s| s.current_qso.as_ref().is_some_and(|q| q.id != first_qso)).await;
     assert_eq!(qso.current_qso.unwrap().notes.as_deref(), Some(format!("QSY from {first_qso}").as_str()));
     t.a.wait(5, "A's QSY done", |s| s.qsy.is_none()).await;

@@ -391,6 +391,11 @@ impl App {
         }
     }
 
+    /// This station is the caller and its re-call is out.
+    pub(super) fn qsy_dialing(&self) -> bool {
+        self.qsy.calling
+    }
+
     /// A call failed: while the window is open the caller calls again.
     pub(super) fn qsy_call_failed(&mut self) {
         if self.qsy.calling {

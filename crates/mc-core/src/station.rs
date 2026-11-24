@@ -506,6 +506,9 @@ impl Station {
 
     /// Place a call and wait for CONNECTED (or DISCONNECTED = failed).
     pub async fn call(&mut self, peer: &Callsign, timeout: Duration) -> Result<ConnectInfo, StationError> {
+        // Anything still on the data port is from a link that has ended: it would
+        // be read as the start of this one.
+        self.discard_stale_data(Duration::from_millis(30)).await;
         self.cmd(Command::Connect { mycall: self.cfg.callsign.clone(), theircall: peer.clone() }).await?;
         let ev = match self
             .wait_for("CONNECTED", timeout, |e| {
