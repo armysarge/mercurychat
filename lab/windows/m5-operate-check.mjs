@@ -118,7 +118,7 @@ try {
 
   // ---- O12: the rail; Heard's count, then the Heard list from the rail.
   const order = await s.eval("[...document.querySelectorAll('.rail button')].map(b => b.dataset.rail).join(',')");
-  if (order !== "chats,heard,files,logbook,diagnostics,settings") throw new Error(`O12: rail order ${order}`);
+  if (order !== "chats,heard,files,broadcasts,logbook,diagnostics,settings") throw new Error(`O12: rail order ${order}`);
   await until(s, "!!document.querySelector('.rail [data-rail=heard] .rail-badge')", "the Heard count on the rail", 20000);
   const badge = await s.eval(text(".rail [data-rail=heard] .rail-badge"));
   await s.eval("document.querySelector('.rail [data-rail=heard]').click()");
@@ -261,6 +261,26 @@ try {
   await until(s, "document.querySelector('.conv .chips button[aria-pressed=true]')?.textContent.trim() === 'CQ'", "the CQ chip on");
   await s.eval("[...document.querySelectorAll('.conv .chips button')].find(b => b.textContent.trim() === 'All').click()");
   results.push(`PASS O14 Chats list: "${chats.title}", search, chips ${chats.chips}; SIM1 live with "${chats.preview.slice(0, 50)}…", no initials circles, no CQ/Beacon foot (they stay on the station home and in the header's station panel)`);
+
+  // ---- B1-B3: the header's Broadcast menu and the Broadcasts page (owner, 24 Nov).
+  await s.eval("document.querySelector('.broadcast-toggle').click()");
+  await until(s, "!!document.querySelector('.broadcast-panel button.broadcast-cq:not([disabled])')", "the Broadcast menu, usable once idle");
+  if (!(await s.eval("!!document.querySelector('.broadcast-panel button.broadcast-beacon') && !!document.querySelector('.broadcast-panel input.broadcast-text')"))) throw new Error("B1: Call CQ, Beacon now and the message box are not all in the menu");
+  await s.eval(setInput(".broadcast-panel input.broadcast-text", "QRV test 73 de the lab"));
+  await until(s, "!document.querySelector('.broadcast-panel button.broadcast-send').disabled", "Send enabled for a short message");
+  await s.eval(setInput(".broadcast-panel input.broadcast-text", "x".repeat(41)));
+  await until(s, "document.querySelector('.broadcast-panel button.broadcast-send').disabled", "Send disabled over 40 bytes");
+  await s.eval(setInput(".broadcast-panel input.broadcast-text", "QRV test 73 de the lab"));
+  await s.eval("document.querySelector('.broadcast-panel button.broadcast-send').click()");
+  await until(s, "!document.querySelector('.broadcast-panel')", "the menu closing after a send");
+  results.push("PASS B1 Broadcast menu in the header: Call CQ, Beacon now and a message of up to 40 bytes; sent while idle");
+  await s.eval(`${rail("Broadcasts")}.click()`);
+  await until(s, "!!document.querySelector('.broadcasts .sent-list [data-kind=message]')", "the sent message on the Broadcasts page", 15000);
+  const sentRow = await s.eval(text(".broadcasts .sent-list [data-kind=message]"));
+  if (!sentRow.includes("QRV test 73 de the lab")) throw new Error(`B2: the sent row says "${sentRow}"`);
+  if (!(await s.eval("!!document.querySelector('.broadcasts .empty-heard, .broadcasts .heard-list')"))) throw new Error("B2: no Heard section");
+  results.push(`PASS B2 Broadcasts page: Sent lists "${sentRow}"; a Heard section is there`);
+  await s.eval(`${rail("Chats")}.click()`);
 
   results.push(...fit);
   const errs = (await s.eval("window.__uiErrors ?? []")) ?? [];

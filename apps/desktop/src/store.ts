@@ -23,7 +23,7 @@ import { applyLanguage, rememberLanguage, t } from "./i18n";
 export const MAX_BYTES = 4096; // CHT-01
 export const PAGE = 50; // messages per history page
 
-export type ViewName = "operate" | "conversations" | "files" | "logbook" | "settings" | "diagnostics";
+export type ViewName = "operate" | "conversations" | "files" | "logbook" | "broadcasts" | "settings" | "diagnostics";
 export type Drawer = "peers" | "session" | null;
 
 export const app = reactive({
@@ -283,7 +283,7 @@ watch(
 );
 
 /** A discovery command's refusal, shown inline beside the control that sent it. */
-export const discoveryError = reactive({ cq: "", beacon: "", star: "" });
+export const discoveryError = reactive({ cq: "", beacon: "", star: "", message: "" });
 
 async function discoveryAct(slot: keyof typeof discoveryError, step: () => Promise<unknown>) {
   discoveryError[slot] = "";
@@ -295,6 +295,7 @@ async function discoveryAct(slot: keyof typeof discoveryError, step: () => Promi
 }
 
 export const sendCq = () => discoveryAct("cq", () => call({ type: "sendCq" }));
+export const sendBroadcastMessage = (text: string) => discoveryAct("message", () => call({ type: "sendBroadcastMessage", text }));
 export const sendBeaconNow = () => discoveryAct("beacon", () => call({ type: "sendBeaconNow" }));
 export const setBeacon = (on: boolean) => discoveryAct("beacon", () => call({ type: "setBeacon", on }));
 export const setBeaconInterval = (minutes: number) => discoveryAct("beacon", () => call({ type: "setBeaconInterval", minutes }));

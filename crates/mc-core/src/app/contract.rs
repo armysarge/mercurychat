@@ -184,6 +184,11 @@ pub enum AppCommand {
     /// Send one beacon now, through the same gate as a CQ. It neither arms
     /// nor moves the scheduled beacon.
     SendBeaconNow,
+    /// A one-off broadcast with a short message as its status line (up to
+    /// 40 bytes), sent like a beacon: only while idle, and never confirmed.
+    SendBroadcastMessage {
+        text: String,
+    },
     /// Whether beacons carry the profile's locator (default yes), kept per
     /// profile. An MCB/1 beacon has only callsign, locator and capabilities.
     SetBeaconContent {

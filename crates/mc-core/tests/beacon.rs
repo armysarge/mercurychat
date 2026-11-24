@@ -547,6 +547,42 @@ mod service {
         assert!(conflict(h.call(AppCommand::SendBeaconNow).await).contains("no station"));
     }
 
+    /// The operator's one-off broadcast message rides a beacon's status line (owner, 24 Nov).
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_broadcast_message_goes_out_as_a_beacons_status_and_is_checked_first() {
+        let net = FakeNet::start().await;
+        let dir = tempfile::tempdir().unwrap();
+        let (h, _rx) = ready(dir.path(), profile(&net, Some("KG33"))).await;
+        tokio::time::pause();
+        // Refused without sending: empty, too long, more than one line.
+        for bad in [
+            "",
+            "   ",
+            &"x".repeat(41),
+            "two
+lines",
+        ] {
+            let why = conflict(h.call(AppCommand::SendBroadcastMessage { text: bad.into() }).await);
+            assert!(why.starts_with("not sent: "), "{bad:?}: {why}");
+        }
+        assert_eq!(sent(&net), 0);
+        done(&h, AppCommand::SendBroadcastMessage { text: "  QRV 14.074, 73 de ZS6PS ".into() }).await;
+        settle().await;
+        advance(Duration::from_secs(1)).await;
+        assert_eq!(sent(&net), 1);
+        let mch_protocol::beacon::Received::Extended(e) = mch_protocol::beacon::classify(&net.broadcast_log()[0].1)
+        else {
+            panic!("a message is an extended beacon")
+        };
+        assert!(e.tlvs.contains(&mch_protocol::beacon::Tlv::Status("QRV 14.074, 73 de ZS6PS".into())), "{:?}", e.tlvs);
+        // And the message stays in the activity log, for the Broadcasts page.
+        let CommandOk::Activity { entries } = h.call(AppCommand::Activity).await.unwrap() else { panic!("activity") };
+        assert!(
+            entries.iter().any(|e| e.kind == "message" && e.text == "Message sent: QRV 14.074, 73 de ZS6PS"),
+            "{entries:?}"
+        );
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn beacon_now_goes_through_the_gate_and_leaves_the_schedule_alone() {
         let net = FakeNet::start().await;

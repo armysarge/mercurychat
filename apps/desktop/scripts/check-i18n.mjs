@@ -257,6 +257,7 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "rig.refused.": () => constOf("rig.ts", "REFUSALS"),
     "settings.tabs.": () => constOf("views/Settings.vue", "TABS"),
     // M3b.1: Settings → Rig's dropdowns (rigForm.ts) and Settings → Audio's channels.
+    "broadcasts.kind.": () => ["message", "cq", "beacon"],
     "rigSettings.freqControlOpt.": () => constOf("rigForm.ts", "FREQ_CONTROLS"),
     "rigSettings.pttOpt.": () => constOf("rigForm.ts", "PTT_METHODS"),
     "rigSettings.pttLineOpt.": () => constOf("rigForm.ts", "PTT_LINES"),

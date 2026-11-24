@@ -743,6 +743,7 @@ impl App {
                 }))
             }
             AppCommand::SendBeaconNow => self.send_beacon().map(|_| CommandOk::Done),
+            AppCommand::SendBroadcastMessage { text } => self.send_broadcast_message(&text).map(|_| CommandOk::Done),
             AppCommand::Qsos { limit } => {
                 let rows = self.chat_store()?.qsos(limit.clamp(1, 500)).map_err(storage)?;
                 Ok(CommandOk::Qsos { qsos: rows.iter().map(Qso::from).collect() })
@@ -1242,6 +1243,22 @@ impl App {
             Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
         };
         self.send_broadcast(BroadcastKind::Beacon, payload)
+    }
+
+    /// A one-off broadcast: a beacon whose status line is the operator's message.
+    fn send_broadcast_message(&mut self, text: &str) -> Result<(), AppError> {
+        self.qsy_owns_rig()?;
+        let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+        let mode = self.listen_mode.current().unwrap_or(DATAC3);
+        let payload = match self.beacon.payload_with_status(&p, mode, text) {
+            Ok(payload) => payload,
+            Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
+        };
+        self.send_broadcast(BroadcastKind::Beacon, payload)?;
+        // What was sent stays in the activity log, for the Broadcasts page.
+        let line = self.discovery.note("message", format!("Message sent: {}", text.trim()));
+        self.emit(line);
+        Ok(())
     }
 
     /// The scheduler's deadline passed. Whatever happens, the next beacon is

@@ -16,7 +16,8 @@
     "logbook": "Libro de guardia",
     "files": "Archivos",
     "chats": "Chats",
-    "heard": "Escuchadas"
+    "heard": "Escuchadas",
+    "broadcasts": "Difusiones"
   },
   "modem": {
     "unavailable": "no disponible",
@@ -85,7 +86,14 @@
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "El módem no transmitió; puede que otro programa esté usando el puerto de difusión de Mercury."
-    }
+    },
+    "button": "Difundir",
+    "title": "Difundir a todos",
+    "message": "Mensaje para todas las estaciones",
+    "placeholder": "p. ej. QRV en 14.074, 73",
+    "bytes": "{n} / {max} bytes",
+    "send": "Enviar",
+    "hint": "Sale como una baliza: solo en reposo, lo oye quien esté escuchando y nunca se confirma."
   },
   "direction": {
     "outgoing": "Llamamos nosotros",
@@ -1365,5 +1373,18 @@
   "header": {
     "beaconIn": "Baliza en {time}",
     "beaconInTitle": "Próxima baliza periódica. Cámbiala en la tarjeta Baliza de la estación."
+  },
+  "broadcasts": {
+    "title": "Difusiones",
+    "note": "Lo que esta estación envió a todos y los mensajes que otras estaciones difundieron. Las difusiones nunca se confirman como recibidas.",
+    "sent": "Enviadas",
+    "heard": "Oídas",
+    "noneSent": "Aún no has difundido nada.",
+    "noneHeard": "Aún no se han oído mensajes difundidos.",
+    "kind": {
+      "message": "Mensaje",
+      "cq": "Llamada CQ",
+      "beacon": "Baliza"
+    }
   }
 }

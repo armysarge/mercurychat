@@ -112,7 +112,7 @@ pub struct HeardStation {
 
 /// One line of the activity log. `kind` is a short lowercase word: state,
 /// ptt, busy, pending, buffer, heard, malformed, unsupported, broadcast,
-/// telemetry or purge.
+/// message (a broadcast message the operator sent), telemetry or purge.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(export)]

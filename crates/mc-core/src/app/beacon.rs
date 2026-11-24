@@ -555,6 +555,24 @@ impl BeaconState {
         beacon_payload(&self.prefs, p, self.seq, listen_mode)
     }
 
+    /// The payload of a one-off beacon whose status line is `text` (the
+    /// operator's short message to everyone), the saved status left alone.
+    pub fn payload_with_status(&self, p: &StationProfile, listen_mode: u8, text: &str) -> Result<Vec<u8>, String> {
+        let text = text.trim();
+        if text.is_empty() {
+            return Err("not sent: type a message first".into());
+        }
+        if text.len() > STATUS_MAX {
+            return Err(format!("not sent: a broadcast message is up to {STATUS_MAX} bytes"));
+        }
+        if text.chars().any(char::is_control) {
+            return Err("not sent: a broadcast message is one line of plain text".into());
+        }
+        let mut prefs = self.prefs.clone();
+        prefs.status = Some(text.to_string());
+        beacon_payload(&prefs, p, self.seq, listen_mode)
+    }
+
     /// A beacon was handed to the modem.
     pub fn submitted(&mut self) {
         self.seq = self.seq.wrapping_add(1);

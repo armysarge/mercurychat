@@ -15,7 +15,8 @@
     "logbook": "Logbook",
     "files": "Files",
     "chats": "Chats",
-    "heard": "Heard"
+    "heard": "Heard",
+    "broadcasts": "Broadcasts"
   },
   "modem": {
     "unavailable": "unavailable",
@@ -84,7 +85,14 @@
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "The modem did not transmit; another program may be using Mercury's broadcast port."
-    }
+    },
+    "button": "Broadcast",
+    "title": "Broadcast to everyone",
+    "message": "Message to all stations",
+    "placeholder": "e.g. QRV on 14.074, 73",
+    "bytes": "{n} / {max} bytes",
+    "send": "Send",
+    "hint": "Goes out like a beacon: only while idle, heard by anyone listening, and never confirmed."
   },
   "direction": {
     "outgoing": "We called",
@@ -1364,5 +1372,18 @@
   "header": {
     "beaconIn": "Beacon in {time}",
     "beaconInTitle": "Next periodic beacon. Change it in the Beacon card on the station home."
+  },
+  "broadcasts": {
+    "title": "Broadcasts",
+    "note": "What this station sent to everyone, and the messages other stations broadcast. Broadcasts are never confirmed as received.",
+    "sent": "Sent",
+    "heard": "Heard",
+    "noneSent": "Nothing broadcast yet.",
+    "noneHeard": "No broadcast messages heard yet.",
+    "kind": {
+      "message": "Message",
+      "cq": "Call CQ",
+      "beacon": "Beacon"
+    }
   }
 }

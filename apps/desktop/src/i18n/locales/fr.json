@@ -16,7 +16,8 @@
     "logbook": "Carnet de trafic",
     "files": "Fichiers",
     "chats": "Discussions",
-    "heard": "Entendues"
+    "heard": "Entendues",
+    "broadcasts": "Diffusions"
   },
   "modem": {
     "unavailable": "indisponible",
@@ -85,7 +86,14 @@
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "Le modem n'a pas émis ; un autre programme utilise peut-être le port de diffusion de Mercury."
-    }
+    },
+    "button": "Diffuser",
+    "title": "Diffuser à tous",
+    "message": "Message pour toutes les stations",
+    "placeholder": "p. ex. QRV sur 14.074, 73",
+    "bytes": "{n} / {max} octets",
+    "send": "Envoyer",
+    "hint": "Part comme une balise : seulement au repos, entendu par quiconque écoute, et jamais confirmé."
   },
   "direction": {
     "outgoing": "Nous avons appelé",
@@ -1365,5 +1373,18 @@
   "header": {
     "beaconIn": "Balise dans {time}",
     "beaconInTitle": "Prochaine balise périodique. Modifiez-la dans la carte Balise de la station."
+  },
+  "broadcasts": {
+    "title": "Diffusions",
+    "note": "Ce que cette station a envoyé à tous, et les messages diffusés par d'autres stations. Une diffusion n'est jamais confirmée comme reçue.",
+    "sent": "Envoyées",
+    "heard": "Entendues",
+    "noneSent": "Rien n'a encore été diffusé.",
+    "noneHeard": "Aucun message diffusé entendu pour l'instant.",
+    "kind": {
+      "message": "Message",
+      "cq": "Appel CQ",
+      "beacon": "Balise"
+    }
   }
 }

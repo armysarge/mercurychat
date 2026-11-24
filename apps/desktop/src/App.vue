@@ -16,6 +16,8 @@ import Conversations from "./views/Conversations.vue";
 import Diagnostics from "./views/Diagnostics.vue";
 import Files from "./views/Files.vue";
 import Logbook from "./views/Logbook.vue";
+import Broadcasts from "./views/Broadcasts.vue";
+import BroadcastMenu from "./components/BroadcastMenu.vue";
 import Operate from "./views/Operate.vue";
 import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
@@ -48,6 +50,7 @@ const RAIL: RailItem[] = [
   { id: "chats", page: "operate", side: "chats", label: "nav.chats", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
   { id: "heard", page: "operate", side: "heard", label: "nav.heard", icon: "M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8" },
   { id: "files", page: "files", label: "nav.files", icon: "M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h5" },
+  { id: "broadcasts", page: "broadcasts", label: "nav.broadcasts", icon: "M4 11v2a1 1 0 0 0 1 1h2l5 4V6L7 10H5a1 1 0 0 0-1 1Zm13-2a4 4 0 0 1 0 6M19.5 6.5a8 8 0 0 1 0 11" },
   { id: "logbook", page: "logbook", label: "nav.logbook", icon: "M5 4h11a3 3 0 0 1 3 3v13H8a3 3 0 0 1-3-3V4Zm0 13a3 3 0 0 1 3-3h11M9 8h6" },
   { id: "diagnostics", page: "diagnostics", label: "nav.diagnostics", icon: "M3 13h4l3-7 4 12 3-5h4" },
   { id: "settings", page: "settings", label: "nav.settings", icon: "M4 6h5m4 0h7M4 12h9m4 0h3M4 18h3m4 0h9M9 4h4v4H9zM13 10h4v4h-4zM7 16h4v4H7z" },
@@ -280,6 +283,7 @@ onUnmounted(() => {
           <span class="track" aria-hidden="true"></span>
         </label>
       </span>
+      <BroadcastMenu v-if="!inWizard && !setup" />
       <span class="grow" data-tauri-drag-region></span>
       <span v-if="beaconIn && !setup" class="beacon-in small" :title="t('header.beaconInTitle')" data-tauri-drag-region>
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7" /></svg>
@@ -349,6 +353,7 @@ onUnmounted(() => {
         <Conversations v-else-if="app.page === 'conversations'" />
         <Files v-else-if="app.page === 'files'" />
         <Logbook v-else-if="app.page === 'logbook'" />
+        <Broadcasts v-else-if="app.page === 'broadcasts'" />
         <Settings v-else-if="app.page === 'settings'" />
         <Diagnostics v-else />
       </main>
@@ -458,5 +463,9 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   .alpha, .utc { display: none; }
   /* The strip right below shows the frequency: the pill keeps the callsign only. */
   .station-pill .divider, .pill-freq, .beacon-in { display: none; }
+}
+/* Zoomed to 200 % (about 680 px): the Answering-calls word goes, its switch stays (Task 13: the window controls stay in view). */
+@media (max-width: 760px) {
+  .mode-word { display: none; }
 }
 </style>

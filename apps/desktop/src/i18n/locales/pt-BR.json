@@ -16,7 +16,8 @@
     "logbook": "Logbook",
     "files": "Arquivos",
     "chats": "Conversas",
-    "heard": "Ouvidas"
+    "heard": "Ouvidas",
+    "broadcasts": "Transmissões"
   },
   "modem": {
     "unavailable": "indisponível",
@@ -85,7 +86,14 @@
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "O modem não transmitiu; outro programa pode estar usando a porta de difusão do Mercury."
-    }
+    },
+    "button": "Transmitir",
+    "title": "Transmitir para todos",
+    "message": "Mensagem para todas as estações",
+    "placeholder": "ex.: QRV em 14.074, 73",
+    "bytes": "{n} / {max} bytes",
+    "send": "Enviar",
+    "hint": "Sai como um farol: só em repouso, ouvido por quem estiver escutando e nunca confirmado."
   },
   "direction": {
     "outgoing": "Nós chamamos",
@@ -1365,5 +1373,18 @@
   "header": {
     "beaconIn": "Beacon em {time}",
     "beaconInTitle": "Próximo beacon periódico. Altere no cartão Beacon da estação."
+  },
+  "broadcasts": {
+    "title": "Transmissões",
+    "note": "O que esta estação enviou a todos e as mensagens que outras estações transmitiram. Uma transmissão nunca é confirmada como recebida.",
+    "sent": "Enviadas",
+    "heard": "Ouvidas",
+    "noneSent": "Nada foi transmitido ainda.",
+    "noneHeard": "Nenhuma mensagem transmitida foi ouvida ainda.",
+    "kind": {
+      "message": "Mensagem",
+      "cq": "Chamada CQ",
+      "beacon": "Farol"
+    }
   }
 }
