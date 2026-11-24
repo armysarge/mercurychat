@@ -379,7 +379,8 @@ header > .state { flex: 0 1 auto; min-width: 0; }
   .station-pill .chips { display: none; }
 }
 @media (max-width: 1099px) {
-  .detail, .state .where { display: none; }
+  /* 150 % zoom on a 1366 px screen is 911 px: the window controls must still show (Task 13). */
+  .detail, .state .where, .alpha, .utc { display: none; }
   header { gap: var(--space); }
 }
 /* Up to 960 px the sidebar is a drawer (Sidebar.vue): the grid loses its column. */

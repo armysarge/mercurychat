@@ -18,11 +18,10 @@
 // Build first (debug: MC_BUNDLE_DIR is read only by debug builds):
 //   cargo build -p mercury-adapter --bins
 //   npm --prefix apps/desktop run build && cargo build -p mercurychat --features tauri/custom-protocol
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createHash } from "node:crypto";
+import { existsSync, rmSync } from "node:fs";
 import { createServer, connect as tcp } from "node:net";
-import { dirname, join } from "node:path";
 import { firstUse, kill, launch, page, sleep, until } from "./cdp.mjs";
+import { HAMLIB, MERCURY, fakeBundle as sharedFakeBundle } from "./fakebundle.mjs";
 import { click, pill, setInput } from "./m2-dom.mjs";
 
 const [exe, dataDir, port = "9363"] = process.argv.slice(2);
@@ -31,8 +30,6 @@ if (!exe || !dataDir) {
   process.exit(2);
 }
 const CALL = "ZS6BIN";
-const MERCURY = "1.9.25";
-const HAMLIB = "4.7.2";
 const rail = (name) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(name)})`;
 const text = (sel) => `(document.querySelector(${JSON.stringify(sel)})?.textContent ?? '').replace(/\\s+/g, ' ').trim()`;
 const watchErrors = `(() => {
@@ -45,22 +42,8 @@ const watchErrors = `(() => {
   addEventListener('unhandledrejection', (e) => keep(e.reason));
 })()`;
 
-/** The fake bundle beside the data dir: fake programs, manifest, BUILD.txt. */
-function fakeBundle() {
-  const bin = dirname(exe);
-  const dir = `${dataDir}-bundle`;
-  rmSync(dir, { recursive: true, force: true });
-  mkdirSync(dir, { recursive: true });
-  let manifest = "";
-  for (const [from, to] of [["fake-mercury.exe", "mercury.exe"], ["fake-rigctld.exe", "rigctld.exe"]]) {
-    if (!existsSync(join(bin, from))) throw new Error(`${from} is not built: cargo build -p mercury-adapter --bins`);
-    copyFileSync(join(bin, from), join(dir, to));
-    manifest += `${createHash("sha256").update(readFileSync(join(dir, to))).digest("hex")}  ${to}\n`;
-  }
-  writeFileSync(join(dir, "MANIFEST.sha256"), manifest);
-  writeFileSync(join(dir, "BUILD.txt"), `target=windows-x64\nhamlib_version=${HAMLIB}\nmercury_version=v${MERCURY}\n`);
-  return dir;
-}
+/** The fake bundle beside the data dir (fakebundle.mjs). */
+const fakeBundle = () => sharedFakeBundle(exe, dataDir);
 
 const open = (p) =>
   new Promise((resolve) => {

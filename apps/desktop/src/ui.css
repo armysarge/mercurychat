@@ -27,6 +27,11 @@ input[type="checkbox"] { width: auto; accent-color: var(--accent); }
 /* Every button has one shape: 32 px tall, 9 px radius, the same weight and
    padding; `small` is the one compact size (26 px), for dense bars such as the
    station strip. Variants change colour only, never size (owner, 17 Nov). */
+/* The hidden attribute always hides: an author display (button's inline-flex)
+   would otherwise beat the browser's own [hidden] rule (M5 Task 13: an empty
+   button showed on the wizard's station step). */
+[hidden] { display: none !important; }
+
 button {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 32px; padding: 0 14px; box-sizing: border-box;
