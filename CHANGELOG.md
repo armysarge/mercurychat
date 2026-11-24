@@ -11,10 +11,16 @@
 - **Operate, after the owner's design canvas:** a station pill in the header (callsign, frequency, band, mode and bandwidth) opens the station panel, which replaces the strip under the header; a status pill says where the modem is; an idle station home (dial, bands, spectrum, CQ and Beacon cards); round initials avatars; messenger bubbles.
 - **Packages:** a per-user Windows installer, a `.deb` (`mercury-chat`) for Ubuntu 22.04/24.04 and Debian 12, and an Arch package (`mercurychat`), each with the modem; `mercurychat --version` reports the versions and the modem check headless. Each release carries `THIRD-PARTY.md`, the GPL-3.0 `LICENSE`, the source of MercuryChat, the patched Mercury and Hamlib, and `SHA256SUMS`. Settings → About → Licences lists every component.
 - **Accessibility:** a new window check covers Tab order, accessible names, AA contrast in both themes and 150 %/200 % zoom. It found an empty button on the wizard and window controls pushed off the header at 150 %; both are fixed.
+- **After the owner's review (24 November):**
+  - **Built-in radio control:** a new Frequency control that talks to the radio's serial port itself with its own commands, so Hamlib is not needed. It ships with the Icom IC-7300, Yaesu FT-991A and Kenwood TS-590S/SG, and Settings → Rig can import a CAT commands file (the common table layout, or MercuryChat's own). It serves Mercury and the app as a rigctld; a mode is reported only once it has been set, and anything the radio cannot do is an error, never made-up data. Not yet tried on a real radio (M6).
+  - **Broadcasts:** a Broadcast menu in the header (Call CQ, Beacon now, and a short message of up to 40 bytes to all stations, sent as a beacon's status line), and a Broadcasts page that lists what this station sent and the messages heard from others. No broadcast is ever confirmed as received.
+  - **Wizard and Settings:** the sound system is detected (Mercury's own device list, nothing started), the input channel is under Advanced, the radio test is in the rig step, and the wizard asks only for the bare basics. The busy detector ("listen before transmit") is on by default with a switch in Settings → Modem. The largest incoming file is a 256 MiB memory guard, and the receiver sets the real limit.
+  - **Chats and Heard:** no initials circles, the filters are one segmented control, SNR is shown with its sign (SNR +3.5 dB), Heard starts empty at every start (earlier stations stay on record), a station menu on every row, and a Disconnect button (Abort only appears while a disconnect is stuck).
+  - **Log4OM:** the ADIF mode is a setting (default DYNAMIC), and a QSO with no band or frequency is flagged before export.
 - **Checks:**
   - clean installs (install, the modem runs, headless version, manifest, upgrade keeps data) pass on Ubuntu 22.04, Ubuntu 24.04, Debian 12 and Arch;
   - the contract suite on the bundle's own Mercury: 42 passed;
-  - the window checks: wizard 22, Operate 18, a11y 88, m5-ui 7, responsive 18, m4 7, m3c 7, m3 36.
+  - the window checks: wizard 22, Operate 31, a11y 88, m5-ui 7, responsive 18, m4 7, m3c 7, m3 36.
 - Still open: the Windows installer in Windows Sandbox (the owner), the wizard, CAT and PTT through the built-in rigctld and a session on a real radio (M6), a Log4OM import of the sample, a screen reader, CachyOS, the security and optimization audit before the beta is published, and the version scheme (`0.5.0-beta.1` sorts after `0.5.0` as a `.deb`). Details: docs/M5-progress.md.
 
 ## 0.10 — 23 November 2026 (M4 files)
