@@ -105,7 +105,7 @@
     "peers": "Peers",
     "call": "Call",
     "cancel": "Cancel",
-    "disconnect": "Hang up",
+    "disconnect": "Disconnect",
     "abort": "Abort (delivery uncertain)",
     "session": "Session",
     "progressAria": "Connection progress",

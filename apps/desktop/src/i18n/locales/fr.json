@@ -106,7 +106,7 @@
     "peers": "Contacts",
     "call": "Appeler",
     "cancel": "Annuler",
-    "disconnect": "Raccrocher",
+    "disconnect": "Déconnecter",
     "abort": "Interrompre (livraison incertaine)",
     "session": "Session",
     "progressAria": "Progression de la connexion",

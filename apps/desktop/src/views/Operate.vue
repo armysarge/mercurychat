@@ -77,7 +77,8 @@ const subtitle = computed(() => {
           <button v-if="modemState === 'calling'" class="quiet" @click="cancelCall">{{ t("operate.cancel") }}</button>
           <button v-else-if="!inSession" class="primary" :disabled="!canCall || !chat.open" @click="placeCall">{{ t("operate.call") }}</button>
           <button class="disconnect" :disabled="!inSession" @click="disconnect">{{ t("operate.disconnect") }}</button>
-          <button class="abort danger" :disabled="!canAbort" @click="abort">{{ t("operate.abort") }}</button>
+          <!-- Abort (owner, 24 Nov: hide it): only while a disconnect is still draining, the way out of a stuck close. -->
+          <button v-if="modemState === 'draining'" class="abort danger" :disabled="!canAbort" @click="abort">{{ t("operate.abort") }}</button>
           <button class="toggle-session quiet" :aria-pressed="panelShown" @click="toggleSession">{{ t("operate.qsoRecord") }}</button>
           <button
             class="more quiet"

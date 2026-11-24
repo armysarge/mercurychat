@@ -51,9 +51,8 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
 
 <template>
   <div ref="root" class="macros" @keydown="onKey">
-    <button type="button" class="macro-toggle quiet" aria-haspopup="menu" :aria-expanded="open" :disabled="!chat.open || !activeProfile" @click="toggle">
+    <button type="button" class="macro-toggle quiet" aria-haspopup="menu" :aria-expanded="open" :aria-label="t('macros.button')" :title="t('macros.button')" :disabled="!chat.open || !activeProfile" @click="toggle">
       <svg class="macro-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M13 3 5 14h6l-1 7 8-11h-6l1-7Z" /></svg>
-      {{ t("macros.button") }}
     </button>
     <div v-if="open" class="macro-menu" role="menu" :aria-label="t('macros.menuAria')">
       <template v-if="sections.quick.length">

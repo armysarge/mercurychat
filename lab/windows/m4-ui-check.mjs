@@ -162,7 +162,7 @@ try {
   await until(s, "!document.querySelector('form.send-file')", "the dialog closed on Send");
   await until(s, `${card("out", "hello.txt")}?.dataset.state === 'complete'`, "hello.txt complete on SIM1", 30000);
   results.push(`PASS F1 send: size ${facts.size}, on the air ${facts.wire}, airtime ${facts.airtime}; SIM1 took it -> complete`);
-  await s.eval(click("Hang up")).catch(() => {});
+  await s.eval(click("Disconnect")).catch(() => {});
   await noErrors("F1-F3, F6");
 
   // ---- F5. a minor-0 SIM1: Send file is disabled, with the reason
@@ -171,7 +171,7 @@ try {
   const off = await s.eval("(() => { const b = document.querySelector('button.send-file-open'); return [b.disabled, b.title, document.getElementById('send-file-why')?.textContent.trim()]; })()");
   if (!off[0] || off[1] !== "not supported by this station" || off[2] !== "not supported by this station") throw new Error(`F5: ${JSON.stringify(off)}`);
   results.push(`PASS F5 minor 0: Send file disabled, "${off[1]}"`);
-  await s.eval(click("Hang up")).catch(() => {});
+  await s.eval(click("Disconnect")).catch(() => {});
   await noErrors("F5");
 
   // ---- F4. a slow link: Cancel mid-send
@@ -186,7 +186,7 @@ try {
   await until(s, `${card("out", "big.bin")}?.dataset.state === 'cancelled'`, "big.bin cancelled", 30000);
   const at = await s.eval(`${card("out", "big.bin")}.querySelector('.state').textContent.trim()`);
   results.push(`PASS F4 cancel mid-send: the card says "${at}"`);
-  await s.eval(click("Hang up")).catch(() => {});
+  await s.eval(click("Disconnect")).catch(() => {});
   await noErrors("F4");
   results.push("PASS F7 console: no errors from the first screen to the end");
 } catch (e) {

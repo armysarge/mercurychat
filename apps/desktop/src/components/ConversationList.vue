@@ -188,7 +188,7 @@ function openEntry() {
 .chips { display: flex; gap: 2px; padding: 3px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
 .chip { flex: 1 1 0; min-height: 0; min-width: 0; padding: 5px 4px; border: 0; border-radius: 9px; background: transparent; color: var(--text-2); font-size: calc(12px * var(--font-scale)); font-weight: 600; white-space: nowrap; }
 .chip:hover:not([aria-pressed="true"]) { background: var(--raised); color: var(--text); }
-.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.25); }
+.chip[aria-pressed="true"] { background: var(--accent); color: var(--accent-text) }
 .new-chat label { display: grid; gap: 4px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
 .section { display: grid; gap: 4px; }
 .section .label { margin: 0; font-size: calc(11px * var(--font-scale)); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-2); }

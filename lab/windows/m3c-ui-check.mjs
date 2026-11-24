@@ -190,7 +190,7 @@ try {
   if (!stages.includes("proposed") || !stages.some((x) => x === "agreed" || x === "moving")) throw new Error(`Q2 stages: ${JSON.stringify(stages)}`);
   if (after.freq !== target.freqHz || after.qsy !== null || after.peer !== "SIM1") throw new Error(`Q2 after: ${JSON.stringify(after)} (wanted ${target.freqHz})`);
   results.push(`PASS Q2 QSY: proposed ${picked.length} entries; the card went ${stages.join(" -> ")}; the sim rig is on ${target.freqHz} Hz (${target.name}) and SIM1 is back in a new session`);
-  await s.eval(click("Hang up")).catch(() => {});
+  await s.eval(click("Disconnect")).catch(() => {});
   const errs = await errorsSoFar();
   if (errs.length) throw new Error(`console errors: ${errs.join(" | ")}`);
 

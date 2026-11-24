@@ -195,12 +195,12 @@ watch(
 </template>
 
 <style scoped>
-.scroller { overflow-y: auto; min-height: 0; padding: calc(var(--space) * 2) calc(var(--space) * 3); }
+.scroller { overflow-y: auto; min-height: 0; padding: calc(var(--space) * 2) calc(var(--space) * 1.5); }
 .older { text-align: center; margin-bottom: var(--space); }
 .empty { text-align: center; margin-top: calc(var(--space) * 4); }
 /* A messenger column (design canvas): at most 760 px wide, centred. */
-.transcript { list-style: none; margin: 0 auto; padding: 0; display: grid; gap: calc(var(--space) * 1.5); max-width: 760px; }
-.msg { max-width: 82%; }
+.transcript { list-style: none; margin: 0; padding: 0; display: grid; gap: calc(var(--space) * 1.5); max-width: none; }
+.msg { max-width: 78%; }
 .msg.out { margin-left: auto; text-align: right; }
 .day { text-align: center; margin: var(--space) 0; }
 .msg.out .day { margin-right: 0; }

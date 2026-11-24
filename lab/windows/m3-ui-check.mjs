@@ -553,7 +553,7 @@ try {
   await s.eval("location.reload()");
   await sleep(1500);
   await until(s, `${pill} === 'connected' && document.querySelector('section.qso-card input[name=rstSent]')?.value === '59'`, "the QSO edits after a window reload", 20000);
-  await s.eval(click("Hang up"));
+  await s.eval(click("Disconnect"));
   await until(s, `['ready','listening'].includes(${pill})`, "the session ended", 20000);
   await until(s, "!!document.querySelector('.transcript li.sys[data-kind=session-end]')", "the QSO summary row");
   const summary = await s.eval("document.querySelector('.transcript li.sys[data-kind=session-end]').textContent.replace(/\\s+/g, ' ').trim()");

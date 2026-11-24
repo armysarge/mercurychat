@@ -106,7 +106,7 @@
     "peers": "Contatos",
     "call": "Chamar",
     "cancel": "Cancelar",
-    "disconnect": "Desligar",
+    "disconnect": "Desconectar",
     "abort": "Interromper (entrega incerta)",
     "session": "Sessão",
     "progressAria": "Progresso da conexão",

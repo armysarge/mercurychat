@@ -121,7 +121,7 @@ async function submit() {
 <style scoped>
 .row { flex-wrap: wrap; }
 .composer-box {
-  margin: 0 max(calc(var(--space) * 2), calc((100% - 760px) / 2)) calc(var(--space) * 2); padding: var(--space) calc(var(--space) * 1.5);
+  margin: 0 calc(var(--space) * 1.5) calc(var(--space) * 2); padding: var(--space) calc(var(--space) * 1.5);
   border: 1px solid var(--border-strong); border-radius: 18px; background: var(--surface); display: grid; gap: 6px;
 }
 .composer-box:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, var(--border-strong)); }

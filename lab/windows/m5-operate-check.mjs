@@ -20,7 +20,7 @@
 //   O8 the station menu on a Heard row: right-click and the row's "…" open
 //      it (Open chat, Call, Suggest QSY, Star; focus on its first item),
 //      Escape closes it and gives focus back; Call from it calls SIM1
-//   O9 the session header: Hang up and Abort in view, the rest in its "…"
+//   O9 the session header: Disconnect in view, Abort hidden, the rest in its "…"
 //      menu (Export conversation, Suggest QSY, Star, Close conversation)
 //   O10 Close conversation (after hanging up) brings the station home back
 //   O11 a restart with history opens the station home, not the last conversation
@@ -31,7 +31,7 @@
 //      as its preview and a 40 px avatar; Call CQ / Beacon now at the foot,
 //      held during the session with the reason, usable after hanging up
 //   O15 the session header (canvas): "Connected · ... · since HH:MM UTC",
-//      "Hang up", and a "QSO record" toggle whose aria-pressed follows the panel
+//      "Disconnect", and a "QSO record" toggle whose aria-pressed follows the panel
 //   O16 Heard starts empty at every start; the station heard this run is
 //      listed; the Listen before transmit switch is on by default and off after
 //      turning it off (Settings -> Modem)
@@ -184,8 +184,8 @@ try {
   if (!chats.noAvatar) throw new Error("O14: initials circles are still there");
   if (!chats.noFoot || parseFloat(chats.track) < 8) throw new Error(`O14: foot gone and filters a segmented track: ${JSON.stringify(chats)}`);
 
-  // ---- O9: Hang up and Abort in view; the rest in the header's "…".
-  const head = await s.eval(`({ hang: !!document.querySelector('.peer-header button.disconnect:not([disabled])'), abort: !!document.querySelector('.peer-header button.abort'), more: !!document.querySelector('.peer-header button.more') })`);
+  // ---- O9: Disconnect in view, Abort hidden; the rest in the header's "…".
+  const head = await s.eval(`({ hang: !!document.querySelector('.peer-header button.disconnect:not([disabled])'), abort: !document.querySelector('.peer-header button.abort'), more: !!document.querySelector('.peer-header button.more') })`);
   if (!head.hang || !head.abort || !head.more) throw new Error(`O9: the session header has ${JSON.stringify(head)}`);
   await s.eval("document.querySelector('.peer-header button.more').click()");
   await until(s, `!!${menu}`, "the header's menu");
@@ -193,7 +193,7 @@ try {
   for (const a of ["export", "suggest-qsy", "star", "close"]) if (!headItems.includes(a)) throw new Error(`O9: the header menu has no ${a}: ${headItems}`);
   await s.eval("document.activeElement.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))");
   await until(s, `!${menu}`, "Escape closing the header menu");
-  results.push(`PASS O9 session header: Hang up and Abort in view; "…" holds ${headItems.join(", ")}`);
+  results.push(`PASS O9 session header: Disconnect in view, Abort hidden; "…" holds ${headItems.join(", ")}`);
 
   // ---- O17: bubbles, composer and panel tabs.
   const bub = await s.eval(`(() => {
@@ -218,7 +218,7 @@ try {
   const sub = await s.eval(text(".peer-header .who p"));
   if (!/^Connected · .* · since [0-9][0-9]:[0-9][0-9] UTC$/.test(sub)) throw new Error(`O15: the status line is "${sub}"`);
   const hang = await s.eval(text(".peer-header button.disconnect"));
-  if (hang !== "Hang up") throw new Error(`O15: the hang-up button says "${hang}"`);
+  if (hang !== "Disconnect") throw new Error(`O15: the disconnect button says "${hang}"`);
   const qso = "document.querySelector('.peer-header button.toggle-session')";
   if ((await s.eval(`${qso}.textContent.trim()`)) !== "QSO record") throw new Error("O15: the panel toggle is not \"QSO record\"");
   if ((await s.eval(`${qso}.getAttribute('aria-pressed')`)) !== "false") throw new Error("O15: the toggle says pressed with the panel closed");
@@ -227,7 +227,7 @@ try {
   await s.eval(`${qso}.click()`);
   await until(s, "!!document.querySelector('.session-pane.open .qso-card, .session-pane .qso-card')", "the QSO record");
   if ((await s.eval(`${qso}.getAttribute('aria-pressed')`)) !== "true") throw new Error("O15: the toggle does not say pressed with the panel open");
-  results.push(`PASS O15 session header: "${sub}"; "Hang up"; "QSO record" toggle pressed with the panel`);
+  results.push(`PASS O15 session header: "${sub}"; "Disconnect"; "QSO record" toggle pressed with the panel`);
   await sleep(500);
   results.push(`PASS O4 session panel: "${(await s.eval(text(".session-pane"))).slice(0, 120)}…"`);
   await fits("operate-session-panel");

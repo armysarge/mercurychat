@@ -70,7 +70,7 @@ export function connect(wsUrl) {
       const reply = new Promise((r) => waiting.set(n, r));
       ws.send(JSON.stringify({ id: n, method: "Runtime.evaluate", params: { expression: expr, awaitPromise: true, returnByValue: true } }));
       const msg = await reply;
-      if (msg.result?.exceptionDetails) throw new Error(JSON.stringify(msg.result.exceptionDetails));
+      if (msg.result?.exceptionDetails) throw new Error(JSON.stringify(msg.result.exceptionDetails) + " EXPR: " + String(expr).slice(0, 300));
       return msg.result?.result?.value;
     },
     close: () => ws.close(),
