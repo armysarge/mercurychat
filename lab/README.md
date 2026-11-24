@@ -274,6 +274,7 @@ npm --prefix apps/desktop run build && cargo build -p mercurychat --features tau
 ```
 
 Each check takes `<mercurychat.exe> <empty data dir>` (and a PNG folder where shown), launches the window on its own DevTools port, and prints one PASS or FAIL line per check:
+- `m5-nobundle-check.mjs`: a build with no built-in modem (no `modem\` folder, no `MC_BUNDLE_DIR`): the wizard and first-use screens show the built-in card with why it is missing, and no button to use it;
 - `m5-ui-check.mjs`: the built-in modem with a fake bundle (`MC_BUNDLE_DIR`, debug builds only): versions shown, a taken port, the diagnostics preview, About → Licences;
 - `m5-wizard-check.mjs … <png dir>`: the first-run wizard, resumed after a restart, with nothing transmitted;
 - `m5-operate-check.mjs … <png dir>`: the Operate screens after the design canvas, and the station panel that drops from the header's station pill;

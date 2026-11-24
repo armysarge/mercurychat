@@ -231,6 +231,7 @@
     "builtInTitleNoVersion": "Mercury integrado",
     "recommended": "Recomendado",
     "builtInBody": "El módem Mercury y Hamlib que vienen con MercuryChat. MercuryChat los inicia y los detiene, solo en este ordenador. Elija la tarjeta de sonido después, en Ajustes → Audio.",
+    "builtInMissing": "No está en esta copia de MercuryChat. Mercury y Hamlib integrados vienen con las versiones del instalador (el instalador de Windows, el .deb y el paquete de Arch). Instale una de ellas, o use abajo un Mercury que ejecute usted mismo.",
     "advanced": "Avanzado: puertos",
     "uiPort": "Puerto de la interfaz de Mercury",
     "rigctldPort": "Puerto de rigctld",

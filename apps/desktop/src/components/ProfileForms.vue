@@ -221,6 +221,11 @@ async function checkExisting() {
       <div><button type="submit" class="primary" :disabled="busy">{{ t("profile.useBuiltIn") }}</button></div>
     </form>
 
+    <section v-else-if="builtin && !builtin.available" class="card stack builtin-missing" aria-labelledby="builtin-missing-title">
+      <h2 id="builtin-missing-title">{{ t("profile.builtInTitleNoVersion") }}</h2>
+      <p class="muted small">{{ t("profile.builtInMissing") }}</p>
+    </section>
+
     <form class="card stack existing" @submit.prevent="useExisting">
       <h2>{{ t("profile.existingTitle") }}</h2>
       <p class="muted small">{{ t("profile.existingBody") }}</p>

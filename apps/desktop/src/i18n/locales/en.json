@@ -230,6 +230,7 @@
     "builtInTitleNoVersion": "Built-in Mercury",
     "recommended": "Recommended",
     "builtInBody": "The Mercury modem and Hamlib that come with MercuryChat. MercuryChat starts and stops them, on this computer only. Choose the sound card afterwards, in Settings → Audio.",
+    "builtInMissing": "Not in this copy of MercuryChat. The built-in Mercury and Hamlib come with the installer builds (the Windows setup, the .deb and the Arch package). Install one of those, or use a Mercury you run yourself below.",
     "advanced": "Advanced: ports",
     "uiPort": "Mercury UI port",
     "rigctldPort": "rigctld port",
