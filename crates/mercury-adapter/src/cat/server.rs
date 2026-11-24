@@ -11,7 +11,7 @@ use super::file::Radio;
 use std::io;
 use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::TcpListener;
 use tokio::task::JoinHandle;
 
@@ -254,13 +254,24 @@ impl Drop for CatServer {
     }
 }
 
+/// The longest request line: a rigctld command is a few dozen characters.
+const MAX_LINE: u64 = 4096;
+const NL: char = '\n';
+
 async fn client(sock: tokio::net::TcpStream, engine: Arc<Mutex<Engine>>) {
     let (r, mut w) = sock.into_split();
-    let mut lines = BufReader::new(r).lines();
-    while let Ok(Some(line)) = lines.next_line().await {
-        let e = engine.clone();
-        let reply = tokio::task::spawn_blocking(move || e.lock().unwrap().answer(&line)).await;
-        match reply {
+    let mut reader = BufReader::new(r);
+    let mut line = String::new();
+    loop {
+        line.clear();
+        // A line that does not end within the limit is not a rigctld client.
+        match (&mut reader).take(MAX_LINE).read_line(&mut line).await {
+            Ok(0) | Err(_) => return,
+            Ok(_) if !line.ends_with(NL) => return,
+            Ok(_) => {}
+        }
+        let (e, l) = (engine.clone(), line.clone());
+        match tokio::task::spawn_blocking(move || e.lock().unwrap().answer(&l)).await {
             Ok(Some(text)) => {
                 if w.write_all(text.as_bytes()).await.is_err() {
                     return;
@@ -479,6 +490,30 @@ mod tests {
         assert_eq!(n, 0);
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         assert!(!log.lock().unwrap().keyed, "the engine went with the server and unkeyed the radio");
+    }
+
+    #[tokio::test]
+    async fn a_line_that_never_ends_closes_the_connection() {
+        let (e, _) = icom();
+        let server = CatServer::start("127.0.0.1:0".parse().unwrap(), e).await.unwrap();
+        let mut c = TcpStream::connect(server.addr).await.unwrap();
+        c.write_all(&vec![b'x'; 64 * 1024]).await.unwrap();
+        let mut buf = [0u8; 16];
+        let n = tokio::time::timeout(std::time::Duration::from_secs(2), c.read(&mut buf))
+            .await
+            .expect("closed, not waiting for more")
+            .unwrap_or(0);
+        assert_eq!(n, 0);
+        // A new client is still served.
+        let mut d = TcpStream::connect(server.addr).await.unwrap();
+        d.write_all(
+            b"f
+",
+        )
+        .await
+        .unwrap();
+        let n = d.read(&mut buf).await.unwrap();
+        assert!(String::from_utf8_lossy(&buf[..n]).starts_with("14074000"));
     }
 
     #[tokio::test]
