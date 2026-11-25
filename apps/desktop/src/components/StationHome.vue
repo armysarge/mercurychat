@@ -2,7 +2,7 @@
 // The idle station home (the design canvas, M5 Task 11b), shown in Operate
 // while no conversation is open: the dial (the rig's frequency while its link
 // is up, else Mercury's), the bands of the saved frequency list, the
-// spectrum, and the CQ and Beacon cards. Every control goes through the same
+// spectrum, and the CQ, Broadcast and Beacon cards. Every control goes through the same
 // commands as the station strip; nothing here transmits by itself.
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -10,6 +10,7 @@ import { settingsTabRequest } from "../builtin";
 import { currentBand, refusalText, rigRefusal, rigSet, rigUi, rigUp, rigView, shownBandwidth, shownFreq, shownMode, tuneToEntry } from "../rig";
 import { activeProfile, app, discoveryError, modemState, sendCq } from "../store";
 import BeaconControl from "./BeaconControl.vue";
+import BroadcastMessage from "./BroadcastMessage.vue";
 import FreqDigits from "./FreqDigits.vue";
 import Waterfall from "./Waterfall.vue";
 
@@ -96,6 +97,12 @@ function savedFrequencies() {
       <p v-if="discoveryError.cq" class="warn small" role="alert">{{ discoveryError.cq }}</p>
     </div>
 
+    <div class="card broadcast-card">
+      <span class="label">{{ t("broadcast.title") }}</span>
+      <BroadcastMessage />
+      <p class="muted small">{{ t("broadcast.hint") }}</p>
+    </div>
+
     <div class="beacon-card">
       <BeaconControl :now="now" />
     </div>
@@ -107,7 +114,7 @@ function savedFrequencies() {
   flex: 1; min-height: 0; overflow-y: auto; padding: calc(var(--space) * 2);
   display: grid; gap: calc(var(--space) * 1.5); align-content: start;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-areas: "dial bands" "spectrum spectrum" "cq beacon";
+  grid-template-areas: "dial bands" "spectrum spectrum" "cq beacon" "broadcast beacon";
 }
 .card { border-radius: 12px; min-width: 0; }
 .dial { grid-area: dial; display: grid; gap: 6px; align-content: start; }
@@ -125,9 +132,11 @@ function savedFrequencies() {
 .spectrum { grid-area: spectrum; }
 .cq-card { grid-area: cq; display: grid; gap: var(--space); align-content: start; justify-items: start; }
 .cq-card p { margin: 0; }
+.broadcast-card { grid-area: broadcast; display: grid; gap: var(--space); align-content: start; }
+.broadcast-card p { margin: 0; }
 .beacon-card { grid-area: beacon; min-width: 0; }
 .beacon-card :deep(.card) { border-radius: 12px; height: 100%; }
 @media (max-width: 900px) {
-  .station-home { grid-template-columns: minmax(0, 1fr); grid-template-areas: "dial" "bands" "spectrum" "cq" "beacon"; padding: calc(var(--space) * 1.5); }
+  .station-home { grid-template-columns: minmax(0, 1fr); grid-template-areas: "dial" "bands" "spectrum" "cq" "broadcast" "beacon"; padding: calc(var(--space) * 1.5); }
 }
 </style>

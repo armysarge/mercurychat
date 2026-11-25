@@ -4,18 +4,15 @@
 // status line is the message, up to 40 bytes). Only while the modem is idle.
 import { computed, nextTick, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
-import { activeProfile, discoveryError, modemState, sendBeaconNow, sendBroadcastMessage, sendCq } from "../store";
+import { activeProfile, discoveryError, modemState, sendBeaconNow, sendCq } from "../store";
+import BroadcastMessage from "./BroadcastMessage.vue";
 
 const { t } = useI18n();
-const MAX = 40;
 const open = ref(false);
-const text = ref("");
 const root = ref<HTMLElement | null>(null);
 const idle = computed(() => modemState.value === "ready" || modemState.value === "listening");
 const usable = computed(() => !!activeProfile.value && idle.value);
-const bytes = computed(() => new TextEncoder().encode(text.value.trim()).length);
-const canSend = computed(() => usable.value && bytes.value > 0 && bytes.value <= MAX);
-const error = computed(() => discoveryError.cq || discoveryError.beacon || discoveryError.message);
+const error = computed(() => discoveryError.cq || discoveryError.beacon);
 
 /** Open or close the panel: focus goes into it, and back to the button on close; old errors go. */
 async function toggle() {
@@ -29,14 +26,6 @@ async function toggle() {
 async function run(step: () => Promise<unknown>) {
   await step();
   if (!error.value) open.value = false;
-}
-async function send() {
-  if (!canSend.value) return;
-  await sendBroadcastMessage(text.value);
-  if (!discoveryError.message) {
-    text.value = "";
-    open.value = false;
-  }
 }
 function away(e: Event) {
   if (open.value && root.value && !root.value.contains(e.target as Node)) open.value = false;
@@ -63,16 +52,7 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
         <button class="broadcast-cq" :disabled="!usable" :title="t('strip.idleOnly')" @click="run(sendCq)">{{ t("conversations.footCq") }}</button>
         <button class="broadcast-beacon" :disabled="!usable" :title="t('strip.idleOnly')" @click="run(sendBeaconNow)">{{ t("conversations.footBeacon") }}</button>
       </div>
-      <form class="message" @submit.prevent="send">
-        <label>
-          {{ t("broadcast.message") }}
-          <input v-model="text" class="broadcast-text" maxlength="80" autocomplete="off" :placeholder="t('broadcast.placeholder')" :disabled="!usable" />
-        </label>
-        <div class="row">
-          <span :class="['small', bytes > MAX ? 'err' : 'muted']">{{ t("broadcast.bytes", { n: bytes, max: MAX }) }}</span>
-          <button type="submit" class="primary broadcast-send" :disabled="!canSend">{{ t("broadcast.send") }}</button>
-        </div>
-      </form>
+      <BroadcastMessage @sent="open = false" />
       <p v-if="!usable" class="muted small">{{ t("strip.idleOnly") }}</p>
       <p v-if="error" class="err small" role="alert">{{ error }}</p>
       <p class="muted small">{{ t("broadcast.hint") }}</p>
@@ -90,9 +70,6 @@ onUnmounted(() => document.removeEventListener("pointerdown", away));
   background: var(--surface); border: 1px solid var(--border-strong); border-radius: 14px;
 }
 .buttons { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-.message { display: grid; gap: 6px; }
-.message label { display: grid; gap: 4px; font-size: calc(12px * var(--font-scale)); color: var(--text-2); }
-.row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 p { margin: 0; }
 @media (max-width: 1100px) { .broadcast-toggle .label { display: none; } }
 </style>
