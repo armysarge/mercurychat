@@ -33,6 +33,8 @@ struct Station {
     listen_wrong: bool,
     /// Answer `LISTEN OFF` with WRONG (fault injection); the setting stays.
     listen_off_wrong: bool,
+    /// Hears no call, whatever LISTEN says (fault injection).
+    deaf: bool,
     /// An older Mercury: no TUNE at all (every TUNE is WRONG).
     no_tune: bool,
     /// Answer every TUNE level with WRONG (fault injection).
@@ -265,6 +267,13 @@ impl FakeNet {
         self.shared.lock().unwrap().st[i].listen_off_wrong = wrong;
     }
 
+    /// Station `i` hears no call from the next CONNECT on, as when the other
+    /// station is out of range. `LISTEN OFF` from an app is not this: the app
+    /// sends it some time after a link ends, and a call can get there first.
+    pub fn set_deaf(&self, i: usize, on: bool) {
+        self.shared.lock().unwrap().st[i].deaf = on;
+    }
+
     /// Whether station `i` is listening now, as the fake modem sees it.
     pub fn listening(&self, i: usize) -> bool {
         self.shared.lock().unwrap().st[i].listen
@@ -456,7 +465,9 @@ async fn handle_command(net: &Arc<FakeNet>, i: usize, line: &str) {
             send_line(&s, i, "OK");
             let (a, b) = ((*a).to_string(), (*b).to_string());
             let j = 1 - i;
-            let reachable = s.session.is_none() && s.st[j].listen && s.st[j].mycall.as_deref() == Some(&b);
+            let callee = &s.st[j];
+            let reachable =
+                s.session.is_none() && callee.listen && !callee.deaf && callee.mycall.as_deref() == Some(&b);
             let net2 = net.clone();
             let delay = net.connect_delay;
             drop(s);
