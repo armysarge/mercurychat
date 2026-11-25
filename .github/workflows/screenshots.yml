@@ -1,0 +1,30 @@
+# Screenshots of the real Windows app on its simulator (demo callsign N0CALL),
+# for the README. Started by hand: Actions -> screenshots -> Run workflow.
+# The PNGs come out as the "screenshots" artifact.
+name: screenshots
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  shoot:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 22 }
+      - name: Install UI dependencies
+        run: npm --prefix apps/desktop ci
+      - name: Build the UI
+        run: npm --prefix apps/desktop run build
+      - name: Build the app (debug, with the simulator)
+        run: cargo build -p mercurychat --features tauri/custom-protocol
+      - name: Take the screenshots
+        run: node scripts/screenshots.mjs target/debug/mercurychat.exe shots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: screenshots
+          path: shots/
+          if-no-files-found: warn
+          retention-days: 14

@@ -15,13 +15,15 @@
 //   view   operate | logbook | settings
 //   theme  a theme id from apps/desktop/src/themes/presets.ts (or "system")
 //   setup  named steps (STEPS below), each done once per run, in order
+//   side   the Operate sidebar tab: chats | heard
+//   tab    a Settings tab id (station, rig, ...)
 //   clip   a CSS selector: capture only that element (plus a margin)
 //   scroll a CSS selector to scroll into view first
 // Each PNG must be at most MAX_BYTES; a larger one fails the run.
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { kill, launch, page, sleep, until } from "../lab/windows/cdp.mjs";
+import { firstUse, kill, launch, sleep, until } from "../lab/windows/cdp.mjs";
 import { click, compose, pill, setInput } from "../lab/windows/m2-dom.mjs";
 
 const MAX_BYTES = 300 * 1024;
@@ -31,12 +33,14 @@ const CALL = "N0CALL";
 
 /** The default shot list: what the README and the manual use. */
 const SHOTS = [
-  { name: "operate-dark", view: "operate", theme: "midnight", setup: ["station", "heard", "beacons", "session", "chat"], side: "heard" },
+  // The idle station home comes first: it is gone once a conversation is open.
+  { name: "station-home", view: "operate", theme: "midnight", setup: ["station", "heard", "beacons"], side: "heard" },
+  { name: "operate-dark", view: "operate", theme: "midnight", setup: ["session", "chat", "panel"], side: "heard" },
   { name: "qso-card", view: "operate", theme: "midnight", setup: ["session", "qso"], clip: "section.qso-card" },
   { name: "operate-light", view: "operate", theme: "daylight", setup: ["session"], side: "chats" },
-  { name: "settings-station", view: "settings", theme: "midnight", setup: ["stationInfo"], scroll: "form.station-info" },
+  { name: "settings-station", view: "settings", theme: "midnight", setup: ["stationInfo"], tab: "station" },
   { name: "logbook", view: "logbook", theme: "midnight", setup: ["disconnect"] },
-  { name: "settings-rig", view: "settings", theme: "midnight", setup: ["disconnect", "rigTest"], scroll: ".rig-settings" },
+  { name: "settings-rig", view: "settings", theme: "midnight", setup: ["disconnect", "rigTest"], tab: "rig", scroll: ".rig-test-steps" },
 ];
 
 const args = process.argv.slice(2);
@@ -58,32 +62,42 @@ const shots = (listArg ? JSON.parse(readFileSync(listArg, "utf8")) : SHOTS).filt
 
 const rail = (label) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(label)})`;
 const VIEW_LABEL = { operate: "Operate", logbook: "Logbook", settings: "Settings" };
-const sideTab = (name) => `[...document.querySelectorAll('aside.sidebar [role=tab]')].find(b => b.textContent.trim() === ${JSON.stringify(name)})?.click()`;
+const sideTab = (id) => `document.getElementById(${JSON.stringify(`side-tab-${id}`)})?.click()`;
+const sim1 = `.heard .row[data-callsign="SIM1"]`;
 
 /** The named set-up steps. Each runs at most once per run. */
 const STEPS = {
   async station(s) {
-    await until(s, "!!document.querySelector('form.simulator')", "the first-use screen", 30000);
     await s.eval(setInput('form.simulator input[name="callsign"]', CALL));
     await s.eval(click("Use simulator"));
-    await until(s, `['ready','listening'].includes(${pill}) && !!document.querySelector('textarea.composer')`, "the workspace", 30000);
+    await until(s, `['ready','listening'].includes(${pill}) && !!document.querySelector('.station-home')`, "the station home", 30000);
   },
   async heard(s) {
-    await until(s, `!!document.querySelector('.heard .row[data-callsign="SIM1"] .grid')`, "SIM1 heard with its locator", 30000);
+    await s.eval(sideTab("heard"));
+    await until(s, `!!document.querySelector('${sim1} .grid')`, "SIM1 heard with its locator", 75000);
   },
   async beacons(s) {
-    await s.eval(`${rail("Operate")}.click()`);
-    await until(s, "!!document.querySelector('input.beacon-toggle')", "the beacon card");
-    if (!(await s.eval("document.querySelector('input.beacon-toggle').checked"))) await s.eval("document.querySelector('input.beacon-toggle').click()");
-    await until(s, "/Next beacon/.test(document.querySelector('.strip .next-beacon')?.textContent ?? '')", "the beacon countdown");
+    await until(s, "!!document.querySelector('.station-home input.beacon-toggle')", "the beacon card");
+    if (!(await s.eval("document.querySelector('.station-home input.beacon-toggle').checked"))) await s.eval("document.querySelector('.station-home input.beacon-toggle').click()");
+    await until(s, "!!document.querySelector('header .beacon-in')", "the beacon countdown", 15000);
   },
   async session(s) {
     if ((await s.eval(pill)) === "connected") return;
-    await s.eval(`${rail("Operate")}.click()`);
-    await s.eval(setInput("input.peer", "SIM1"));
+    await s.eval(`${rail("Operate")}?.click()`);
+    await s.eval(sideTab("heard"));
+    await until(s, `!!document.querySelector('${sim1} button.pick')`, "SIM1 in the Heard list", 75000);
+    await s.eval(`document.querySelector('${sim1} button.pick').click()`);
     await until(s, "document.querySelector('.peer-header h1')?.textContent.trim() === 'SIM1'", "SIM1 open");
-    await s.eval(click("Call"));
+    if ((await s.eval(pill)) !== "connected") {
+      await until(s, "!!document.querySelector('.peer-header button.primary:not([disabled])')", "the Call button");
+      await s.eval("document.querySelector('.peer-header button.primary').click()");
+    }
     await until(s, `${pill} === 'connected'`, "connected to SIM1", 30000);
+  },
+  async panel(s) {
+    const toggle = "document.querySelector('.peer-header button.toggle-session')";
+    if ((await s.eval(`${toggle}.getAttribute('aria-pressed')`)) !== "true") await s.eval(`${toggle}.click()`);
+    await until(s, "!!document.querySelector('.session-pane .qso-card')", "the QSO record panel", 20000);
   },
   async chat(s) {
     for (const text of ["Good afternoon from N0CALL, testing MercuryChat on the simulator.", "Signal looks clean here. 73!"]) {
@@ -92,6 +106,7 @@ const STEPS = {
     }
   },
   async qso(s) {
+    await STEPS.panel(s);
     await until(s, "!!document.querySelector('section.qso-card input[name=rstSent]')", "the QSO card", 20000);
     for (const [name, value] of [["rstSent", "59"], ["rstRcvd", "57"], ["name", "Sam"], ["qth", "Simulator"]]) {
       await s.eval(setInput(`section.qso-card input[name=${name}]`, value));
@@ -102,6 +117,8 @@ const STEPS = {
   },
   async stationInfo(s) {
     await s.eval(`${rail("Settings")}.click()`);
+    await until(s, "!!document.getElementById('tab-station')", "the Settings tabs");
+    await s.eval("document.getElementById('tab-station').click()");
     await until(s, "!!document.querySelector('form.station-info')", "the station information form");
     const fields = { name: "Alex", grid: "FN31pr", qth: "Springfield", rig: "HF transceiver", power: "50 W", antenna: "End-fed half-wave", about: "Portable station, evenings and weekends" };
     for (const [k, v] of Object.entries(fields)) await s.eval(setInput(`form.station-info input[name=${k}]`, v));
@@ -120,7 +137,7 @@ const STEPS = {
   async disconnect(s) {
     if ((await s.eval(pill)) !== "connected") return;
     await s.eval(`${rail("Operate")}.click()`);
-    await s.eval(click("Disconnect"));
+    await s.eval("document.querySelector('.peer-header button.disconnect').click()");
     await until(s, `['ready','listening'].includes(${pill})`, "the session ended", 20000);
   },
 };
@@ -139,7 +156,8 @@ const app = launch(exe, data, port);
 const done = new Set();
 const results = [];
 try {
-  const s = await page(port, (t) => !!t.trim() && !/Opening|Starting/.test(t), "the main window", 40000);
+  // A new install opens the setup wizard; this leaves it for the plain setup screen.
+  const s = await firstUse(port, "Use simulator", 90000);
   await s.send("Emulation.setDeviceMetricsOverride", { width: WIDTH, height: HEIGHT, deviceScaleFactor: 1, mobile: false });
   for (const step of ["station"]) {
     await STEPS[step](s);
@@ -154,7 +172,8 @@ try {
     }
     if (shot.theme) await setTheme(s, shot.theme);
     await s.eval(`${rail(VIEW_LABEL[shot.view] ?? "Operate")}.click()`);
-    if (shot.side) await s.eval(sideTab(shot.side === "heard" ? "Heard" : "Contacts"));
+    if (shot.side) await s.eval(sideTab(shot.side));
+    if (shot.tab) await s.eval(`document.getElementById(${JSON.stringify(`tab-${shot.tab}`)}).click()`);
     await sleep(600);
     if (shot.scroll) await s.eval(`document.querySelector(${JSON.stringify(shot.scroll)})?.scrollIntoView({ block: 'start' })`);
     await sleep(300);
@@ -174,7 +193,8 @@ try {
   }
   s.close();
 } catch (e) {
-  results.push(`FAIL ${e.message.slice(0, 400)}`);
+  results.push(`FAIL ${e.message.slice(0, 1200)}`);
+  if (app.out) results.push(`APP OUTPUT ${app.out.slice(-1500)}`);
 } finally {
   kill(app);
   await sleep(500);
