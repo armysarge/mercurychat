@@ -101,8 +101,9 @@ async fn stale_generation_reports_are_dropped() {
     h.call(AppCommand::SelectProfile { id: Some(a) }).await.unwrap();
     assert_eq!(next_state(&mut rx, Duration::from_secs(2)).await.map(|s| s.0), Some(ModemState::Attaching));
     h.call(AppCommand::SelectProfile { id: Some(b) }).await.unwrap();
+    // How fast the simulator starts is not under test, and a busy runner needs longer than 5 s.
     loop {
-        match next_state(&mut rx, Duration::from_secs(5)).await {
+        match next_state(&mut rx, Duration::from_secs(30)).await {
             Some((ModemState::Listening, _)) => break,
             Some(_) => continue,
             None => panic!("simulator never became ready"),
