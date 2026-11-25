@@ -34,7 +34,7 @@ Founded by ZS6SHZ. Updates: [releases](https://github.com/armysarge/mercurychat/
 
 ![The Operate view in the Midnight theme: heard stations, a connected chat with SIM1 and the QSO record](design/screenshots/operate-dark.png)
 
-![The idle station home: the frequency dial, band buttons, CQ and beacon cards, and SIM1 in the heard list](design/screenshots/station-home.png)
+![The idle station home: the frequency dial, band buttons, CQ, broadcast and beacon cards, and SIM1 in the heard list](design/screenshots/station-home.png)
 
 ![A connected chat in the Daylight theme, with the chat list and the filled-in QSO record](design/screenshots/operate-light.png)
 
