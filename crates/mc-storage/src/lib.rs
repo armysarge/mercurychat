@@ -280,7 +280,7 @@ impl Store {
     /// Copy the whole database with SQLite's online backup (never a raw file
     /// copy of a live WAL database).
     pub fn backup_to(&self, dest: &Path) -> Result<()> {
-        Ok(self.conn.backup(rusqlite::MAIN_DB, dest, None)?)
+        Ok(self.conn.backup(rusqlite::MAIN_DB, dest, None::<fn(rusqlite::backup::Progress)>)?)
     }
 
     fn init(mut conn: Connection, path: Option<&Path>, migrations: &[Migration]) -> Result<Self> {

@@ -47,7 +47,7 @@ mercury-adapter = { path = "../mercury-adapter", features = ["fake"] }
 tokio = { version = "1", features = ["full", "test-util"] }
 tempfile = "3"
 # Same version as mc-storage: lets a test break the peer's store on purpose.
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.41", features = ["bundled"] }
 
 [[example]]
 name = "rig_lab"

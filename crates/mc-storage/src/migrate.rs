@@ -219,7 +219,7 @@ fn backup_before(conn: &Connection, db_path: &Path, from: i64) -> Result<PathBuf
     let dest = dir.join(format!("{stem}-v{from}-{}.db", chrono::Utc::now().format("%Y%m%dT%H%M%SZ")));
     let err = |reason: String| StorageError::Backup { path: dest.clone(), reason };
     std::fs::create_dir_all(&dir).map_err(|e| err(e.to_string()))?;
-    conn.backup(rusqlite::MAIN_DB, &dest, None).map_err(|e| err(e.to_string()))?;
+    conn.backup(rusqlite::MAIN_DB, &dest, None::<fn(rusqlite::backup::Progress)>).map_err(|e| err(e.to_string()))?;
     Ok(dest)
 }
 
