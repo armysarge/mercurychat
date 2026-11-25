@@ -573,12 +573,14 @@ impl RigPolicy {
         let was_keyed = self.rig_ptt == RigPttView::On
             || self.mercury_ptt == Some(true)
             || (self.rig_ptt == RigPttView::Unknown && self.activity != Activity::Idle);
+        // A failed reconnect while still lost is not a new loss: what was owed stays owed.
+        let owed = matches!(self.link, RigLinkView::Lost { .. }) && self.recovery.lost_while_keyed;
         self.link = RigLinkView::Lost { since_utc: now_utc(), reason: reason.to_string() };
         self.rig_ptt = RigPttView::Unknown;
         self.unknown_since = None;
         self.meters = [None, None, None];
         self.recovery =
-            Recovery { lost_while_keyed: was_keyed, recovered: self.recovery.recovered, ..Recovery::default() };
+            Recovery { lost_while_keyed: was_keyed || owed, recovered: self.recovery.recovered, ..Recovery::default() };
         let _ = now;
         let mut actions = vec![];
         if was_keyed {
@@ -1014,6 +1016,21 @@ mod tests {
         assert!(!up(None, t0).view(t0 + 1000 * MS).ptt_check_off, "not after a moment");
         reading(&mut p, false, t0 + 10_250 * MS);
         assert!(!p.view(t0 + 10_250 * MS).ptt_check_off);
+    }
+
+    #[test]
+    fn a_second_failed_connect_does_not_forget_the_loss_while_keyed() {
+        // Saving the rig settings restarts the link; the new link's first attempt
+        // can fail before the rig is back, and that must not clear the debt.
+        let t0 = Instant::now();
+        let mut p = up(Some(true), t0);
+        p.on_mercury_ptt(true, t0);
+        reading(&mut p, true, t0 + 100 * MS);
+        p.on_mercury_ptt(false, t0 + 200 * MS);
+        lost(&mut p, t0 + 300 * MS);
+        lost(&mut p, t0 + 1300 * MS); // the restarted link fails again, idle
+        assert!(p.view(t0 + 1400 * MS).banners.contains(&RigBanner::LostWhileKeyed));
+        assert_eq!(back(&mut p, t0 + 2000 * MS), vec![RigAction::SendPttOff], "the one PTT-off is still owed");
     }
 
     #[test]
