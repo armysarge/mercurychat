@@ -407,7 +407,7 @@
  },
  {
   "name": "cookie",
-  "version": "0.18.2",
+  "version": "0.18.3",
   "licence": "MIT OR Apache-2.0",
   "kind": "rust",
   "url": "https://github.com/SergioBenitez/cookie-rs"
@@ -792,13 +792,6 @@
  },
  {
   "name": "foldhash",
-  "version": "0.1.5",
-  "licence": "Zlib",
-  "kind": "rust",
-  "url": "https://github.com/orlp/foldhash"
- },
- {
-  "name": "foldhash",
   "version": "0.2.0",
   "licence": "Zlib",
   "kind": "rust",
@@ -827,7 +820,7 @@
  },
  {
   "name": "form_urlencoded",
-  "version": "1.2.2",
+  "version": "1.2.3",
   "licence": "MIT OR Apache-2.0",
   "kind": "rust",
   "url": "https://github.com/servo/rust-url"
@@ -1058,13 +1051,6 @@
  },
  {
   "name": "hashbrown",
-  "version": "0.15.5",
-  "licence": "MIT OR Apache-2.0",
-  "kind": "rust",
-  "url": "https://github.com/rust-lang/hashbrown"
- },
- {
-  "name": "hashbrown",
   "version": "0.17.1",
   "licence": "MIT OR Apache-2.0",
   "kind": "rust",
@@ -1072,10 +1058,10 @@
  },
  {
   "name": "hashlink",
-  "version": "0.10.0",
+  "version": "0.12.2",
   "licence": "MIT OR Apache-2.0",
   "kind": "rust",
-  "url": "https://github.com/kyren/hashlink"
+  "url": "https://github.com/djc/hashlink"
  },
  {
   "name": "heck",
@@ -1471,7 +1457,7 @@
  },
  {
   "name": "libsqlite3-sys",
-  "version": "0.35.0",
+  "version": "0.39.1",
   "licence": "MIT",
   "kind": "rust",
   "url": "https://github.com/rusqlite/rusqlite"
@@ -2191,8 +2177,15 @@
   "url": "https://github.com/PolyMeilex/rfd"
  },
  {
+  "name": "rsqlite-vfs",
+  "version": "0.2.0",
+  "licence": "MIT",
+  "kind": "rust",
+  "url": "https://github.com/Spxg/sqlite-wasm-rs"
+ },
+ {
   "name": "rusqlite",
-  "version": "0.37.0",
+  "version": "0.41.1",
   "licence": "MIT",
   "kind": "rust",
   "url": "https://github.com/rusqlite/rusqlite"
@@ -2476,6 +2469,13 @@
   "licence": "MIT",
   "kind": "rust",
   "url": "https://gitlab.gnome.org/World/Rust/soup3-rs"
+ },
+ {
+  "name": "sqlite-wasm-rs",
+  "version": "0.6.3",
+  "licence": "MIT",
+  "kind": "rust",
+  "url": "https://github.com/Spxg/sqlite-wasm-rs"
  },
  {
   "name": "stable_deref_trait",
@@ -2969,7 +2969,7 @@
  },
  {
   "name": "url",
-  "version": "2.5.8",
+  "version": "2.5.9",
   "licence": "MIT OR Apache-2.0",
   "kind": "rust",
   "url": "https://github.com/servo/rust-url"
