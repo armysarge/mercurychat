@@ -60,8 +60,9 @@ const out = resolve(outArg);
 mkdirSync(out, { recursive: true });
 const shots = (listArg ? JSON.parse(readFileSync(listArg, "utf8")) : SHOTS).filter((s) => !only || only.includes(s.name));
 
-const rail = (label) => `[...document.querySelectorAll('.rail button')].find(b => b.getAttribute('aria-label') === ${JSON.stringify(label)})`;
-const VIEW_LABEL = { operate: "Operate", logbook: "Logbook", settings: "Settings" };
+// The rail by its ids, not its labels (Operate is "Chats" there).
+const rail = (id) => `document.querySelector('.rail [data-rail=${id}]')`;
+const VIEW_RAIL = { operate: "chats", logbook: "logbook", settings: "settings" };
 const sideTab = (id) => `document.getElementById(${JSON.stringify(`side-tab-${id}`)})?.click()`;
 const sim1 = `.heard .row[data-callsign="SIM1"]`;
 
@@ -83,7 +84,7 @@ const STEPS = {
   },
   async session(s) {
     if ((await s.eval(pill)) === "connected") return;
-    await s.eval(`${rail("Operate")}?.click()`);
+    await s.eval(`${rail("chats")}.click()`);
     await s.eval(sideTab("heard"));
     await until(s, `!!document.querySelector('${sim1} button.pick')`, "SIM1 in the Heard list", 75000);
     await s.eval(`document.querySelector('${sim1} button.pick').click()`);
@@ -116,7 +117,7 @@ const STEPS = {
     await until(s, "/\\S/.test(document.querySelector('section.qso-card .saved')?.textContent ?? '')", "the record saved");
   },
   async stationInfo(s) {
-    await s.eval(`${rail("Settings")}.click()`);
+    await s.eval(`${rail("settings")}.click()`);
     await until(s, "!!document.getElementById('tab-station')", "the Settings tabs");
     await s.eval("document.getElementById('tab-station').click()");
     await until(s, "!!document.querySelector('form.station-info')", "the station information form");
@@ -127,7 +128,7 @@ const STEPS = {
     await until(s, "document.querySelectorAll('.macro-editor .macro').length >= 3", "the macros");
   },
   async rigTest(s) {
-    await s.eval(`${rail("Settings")}.click()`);
+    await s.eval(`${rail("settings")}.click()`);
     await until(s, "!!document.getElementById('tab-rig')", "the Settings tabs");
     await s.eval("document.getElementById('tab-rig').click()");
     await until(s, "!!document.querySelector('.rig-settings button.rig-test')", "the rig link test");
@@ -136,14 +137,14 @@ const STEPS = {
   },
   async disconnect(s) {
     if ((await s.eval(pill)) !== "connected") return;
-    await s.eval(`${rail("Operate")}.click()`);
+    await s.eval(`${rail("chats")}.click()`);
     await s.eval("document.querySelector('.peer-header button.disconnect').click()");
     await until(s, `['ready','listening'].includes(${pill})`, "the session ended", 20000);
   },
 };
 
 async function setTheme(s, id) {
-  await s.eval(`${rail("Settings")}.click()`);
+  await s.eval(`${rail("settings")}.click()`);
   await until(s, `!!document.querySelector('[data-theme-id=${JSON.stringify(id)}]')`, `theme ${id}`);
   await s.eval(`document.querySelector('[data-theme-id=${JSON.stringify(id)}]').click()`);
   await sleep(300);
@@ -171,7 +172,7 @@ try {
       done.add(step);
     }
     if (shot.theme) await setTheme(s, shot.theme);
-    await s.eval(`${rail(VIEW_LABEL[shot.view] ?? "Operate")}.click()`);
+    await s.eval(`${rail(VIEW_RAIL[shot.view] ?? "chats")}.click()`);
     if (shot.side) await s.eval(sideTab(shot.side));
     if (shot.tab) await s.eval(`document.getElementById(${JSON.stringify(`tab-${shot.tab}`)}).click()`);
     await sleep(600);
