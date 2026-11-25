@@ -410,7 +410,7 @@ try {
   // M5 Task 11c (owner): the rail in the canvas's order; Chats (the Operate
   // page with its list) has the canvas's chat icon, no longer the antenna.
   const order = await s.eval("[...document.querySelectorAll('.rail button')].map(b => b.getAttribute('aria-label')).join('|')");
-  if (order !== "Chats|Heard|Files|Broadcasts|Logbook|Diagnostics|Settings") throw new Error(`rail order ${order}`);
+  if (order !== "Operate|Chats|Heard|Files|Broadcasts|Logbook|Diagnostics|Settings") throw new Error(`rail order ${order}`);
   if ((await s.eval(`${rail("Chats")}.title`)) !== "Chats") throw new Error("Chats has no tooltip");
   results.push(`PASS rail: ${order}, each with its tooltip and aria-label`);
 

@@ -9,7 +9,7 @@ import { info, measureIpc } from "./diag";
 import { onEvent as notifyOn, startNotifier, stopNotifier } from "./notifier";
 import { t } from "./i18n";
 import {
-  activeProfile, app, chat, detail, discovery, mirror, modemLabel, modemState, modeWord, offerFile, onAppEvent, openPeer, reloadChat, reloadDiscovery,
+  activeProfile, app, canAbort, chat, detail, discovery, linkPeer, mirror, modemLabel, modemState, modeWord, offerFile, onAppEvent, openPeer, reloadChat, reloadDiscovery,
   reloadTransfers, session, snapshot, stopTimers, type ViewName,
 } from "./store";
 import Conversations from "./views/Conversations.vue";
@@ -41,12 +41,14 @@ const startupError = ref("");
 const now = ref(new Date());
 let clock: ReturnType<typeof setInterval> | undefined;
 
-// The rail in the canvas's order (M5 Task 11c, owner): Chats and Heard (the
-// Operate page with that list beside it), Files, Logbook; Diagnostics and
+// The rail in the canvas's order (M5 Task 11c, owner): Operate (the idle
+// station home, owner 25 Nov), then Chats and Heard (the Operate page with
+// that list beside it), Files, Logbook; Diagnostics and
 // Settings at the bottom. The Conversations page (a conversation's history
 // with its search) opens from the conversation's "…" and keeps Chats selected.
 type RailItem = { id: string; label: string; icon: string; page: ViewName; side?: "chats" | "heard" };
 const RAIL: RailItem[] = [
+  { id: "operate", page: "operate", label: "nav.operate", icon: "M4 17a8 8 0 1 1 16 0M12 17l4-5M3 20h18" },
   { id: "chats", page: "operate", side: "chats", label: "nav.chats", icon: "M7 4h10a4 4 0 0 1 4 4v6a4 4 0 0 1-4 4H9l-5 3v-4a4 4 0 0 1-1-3V8a4 4 0 0 1 4-4Zm0 6h10M7 13h6" },
   { id: "heard", page: "operate", side: "heard", label: "nav.heard", icon: "M12 12h.01M8.5 8.5a5 5 0 0 0 0 7M15.5 8.5a5 5 0 0 1 0 7M5.6 5.6a9 9 0 0 0 0 12.8M18.4 5.6a9 9 0 0 1 0 12.8" },
   { id: "files", page: "files", label: "nav.files", icon: "M6 3h8l5 5v13H6zM14 3v5h5M9 13h7M9 17h5" },
@@ -71,13 +73,31 @@ const stateTone = computed(() => {
   return "warn";
 });
 const CHAT_PAGES: ViewName[] = ["operate", "conversations"];
+/** A link under way: its conversation's header stays on screen, so there is no station home. */
+const linkedPeer = computed(() => (canAbort.value ? session.value?.peer ?? linkPeer.value ?? "" : ""));
+/** The operator came by "Operate" (or has just started), not by Chats or Heard. */
+const viaOperate = ref(true);
+const atHome = computed(() => app.page === "operate" && viaOperate.value && !chat.open && !linkedPeer.value);
+// Closing a conversation lands on the station home too.
+watch(() => chat.open, (now, before) => { if (before && !now) viaOperate.value = true; });
 /** The rail item for where the operator is. */
 function railOn(r: RailItem): boolean {
-  if (r.side) return CHAT_PAGES.includes(app.page) && app.sideTab === r.side;
+  if (r.id === "operate") return atHome.value;
+  if (r.side) return !atHome.value && CHAT_PAGES.includes(app.page) && app.sideTab === r.side;
   return app.page === r.page;
 }
 function goRail(r: RailItem) {
+  if (r.id === "operate") {
+    viaOperate.value = true;
+    // The station home needs no conversation open (the draft is kept). With a
+    // link under way, Operate shows that conversation instead.
+    if (chat.open !== linkedPeer.value) void openPeer(linkedPeer.value);
+    app.drawer = null;
+    app.page = "operate";
+    return;
+  }
   if (r.side) {
+    viaOperate.value = false;
     app.sideTab = r.side;
     // Below 960 px the list is a drawer: the rail opens it.
     if (window.matchMedia("(max-width: 960px)").matches) app.drawer = "peers";

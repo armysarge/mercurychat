@@ -12,7 +12,7 @@
 //   node scripts/screenshots.mjs <mercurychat.exe> <out dir> [shots.json] [--only name,name]
 //
 // A shot is { name, view, theme, setup: [step...], clip? }:
-//   view   operate | logbook | settings
+//   view   home (the station home) | operate (a conversation) | logbook | settings
 //   theme  a theme id from apps/desktop/src/themes/presets.ts (or "system")
 //   setup  named steps (STEPS below), each done once per run, in order
 //   side   the Operate sidebar tab: chats | heard
@@ -34,7 +34,7 @@ const CALL = "N0CALL";
 /** The default shot list: what the README and the manual use. */
 const SHOTS = [
   // The idle station home comes first: it is gone once a conversation is open.
-  { name: "station-home", view: "operate", theme: "midnight", setup: ["station", "heard", "beacons"], side: "heard" },
+  { name: "station-home", view: "home", theme: "midnight", setup: ["station", "heard", "beacons"], side: "heard" },
   { name: "operate-dark", view: "operate", theme: "midnight", setup: ["session", "chat", "panel"], side: "heard" },
   { name: "qso-card", view: "operate", theme: "midnight", setup: ["session", "qso"], clip: "section.qso-card" },
   { name: "operate-light", view: "operate", theme: "daylight", setup: ["session"], side: "chats" },
@@ -62,7 +62,7 @@ const shots = (listArg ? JSON.parse(readFileSync(listArg, "utf8")) : SHOTS).filt
 
 // The rail by its ids, not its labels (Operate is "Chats" there).
 const rail = (id) => `document.querySelector('.rail [data-rail=${id}]')`;
-const VIEW_RAIL = { operate: "chats", logbook: "logbook", settings: "settings" };
+const VIEW_RAIL = { home: "operate", operate: "chats", logbook: "logbook", settings: "settings" };
 const sideTab = (id) => `document.getElementById(${JSON.stringify(`side-tab-${id}`)})?.click()`;
 const sim1 = `.heard .row[data-callsign="SIM1"]`;
 

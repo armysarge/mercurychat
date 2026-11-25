@@ -87,6 +87,7 @@ try {
     dial: !!document.querySelector('.station-home .dial'),
     cq: !!document.querySelector('.station-home .cq-card button.send-cq'),
     beacon: !!document.querySelector('.station-home .beacon-card'),
+    broadcast: !!document.querySelector('.station-home .broadcast-card input.broadcast-text') && !!document.querySelector('.station-home .broadcast-card button.broadcast-send'),
     spectrum: !!document.querySelector('.station-home .spectrum'),
   })`);
   for (const [k, v] of Object.entries(home)) if (!v) throw new Error(`O1: the station home has no ${k}`);
@@ -94,7 +95,7 @@ try {
   const idle = await s.eval(`({ header: !!document.querySelector('.peer-header'), composer: !!document.querySelector('textarea.composer'), typeCallsign: document.querySelector('main.view').innerText.includes('Type a callsign') })`);
   if (idle.header || idle.composer || idle.typeCallsign) throw new Error(`O7: with no conversation open the page shows ${JSON.stringify(idle)}`);
   results.push("PASS O7 no conversation open: no peer header, no composer, the station home alone");
-  results.push(`PASS O1 station home: dial, bands "${await s.eval(text(".station-home .bands"))}", spectrum, CQ and Beacon cards`);
+  results.push(`PASS O1 station home: dial, bands "${await s.eval(text(".station-home .bands"))}", spectrum, CQ, Broadcast and Beacon cards`);
 
   // ---- O2: the header's station pill and status pill.
   const station = await s.eval(text("header .station-pill"));
@@ -118,7 +119,7 @@ try {
 
   // ---- O12: the rail; Heard's count, then the Heard list from the rail.
   const order = await s.eval("[...document.querySelectorAll('.rail button')].map(b => b.dataset.rail).join(',')");
-  if (order !== "chats,heard,files,broadcasts,logbook,diagnostics,settings") throw new Error(`O12: rail order ${order}`);
+  if (order !== "operate,chats,heard,files,broadcasts,logbook,diagnostics,settings") throw new Error(`O12: rail order ${order}`);
   await until(s, "!!document.querySelector('.rail [data-rail=heard] .rail-badge')", "the Heard count on the rail", 20000);
   const badge = await s.eval(text(".rail [data-rail=heard] .rail-badge"));
   await s.eval("document.querySelector('.rail [data-rail=heard]').click()");
@@ -255,6 +256,17 @@ try {
   await s.eval(`${menu}.querySelector('[data-action=close]').click()`);
   await until(s, "!!document.querySelector('.station-home') && !document.querySelector('.peer-header')", "the station home after closing");
   results.push("PASS O10 Close conversation: the station home again, no peer header");
+
+  // ---- O18: the rail's Operate opens the station home from a conversation.
+  await s.eval("document.querySelector('.rail [data-rail=heard]').click()");
+  await until(s, sim1, "SIM1 in the Heard list", 20000);
+  await s.eval(`${sim1}.click()`);
+  await until(s, "!!document.querySelector('.peer-header h1') && !document.querySelector('.station-home')", "SIM1's conversation open");
+  await s.eval("document.querySelector('.rail [data-rail=operate]').click()");
+  await until(s, "!!document.querySelector('.station-home') && !document.querySelector('.peer-header')", "the station home from Operate");
+  if ((await s.eval("document.querySelector('.rail [data-rail=operate]').getAttribute('aria-current')")) !== "page") throw new Error("O18: Operate is not marked current");
+  await s.eval("document.querySelector('.rail [data-rail=chats]').click()");
+  results.push("PASS O18 rail Operate: from SIM1's conversation to the station home, marked current");
 
   // ---- O14 (2): after hanging up, the foot's buttons are usable and the reason gone.
   await s.eval("[...document.querySelectorAll('.conv .chips button')].find(b => b.textContent.trim() === 'CQ').click()");
