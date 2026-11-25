@@ -40,7 +40,7 @@ const SHOTS = [
   { name: "operate-light", view: "operate", theme: "daylight", setup: ["session"], side: "chats" },
   { name: "settings-station", view: "settings", theme: "midnight", setup: ["stationInfo"], tab: "station" },
   { name: "logbook", view: "logbook", theme: "midnight", setup: ["disconnect"] },
-  { name: "settings-rig", view: "settings", theme: "midnight", setup: ["disconnect", "rigTest"], tab: "rig", scroll: ".rig-test-steps" },
+  { name: "settings-rig", view: "settings", theme: "midnight", setup: ["disconnect", "rigTest"], tab: "rig", scroll: ".rig-settings fieldset.box:has(button.rig-test)" },
 ];
 
 const args = process.argv.slice(2);
