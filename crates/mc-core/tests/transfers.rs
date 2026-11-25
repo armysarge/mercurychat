@@ -92,8 +92,11 @@ impl App {
     /// Prepare and send `path`; the transfer id from the first event.
     async fn send(&mut self, path: &Path) -> String {
         let p = self.prepare(path).await;
+        // Events of earlier files may still be waiting: only a new row is this one.
+        let earlier: Vec<String> = self.transfers().await.into_iter().map(|t| t.id).collect();
         assert_eq!(self.call(AppCommand::SendFile { prep_id: p.prep_id }).await.unwrap(), CommandOk::Done);
-        self.transfer(10, "the outgoing row", |t| t.direction == TransferDirection::Out).await.id
+        let new = |t: &TransferView| t.direction == TransferDirection::Out && !earlier.contains(&t.id);
+        self.transfer(10, "the outgoing row", new).await.id
     }
 
     fn station_dir(&self) -> PathBuf {
@@ -252,9 +255,9 @@ async fn cancel_by_sender_and_by_receiver() {
     connect(&t.a, &t.b).await;
     for by_sender in [true, false] {
         let id = t.a.send(&source(dir.path(), "big.bin", &noise(60_000))).await;
-        t.b.transfer(10, "offer", |v| v.state == TransferState::Offered).await;
+        t.b.transfer(10, "offer", |v| v.id == id && v.state == TransferState::Offered).await;
         t.b.call(AppCommand::AcceptFile { id: id.clone() }).await.unwrap();
-        t.b.transfer(15, "receiving", |v| v.state == TransferState::Receiving && v.bytes_done > 0).await;
+        t.b.transfer(15, "receiving", |v| v.id == id && v.state == TransferState::Receiving && v.bytes_done > 0).await;
         let who = if by_sender { &t.a } else { &t.b };
         who.call(AppCommand::CancelFile { id: id.clone() }).await.unwrap();
         t.a.transfer(30, "A cancelled", |v| v.id == id && v.state == TransferState::Cancelled).await;
