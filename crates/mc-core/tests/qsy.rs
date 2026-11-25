@@ -188,6 +188,15 @@ async fn wait_freq(rig: &FakeRigctld, hz: u64, secs: u64, what: &str) {
     }
 }
 
+/// A retune sets the frequency first and the mode after it.
+async fn wait_mode(rig: &FakeRigctld, mode: &str, secs: u64, what: &str) {
+    let end = Instant::now() + Duration::from_secs(secs);
+    while rig.mode().0 != mode {
+        assert!(Instant::now() < end, "{what}: the rig is in {}, not {mode}", rig.mode().0);
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn qsy_end_to_end() {
     let dir = tempfile::tempdir().unwrap();
@@ -197,7 +206,7 @@ async fn qsy_end_to_end() {
     propose_and_accept(&t.a, &t.b).await;
     wait_freq(&t.ra, NEW_HZ, 10, "A retuned").await;
     wait_freq(t.rb.as_ref().unwrap(), NEW_HZ, 10, "B retuned").await;
-    assert_eq!(t.ra.mode().0, "USB");
+    wait_mode(&t.ra, "USB", 10, "A's mode").await;
     // A calls again on the new frequency; the new session is a new QSO linked to the first.
     let s = t.a.wait(25, "the re-call", |s| s.session.as_ref().is_some_and(|x| x.session_id != first)).await;
     // B's end of the new link comes up on its own clock, a moment after A's.
@@ -227,8 +236,8 @@ async fn qsy_fallback_restores_original() {
     let dir = tempfile::tempdir().unwrap();
     let t = two(dir.path(), 0, true).await;
     connect(&t.a, &t.b).await;
-    // B stops answering once the session ends, so A's re-calls go unanswered.
-    t.b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    // B hears no more calls, so A's re-calls go unanswered.
+    t.net.set_deaf(1, true);
     propose_and_accept(&t.a, &t.b).await;
     wait_freq(t.rb.as_ref().unwrap(), NEW_HZ, 10, "B retuned").await;
     wait_freq(&t.ra, NEW_HZ, 10, "A retuned").await;
@@ -288,8 +297,8 @@ async fn no_retune_while_keyed() {
     let dir = tempfile::tempdir().unwrap();
     let t = two(dir.path(), 0, true).await;
     connect(&t.a, &t.b).await;
-    // B answers no re-call (the fake ignores frequency, so one would end B's QSY).
-    t.b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    // B hears no re-call (the fake ignores frequency, so one would end B's QSY).
+    t.net.set_deaf(1, true);
     // A's DISCONNECT does not end the link; B's Mercury is keyed when it does end.
     t.net.set_hold_disconnect(true);
     propose_and_accept(&t.a, &t.b).await;
@@ -480,7 +489,7 @@ async fn tune_refused_while_qsy_moving() {
     let t = two(dir.path(), 0, true).await;
     let other = t.a.entry("30m elsewhere", 10_140_000).await;
     connect(&t.a, &t.b).await;
-    t.b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    t.net.set_deaf(1, true);
     propose_and_accept(&t.a, &t.b).await;
     t.a.wait(10, "A moving", |s| stage(s) == Some("moving") && s.session.is_none()).await;
     wait_freq(&t.ra, NEW_HZ, 10, "A retuned").await;
@@ -519,7 +528,7 @@ async fn no_reading_fallback_says_return_by_hand() {
     let mut a = app(dir.path(), &net, 0, A, None).await;
     let b = app(dir.path(), &net, 1, B, Some((&rb, 0))).await;
     connect(&a, &b).await;
-    b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    net.set_deaf(1, true);
     propose_and_accept(&a, &b).await;
     let secs = (windows().recall + windows().agreed).as_secs() + 15;
     assert!(a.event(secs, |e| notice(e, "qsy.notify.returnByHand")).await.is_some());
@@ -532,7 +541,7 @@ async fn no_beacon_during_qsy_move() {
     let t = two(dir.path(), 0, true).await;
     t.a.h.call(AppCommand::SetBeacon { on: true }).await.unwrap();
     connect(&t.a, &t.b).await;
-    t.b.h.call(AppCommand::SetReceiveOnly { on: true }).await.unwrap();
+    t.net.set_deaf(1, true);
     propose_and_accept(&t.a, &t.b).await;
     t.a.wait(10, "A moving", |s| stage(s) == Some("moving") && s.session.is_none()).await;
     let before = t.net.broadcast_log().iter().filter(|(s, _)| *s == 0).count();
