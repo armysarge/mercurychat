@@ -1,4 +1,4 @@
-# <img style="vertical-align: middle; height: 2em;" src="apps/desktop/public/mercurychat.svg" width="60" height="60" alt="MercuryChat logo" /> MercuryChat
+# <img align="absmiddle" src="apps/desktop/public/mercurychat.svg" width="60" height="60" alt="MercuryChat logo" /> MercuryChat
 
 Open-source HF radio messaging for Windows and Linux, powered by the Mercury HF modem.
 
@@ -31,8 +31,6 @@ Founded by ZS6SHZ. Updates: [releases](https://github.com/armysarge/mercurychat/
 - **Languages:** English, Spanish, French and Brazilian Portuguese.
 
 ## At a glance
-
-These screenshots come from the real Windows app running on its built-in simulator, with the demo callsign N0CALL. `scripts/screenshots.mjs` produces them, so they are never captured by hand.
 
 ![The Operate view in the Midnight theme: heard stations, a connected chat with SIM1 and the QSO record](design/screenshots/operate-dark.png)
 
