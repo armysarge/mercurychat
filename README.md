@@ -14,13 +14,11 @@ Founded by ZS6SHZ. Updates: [releases](https://github.com/armysarge/mercurychat/
 [![TypeScript](https://img.shields.io/badge/TypeScript-frontend-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![SQLite](https://img.shields.io/badge/SQLite-storage-285771?logo=sqlite)](https://sqlite.org/)
 
-[Roadmap](ROADMAP.md) · [Changelog](CHANGELOG.md) · [Modem lab](lab/README.md) · [CI workflow](.github/workflows/ci.yml) · [Report an issue](https://github.com/armysarge/mercurychat/issues)
+[Roadmap](#roadmap) · [Changelog](CHANGELOG.md) · [Modem lab](lab/README.md) · [CI workflow](.github/workflows/ci.yml) · [Report an issue](https://github.com/armysarge/mercurychat/issues)
 
 > **Early alpha: under active development.** MercuryChat is not ready for on-air use. Nothing is released, interfaces and stored data may change without notice, and it has not been tested on air.
 
-**Roadmap:** a public beta for Windows and Linux is planned for **mid-December 2026**, and 1.0 for **February 2027**. These dates are targets, not promises. See the [roadmap](ROADMAP.md).
-
-**Status:** the beta features are built and tested against a built-in simulator, real Mercury modems over virtual audio and Hamlib dummy rigs. No radio transmissions have been made, and rig control has not been tried on a real radio. Raspberry Pi testing is still to be done. Before the beta come a security and optimization audit and a clean install test on Windows.
+**Status:** the beta features are built and tested against a built-in simulator, real Mercury modems over virtual audio and Hamlib dummy rigs. No radio transmissions have been made, and rig control has not been tried on a real radio. Raspberry Pi testing is still to be done.
 
 ## Features
 
@@ -54,18 +52,13 @@ These screenshots come from the real Windows app running on its built-in simulat
 
 MercuryChat should feel like the chat apps people already use every day: a conversation list, message bubbles, a composer that is always ready, and clear delivery status. It should not feel like a wall of modem controls. Radio detail is there when you want it and out of the way when you don't. Screens stay calm and uncluttered, readable at a glance, and friendly to newcomers, while experienced operators keep the controls they rely on.
 
-## How it is built
+## Roadmap
 
-MercuryChat is a Tauri 2 desktop app with a Vue 3 and TypeScript interface, Rust application services and SQLite storage. The Mercury modem runs as a separate program, controlled over TCP on your own computer or on a host you choose. Release packages include their own copy.
+| When | What |
+| --- | --- |
+| **Public beta**, mid-December 2026 | Windows and Linux: chat, discovery, files, rig control and logging. First a security and optimization audit and a clean install test on Windows. |
+| **1.0**, February 2027 | Encryption and signed messages, on-air field testing, a benchmark against VARA HF and Raspberry Pi support. |
+| **After 1.0** | An animated tour, remote station control and a mobile app, mail and relay, a GPS link with a world map and PSK Reporter, other integrations, frequency slots and a user manual. |
+| **Later** | Games over the air, such as tic-tac-toe, battleships and chess. |
 
-MercuryChat talks to other MercuryChat stations. Mercury's VARA-like host interface does not make it compatible with VARA on air, or with VarAC. No VarAC code, assets or proprietary formats are used.
-
-Third-party components and their licences are listed in [THIRD-PARTY.md](THIRD-PARTY.md). To work with the modem lab, see [lab/README.md](lab/README.md).
-
-## Regenerate the app icons
-
-The [MercuryChat logo](apps/desktop/public/mercurychat.svg) is the source for the desktop header, favicon and native icons. From the repository root, generate the icon set with Tauri, then copy the updated desktop files into `src-tauri/icons`:
-
-```bash
-npm run tauri -- icon apps/desktop/public/mercurychat.svg --output target/generated-icons
-```
+These dates are targets, not promises. See the [full roadmap](ROADMAP.md).
