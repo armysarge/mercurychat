@@ -12,7 +12,7 @@ import QsoCard from "./QsoCard.vue";
 import QsyCard from "./QsyCard.vue";
 import SessionMenu from "./SessionMenu.vue";
 import TelemetryPanel from "./TelemetryPanel.vue";
-import { activeProfile, chat, files, inSession, modemLabel, pickFile, queuedBytes, sendFileBlock, session, snapshot } from "../store";
+import { activeProfile, chat, files, inSession, modemLabel, modemState, pickFile, queuedBytes, sendFileBlock, session, snapshot } from "../store";
 
 const { t } = useI18n();
 const now = ref(Date.now());
@@ -67,7 +67,8 @@ function where() {
     <section class="card stack" aria-labelledby="h-listen">
       <span id="h-listen" class="label">{{ t("session.incomingCalls") }}</span>
       <p v-if="snapshot?.receiveOnly" class="muted small">{{ t("session.receiveOnlyNote") }}</p>
-      <p v-else-if="snapshot?.listening" class="ok small">{{ t("session.answeredAuto") }}</p>
+      <!-- The live state, as the header shows it: the snapshot's own flag is not updated by events. -->
+      <p v-else-if="modemState === 'listening'" class="ok small">{{ t("session.answeredAuto") }}</p>
       <p v-else class="muted small">{{ t("session.notAnswering") }}</p>
     </section>
 
