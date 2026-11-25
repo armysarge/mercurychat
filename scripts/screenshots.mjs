@@ -23,7 +23,7 @@
 import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { firstUse, kill, launch, sleep, until } from "../lab/windows/cdp.mjs";
+import { connect, firstUse, kill, launch, pages, sleep, until } from "../lab/windows/cdp.mjs";
 import { click, compose, pill, setInput } from "../lab/windows/m2-dom.mjs";
 
 const MAX_BYTES = 300 * 1024;
@@ -195,6 +195,19 @@ try {
 } catch (e) {
   results.push(`FAIL ${e.message.slice(0, 1200)}`);
   if (app.out) results.push(`APP OUTPUT ${app.out.slice(-1500)}`);
+  // What the window was doing: no DevTools port, no page, or another screen.
+  results.push(`APP ${app.exitCode === null ? "still running" : `exited ${app.exitCode}`}`);
+  try {
+    const found = await pages(port);
+    results.push(`DEVTOOLS PAGES ${found.length}`);
+    for (const t of found) {
+      const c = await connect(t.webSocketDebuggerUrl);
+      results.push(`PAGE ${t.url} TEXT ${String(await c.eval("document.body ? document.body.innerText : '(no body)'")).slice(0, 800)}`);
+      c.close();
+    }
+  } catch (d) {
+    results.push(`DIAG ${d.message}`);
+  }
 } finally {
   kill(app);
   await sleep(500);
