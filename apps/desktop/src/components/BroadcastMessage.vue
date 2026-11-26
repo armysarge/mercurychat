@@ -6,12 +6,12 @@ const text = ref("");
 </script>
 
 <script setup lang="ts">
-// A short message to all stations (a one-off beacon whose status line is the
-// message, up to 40 bytes), only while the modem is idle. Used by the header's
-// Broadcast menu and by the station home's Broadcast card.
+// A short message to all stations (a general broadcast, "CALL: message", up to
+// 40 bytes), only while the modem is idle. Used by the header's Broadcast menu
+// and by the station home's Broadcast card.
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { activeProfile, discoveryError, modemState, sendBroadcastMessage } from "../store";
+import { activeProfile, discovery, discoveryError, modemState, sendBroadcastMessage } from "../store";
 
 const emit = defineEmits<{ sent: [] }>();
 const { t } = useI18n();
@@ -20,6 +20,14 @@ const idle = computed(() => modemState.value === "ready" || modemState.value ===
 const usable = computed(() => !!activeProfile.value && idle.value);
 const bytes = computed(() => new TextEncoder().encode(text.value.trim()).length);
 const canSend = computed(() => usable.value && bytes.value > 0 && bytes.value <= MAX);
+/** What became of the latest message: "transmitted", never "delivered" (DSC-02). */
+const outcome = computed(() => {
+  const o = discovery.outcome.message;
+  if (!o) return "";
+  if (o.type === "refused") return t("strip.outcome.refused", { reason: o.reason.replace(/^not sent: /, "") });
+  if (o.type === "notConfirmed" && o.reason) return t(`broadcast.notConfirmed.${o.reason}`);
+  return t(`broadcast.outcome.${o.type}`);
+});
 
 async function send() {
   if (!canSend.value) return;
@@ -42,6 +50,7 @@ async function send() {
       <button type="submit" class="primary broadcast-send" :disabled="!canSend">{{ t("broadcast.send") }}</button>
     </div>
     <p v-if="discoveryError.message" class="err small" role="alert">{{ discoveryError.message }}</p>
+    <p v-else-if="outcome" class="muted small broadcast-outcome" role="status">{{ outcome }}</p>
   </form>
 </template>
 

@@ -93,7 +93,12 @@
     "placeholder": "p. ex. QRV sur 14.074, 73",
     "bytes": "{n} / {max} octets",
     "send": "Envoyer",
-    "hint": "Part comme une balise : seulement au repos, entendu par quiconque écoute, et jamais confirmé."
+    "hint": "Envoyé à tous avec votre indicatif et le message, pas comme balise : uniquement au repos, jamais confirmé.",
+    "outcome": {
+      "submitted": "Remis au modem…",
+      "transmitted": "Émis. Personne ne confirme une diffusion.",
+      "notConfirmed": "Non confirmé : le modem n’a pas été vu en émission."
+    }
   },
   "direction": {
     "outgoing": "Nous avons appelé",

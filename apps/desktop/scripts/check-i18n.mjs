@@ -247,7 +247,10 @@ for (const f of vueFiles) scanTemplate(f, templateOf(readFileSync(f, "utf8")));
     "about.credit.": () => constOf("components/About.vue", "CREDITS"),
     "stationInfo.": () => constOf("components/StationInfo.vue", "FIELDS"),
     "logbook.col.": () => constOf("views/Logbook.vue", "COLUMNS"),
-    "transcript.sys.": () => unionOf("BroadcastKind.ts"),
+    // A message has no row of its own here: the transcript lists CQs, beacons and QSY suggestions.
+    "transcript.sys.": () => unionOf("BroadcastKind.ts").filter((k) => k !== "message"),
+    // A refusal is worded by strip.outcome.refused.
+    "broadcast.outcome.": () => taggedOf("BroadcastOutcome.ts").filter((k) => k !== "refused"),
     // Task 12b: notification kinds, and the message and modem states notify.ts names.
     "notifySettings.kind.": () => constOf("components/NotificationSettings.vue", "KINDS"),
     "notify.delivery.": () => ["uncertain", "failed"],

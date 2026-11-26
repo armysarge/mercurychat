@@ -493,7 +493,7 @@ const LOGBOOK_MAX = 500;
 export const transmitted = computed(() =>
   discovery.activity
     .filter((e) => e.kind === "broadcast" && /^(cq|beacon) transmitted/i.test(e.text))
-    .map((e) => ({ kind: (e.text.toLowerCase().startsWith("cq") ? "cq" : "beacon") as BroadcastKind, utc: e.atUtc }))
+    .map((e) => ({ kind: (e.text.toLowerCase().startsWith("cq") ? "cq" : "beacon") as "cq" | "beacon", utc: e.atUtc }))
     .reverse(),
 );
 

@@ -187,8 +187,9 @@ pub enum AppCommand {
     /// Send one beacon now, through the same gate as a CQ. It neither arms
     /// nor moves the scheduled beacon.
     SendBeaconNow,
-    /// A one-off broadcast with a short message as its status line (up to
-    /// 40 bytes), sent like a beacon: only while idle, and never confirmed.
+    /// A general broadcast to everyone, sent as `CALL: message` (the message
+    /// up to 40 bytes, and the whole within the listen mode's capacity), not
+    /// as a beacon: only while idle, and never confirmed.
     SendBroadcastMessage {
         text: String,
     },

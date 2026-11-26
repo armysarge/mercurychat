@@ -30,6 +30,9 @@ pub enum BroadcastKind {
     Beacon,
     /// An MCB/1 QSY suggestion (kind 3) on the broadcast port (M3c B5).
     Qsy,
+    /// The operator's general broadcast, `CALL: message`, on the broadcast
+    /// port.
+    Message,
 }
 
 impl BroadcastKind {
@@ -38,6 +41,7 @@ impl BroadcastKind {
             BroadcastKind::Cq => "CQ",
             BroadcastKind::Beacon => "beacon",
             BroadcastKind::Qsy => "QSY suggestion",
+            BroadcastKind::Message => "message",
         }
     }
 }
@@ -279,7 +283,7 @@ impl Tracker {
         let Some(f) = self.in_flight.as_mut().filter(|f| !f.left_idle) else { return Vec::new() };
         let (begin, end) = match f.kind {
             BroadcastKind::Cq => (matches!(o, Observation::Pending), matches!(o, Observation::CancelPending)),
-            BroadcastKind::Beacon | BroadcastKind::Qsy => {
+            BroadcastKind::Beacon | BroadcastKind::Qsy | BroadcastKind::Message => {
                 (matches!(o, Observation::Ptt(true)), matches!(o, Observation::Ptt(false)))
             }
         };
@@ -305,12 +309,13 @@ impl Tracker {
         Vec::new()
     }
 
-    /// The window closed at `now` without the evidence. A beacon the
-    /// broadcast port took (so it was connected) with no PTT at all while
+    /// The window closed at `now` without the evidence. A beacon or message
+    /// the broadcast port took (so it was connected) with no PTT at all while
     /// idle is named: the modem never transmitted it.
     pub fn expired(&mut self, now: Instant) -> Outcomes {
         let Some(f) = self.in_flight.filter(|f| now >= f.deadline) else { return Vec::new() };
-        let silent = f.kind == BroadcastKind::Beacon && f.submitted && !f.started && !f.left_idle;
+        let wrapped = matches!(f.kind, BroadcastKind::Beacon | BroadcastKind::Message);
+        let silent = wrapped && f.submitted && !f.started && !f.left_idle;
         let reason = silent.then_some(NotConfirmedReason::BroadcastPortSilent);
         self.finish(BroadcastOutcome::NotConfirmed { reason })
     }
@@ -363,6 +368,17 @@ mod tests {
         let mut t = Tracker::default();
         t.start(BroadcastKind::Beacon, Instant::now());
         t.submitted(BroadcastKind::Beacon);
+        assert!(t.observe(&Observation::Pending).is_empty());
+        assert!(t.observe(&Observation::CancelPending).is_empty());
+        assert!(t.observe(&Observation::Ptt(true)).is_empty());
+        assert_eq!(kinds(&t.observe(&Observation::Ptt(false))), [BroadcastOutcome::Transmitted]);
+    }
+
+    #[test]
+    fn message_evidence_is_ptt_on_then_off() {
+        let mut t = Tracker::default();
+        t.start(BroadcastKind::Message, Instant::now());
+        t.submitted(BroadcastKind::Message);
         assert!(t.observe(&Observation::Pending).is_empty());
         assert!(t.observe(&Observation::CancelPending).is_empty());
         assert!(t.observe(&Observation::Ptt(true)).is_empty());

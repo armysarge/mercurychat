@@ -550,44 +550,55 @@ mod service {
         assert!(conflict(h.call(AppCommand::SendBeaconNow).await).contains("no station"));
     }
 
-    /// The operator's one-off broadcast message rides a beacon's status line (owner, 24 Nov).
+    async fn activity_entries(h: &AppHandle) -> Vec<(String, String)> {
+        match h.call(AppCommand::Activity).await.unwrap() {
+            CommandOk::Activity { entries } => entries.into_iter().map(|e| (e.kind, e.text)).collect(),
+            other => panic!("{other:?}"),
+        }
+    }
+
+    /// The Broadcast button sends a general broadcast, `CALL: message`, not a
+    /// beacon (owner, 26 Nov).
     #[tokio::test(flavor = "current_thread")]
-    async fn a_broadcast_message_goes_out_as_a_beacons_status_and_is_checked_first() {
+    async fn a_broadcast_message_goes_out_as_a_general_broadcast() {
         let net = FakeNet::start().await;
         let dir = tempfile::tempdir().unwrap();
         let (h, _rx) = ready(dir.path(), profile(&net, Some("KG33"))).await;
         tokio::time::pause();
         // Refused without sending: empty, too long, more than one line.
-        for bad in [
-            "",
-            "   ",
-            &"x".repeat(41),
-            "two
-lines",
-        ] {
+        for bad in ["", "   ", &"x".repeat(41), "two\nlines"] {
             let why = conflict(h.call(AppCommand::SendBroadcastMessage { text: bad.into() }).await);
             assert!(why.starts_with("not sent: "), "{bad:?}: {why}");
         }
         assert_eq!(sent(&net), 0);
+
+        done(&h, AppCommand::SendBeaconNow).await;
+        settle().await;
+        advance(Duration::from_secs(1)).await;
+        advance(Duration::from_secs(20)).await;
+        let before = beacon(&h).await;
+
         done(&h, AppCommand::SendBroadcastMessage { text: "  QRV 14.074, 73 de ZS6PS ".into() }).await;
         settle().await;
         advance(Duration::from_secs(1)).await;
-        assert_eq!(sent(&net), 1);
-        let mch_protocol::beacon::Received::Extended(e) = mch_protocol::beacon::classify(&net.broadcast_log()[0].1)
-        else {
-            panic!("a message is an extended beacon")
-        };
-        assert!(e.tlvs.contains(&mch_protocol::beacon::Tlv::Status("QRV 14.074, 73 de ZS6PS".into())), "{:?}", e.tlvs);
+        assert_eq!(sent(&net), 2);
+        assert_eq!(net.broadcast_log()[1].1, b"ZS6ABC: QRV 14.074, 73 de ZS6PS");
+        // It is not a beacon: the beacon's own record does not move.
+        assert_eq!(beacon(&h).await.last_utc, before.last_utc);
         // And the message stays in the activity log, for the Broadcasts page.
-        let CommandOk::Activity { entries } = h.call(AppCommand::Activity).await.unwrap() else { panic!("activity") };
-        let said: Vec<_> = entries.iter().filter(|e| e.kind == "message").collect();
-        assert_eq!(said.len(), 1, "{entries:?}");
-        assert_eq!(said[0].text, "Message sent: QRV 14.074, 73 de ZS6PS");
-        // One transmission is one row: the generic beacon line is not added beside it.
-        assert!(
-            !entries.iter().any(|e| e.kind == "broadcast" && e.text.to_lowercase().starts_with("beacon transmitted")),
-            "{entries:?}"
-        );
+        let entries = activity_entries(&h).await;
+        let said: Vec<_> = entries.iter().filter(|(kind, _)| kind == "message").map(|(_, text)| text).collect();
+        assert_eq!(said, ["Message sent: QRV 14.074, 73 de ZS6PS"], "{entries:?}");
+        // One transmission is one row: no generic line is added beside it.
+        assert!(!entries.iter().any(|(_, text)| text.starts_with("message transmitted")), "{entries:?}");
+        assert_eq!(entries.iter().filter(|(_, text)| text.starts_with("beacon transmitted")).count(), 1, "{entries:?}");
+
+        advance(Duration::from_secs(20)).await;
+        done(&h, AppCommand::SendBeaconNow).await;
+        settle().await;
+        let log = net.broadcast_log();
+        let (a, b) = (Beacon::decode(&log[0].1).unwrap(), Beacon::decode(&log[2].1).unwrap());
+        assert_eq!(b.seq, a.seq.wrapping_add(1), "the message took no beacon sequence number");
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -707,6 +718,56 @@ lines",
             CommandOk::Activity { entries } => entries.into_iter().map(|e| e.text).collect(),
             other => panic!("{other:?}"),
         }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_silent_message_resets_the_port_and_leaves_beacons_alone() {
+        let net = FakeNet::start().await;
+        let fake = stalled_broadcast_port().await;
+        let mut p = profile(&net, Some("KG33"));
+        if let ModemTarget::Existing { broadcast_port, .. } = &mut p.modem {
+            *broadcast_port = Some(fake.port);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (h, mut rx) = ready(dir.path(), p).await;
+        tokio::time::pause();
+        done(&h, AppCommand::SetBeacon { on: true }).await;
+        let before = beacon(&h).await;
+        for round in 1..=2 {
+            done(&h, AppCommand::SendBroadcastMessage { text: "anyone there?".into() }).await;
+            settle().await;
+            advance(Duration::from_secs(16)).await;
+            let mut outcomes = Vec::new();
+            while let Ok(ev) = rx.try_recv() {
+                if let AppEvent::Broadcast { kind, outcome } = ev.event {
+                    outcomes.push((kind, outcome));
+                }
+            }
+            let silent = Some(NotConfirmedReason::BroadcastPortSilent);
+            assert_eq!(
+                outcomes,
+                [
+                    (BroadcastKind::Message, BroadcastOutcome::Submitted),
+                    (BroadcastKind::Message, BroadcastOutcome::NotConfirmed { reason: silent })
+                ]
+            );
+            // The unread bytes are discarded and a fresh connection is made.
+            for _ in 0..50 {
+                if fake.conns.load(Ordering::SeqCst) > round {
+                    break;
+                }
+                settle().await;
+            }
+            assert_eq!(fake.conns.load(Ordering::SeqCst), round + 1);
+        }
+        let after = beacon(&h).await;
+        assert!(after.active);
+        assert_eq!((after.next_due_utc, after.suppressed), (before.next_due_utc, before.suppressed));
+        let entries = activity_entries(&h).await;
+        assert!(
+            !entries.iter().any(|(kind, text)| kind == "message" || text.starts_with("beacons held")),
+            "{entries:?}"
+        );
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -1058,6 +1119,32 @@ mod extended {
                 }
                 other => panic!("{other:?}"),
             }
+        }
+
+        #[tokio::test(flavor = "multi_thread")]
+        async fn a_message_over_the_modes_capacity_is_refused() {
+            let dir = tempfile::tempdir().unwrap();
+            let net = FakeNet::start().await;
+            let ws = FakeWs::start().await;
+            ws.set_status(Some(&status_on_mode(7))); // DATAC15: 27 bytes
+            let (h, _rx) = app(dir.path(), &net, Some(&ws)).await;
+            let end = Instant::now() + Duration::from_secs(10);
+            loop {
+                let CommandOk::Snapshot(s) = h.call(AppCommand::Snapshot).await.unwrap() else { panic!("snapshot") };
+                if s.telemetry.listen_mode == Some(7) {
+                    break;
+                }
+                assert!(Instant::now() < end, "no DATAC15 from telemetry");
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            // "ZS6ABC: " is 8 bytes, so 19 more fit and 20 do not.
+            let e = h.call(AppCommand::SendBroadcastMessage { text: "x".repeat(20) }).await.unwrap_err();
+            let AppError::Conflict { message } = e else { panic!("{e:?}") };
+            assert_eq!(
+                message,
+                "not sent: with your callsign it is 28 bytes, over the 27-byte limit of this listen mode"
+            );
+            assert!(net.broadcast_log().is_empty());
         }
 
         #[tokio::test(flavor = "multi_thread")]

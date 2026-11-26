@@ -11,6 +11,7 @@ use super::broadcast::{
     activity_text, broadcast_gate, BroadcastKind, BroadcastOutcome, GateRefusal, ListenMode, NotConfirmedReason,
     Tracker,
 };
+use super::broadcast_text;
 use super::chat::{self, ChatMessage, Conversation};
 use super::contract::{AppCommand, AppError, AppSnapshot, CommandOk};
 use super::discovery::{self, Discovery};
@@ -1153,7 +1154,7 @@ impl App {
     /// Send a CQ (payload unused) or a beacon, if the gate allows it now
     /// (DSC-02). A refusal is answered, published and logged, never queued.
     fn send_broadcast(&mut self, kind: BroadcastKind, payload: Vec<u8>) -> Result<(), AppError> {
-        let len = matches!(kind, BroadcastKind::Beacon | BroadcastKind::Qsy).then_some(payload.len());
+        let len = (kind != BroadcastKind::Cq).then_some(payload.len());
         if self.rig.tune.active {
             return Err(self.refuse_broadcast(kind, "not sent: Tune is on".into()));
         }
@@ -1164,15 +1165,19 @@ impl App {
         if self.broadcasts.busy() {
             return Err(self.refuse_broadcast(kind, "not sent: a broadcast is still being sent".into()));
         }
-        if kind == BroadcastKind::Beacon && self.broadcast_silent {
+        if matches!(kind, BroadcastKind::Beacon | BroadcastKind::Message) && self.broadcast_silent {
             let why = NotConfirmedReason::BroadcastPortSilent.text();
             let refusal = self.refuse_broadcast(kind, format!("not sent: {why}"));
-            self.record_silent_beacon();
+            if kind == BroadcastKind::Beacon {
+                self.record_silent_beacon();
+            }
             return Err(refusal);
         }
         let cmd = match kind {
             BroadcastKind::Cq => ModemCmd::Cq,
-            BroadcastKind::Beacon | BroadcastKind::Qsy => ModemCmd::Broadcast { kind, payload },
+            BroadcastKind::Beacon | BroadcastKind::Qsy | BroadcastKind::Message => {
+                ModemCmd::Broadcast { kind, payload }
+            }
         };
         if !self.task.as_ref().is_some_and(|t| t.send(cmd)) {
             return Err(self.refuse_broadcast(kind, GateRefusal::Detached.message()));
@@ -1259,18 +1264,18 @@ impl App {
         self.send_broadcast(BroadcastKind::Beacon, payload)
     }
 
-    /// A one-off broadcast: a beacon whose status line is the operator's message.
+    /// The operator's general broadcast to everyone: `CALL: message`.
     fn send_broadcast_message(&mut self, text: &str) -> Result<(), AppError> {
         self.qsy_owns_rig()?;
         let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
         let mode = self.listen_mode.current().unwrap_or(DATAC3);
-        let payload = match self.beacon.payload_with_status(&p, mode, text) {
+        let payload = match broadcast_text::compose(&p.callsign, text, mode) {
             Ok(payload) => payload,
-            Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Beacon, why)),
+            Err(why) => return Err(self.refuse_broadcast(BroadcastKind::Message, why)),
         };
-        self.send_broadcast(BroadcastKind::Beacon, payload)?;
+        self.send_broadcast(BroadcastKind::Message, payload)?;
         // It is only "sent" once the modem has keyed it: the activity log (and the
-        // Broadcasts page) hear of it when the beacon is transmitted.
+        // Broadcasts page) hear of it when it is transmitted.
         self.pending_message = Some(text.trim().to_string());
         Ok(())
     }
@@ -1311,15 +1316,20 @@ impl App {
                 self.beacon.submitted();
             }
             let silent = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
+            let silent_message = kind == BroadcastKind::Message
+                && matches!(
+                    outcome,
+                    BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) }
+                );
             let line = match (kind, &outcome) {
                 // The operator's message went out: one row for it, not a generic beacon line too.
-                (BroadcastKind::Beacon, BroadcastOutcome::Transmitted) if self.pending_message.is_some() => {
+                (BroadcastKind::Message, BroadcastOutcome::Transmitted) if self.pending_message.is_some() => {
                     let text = self.pending_message.take().unwrap_or_default();
                     self.discovery.note("message", format!("Message sent: {text}"))
                 }
                 _ => {
                     // Not confirmed: the message did not (provably) go out, and is not listed as sent.
-                    if kind == BroadcastKind::Beacon && matches!(outcome, BroadcastOutcome::NotConfirmed { .. }) {
+                    if kind == BroadcastKind::Message && matches!(outcome, BroadcastOutcome::NotConfirmed { .. }) {
                         self.pending_message = None;
                     }
                     self.discovery.note("broadcast", activity_text(kind, &outcome))
@@ -1329,6 +1339,9 @@ impl App {
             self.emit(line);
             if silent {
                 self.record_silent_beacon();
+            }
+            if silent_message {
+                self.reset_silent_port();
             }
         }
     }
@@ -1353,6 +1366,19 @@ impl App {
             _ => {}
         }
         false
+    }
+
+    /// A message the modem never keyed must not linger on its connection to
+    /// go out later (lab F5). A fresh connection is made for the next one the
+    /// operator sends; the beacon schedule is not touched.
+    fn reset_silent_port(&mut self) {
+        let Some(port) = self.broadcast_abort.take() else { return };
+        port.abort();
+        let line = self.discovery.note("broadcast", "broadcast port reset after an unconfirmed message");
+        self.emit(line);
+        if let Some(task) = &self.task {
+            task.send(ModemCmd::ReopenBroadcast);
+        }
     }
 
     fn record_silent_beacon(&mut self) {

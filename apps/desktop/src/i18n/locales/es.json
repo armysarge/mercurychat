@@ -93,7 +93,12 @@
     "placeholder": "p. ej. QRV en 14.074, 73",
     "bytes": "{n} / {max} bytes",
     "send": "Enviar",
-    "hint": "Sale como una baliza: solo en reposo, lo oye quien esté escuchando y nunca se confirma."
+    "hint": "Llega a todos como tu indicativo y el mensaje, no como baliza: solo en reposo y sin confirmación.",
+    "outcome": {
+      "submitted": "Entregado al módem…",
+      "transmitted": "Transmitido. Nadie confirma una difusión.",
+      "notConfirmed": "Sin confirmar: no se vio transmitir al módem."
+    }
   },
   "direction": {
     "outgoing": "Llamamos nosotros",

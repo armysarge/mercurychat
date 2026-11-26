@@ -92,7 +92,12 @@
     "placeholder": "e.g. QRV on 14.074, 73",
     "bytes": "{n} / {max} bytes",
     "send": "Send",
-    "hint": "Goes out like a beacon: only while idle, heard by anyone listening, and never confirmed."
+    "hint": "Goes to everyone as your callsign and the message, not as a beacon: only while idle, and never confirmed.",
+    "outcome": {
+      "submitted": "Given to the modem…",
+      "transmitted": "Transmitted. Nobody confirms a broadcast.",
+      "notConfirmed": "Not confirmed: the modem was not seen to transmit."
+    }
   },
   "direction": {
     "outgoing": "We called",

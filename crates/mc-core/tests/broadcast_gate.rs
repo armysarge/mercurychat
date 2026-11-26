@@ -325,3 +325,21 @@ async fn second_cq_while_one_is_being_sent_is_refused_not_queued() {
     assert_eq!(got.last(), Some(&BroadcastOutcome::Transmitted));
     assert_eq!(cq_lines(&net).len(), 2, "{:?}", cq_lines(&net));
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_message_arrives_in_the_peers_list() {
+    let net = FakeNet::start().await;
+    let (da, db) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    let (ha, mut rxa) = ready(da.path(), existing(&net, ME, 0)).await;
+    let (hb, mut rxb) = ready(db.path(), existing(&net, PEER, 1)).await;
+    let command = AppCommand::SendBroadcastMessage { text: "QRV on 40m".into() };
+    assert_eq!(ha.call(command).await.unwrap(), CommandOk::Done);
+    let (got, _) = outcomes(&mut rxa, BroadcastKind::Message).await;
+    assert_eq!(got, [BroadcastOutcome::Submitted, BroadcastOutcome::Transmitted]);
+    wait_for(&mut rxb, 10, |e| matches!(e, AppEvent::BroadcastHeard { .. }).then_some(())).await;
+    let CommandOk::HeardBroadcasts { broadcasts } = hb.call(AppCommand::HeardBroadcasts).await.unwrap() else {
+        panic!("heard broadcasts")
+    };
+    let got: Vec<_> = broadcasts.iter().map(|b| (b.callsign.as_str(), b.message.as_str())).collect();
+    assert_eq!(got, [(ME, "QRV on 40m")]);
+}

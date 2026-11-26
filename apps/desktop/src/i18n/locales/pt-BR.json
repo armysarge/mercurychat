@@ -93,7 +93,12 @@
     "placeholder": "ex.: QRV em 14.074, 73",
     "bytes": "{n} / {max} bytes",
     "send": "Enviar",
-    "hint": "Sai como um farol: só em repouso, ouvido por quem estiver escutando e nunca confirmado."
+    "hint": "Vai para todos como seu indicativo e a mensagem, não como beacon: só com o modem ocioso e sem confirmação.",
+    "outcome": {
+      "submitted": "Entregue ao modem…",
+      "transmitted": "Transmitido. Ninguém confirma uma transmissão geral.",
+      "notConfirmed": "Não confirmado: o modem não foi visto transmitindo."
+    }
   },
   "direction": {
     "outgoing": "Nós chamamos",
