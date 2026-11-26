@@ -28,6 +28,8 @@ struct Station {
     /// Listen mode set by `MODE n` (None: Mercury's default, 1).
     mode: Option<u8>,
     monitor: bool,
+    /// Report no monitored broadcast (fault injection).
+    mute_reports: bool,
     mode_wrong: bool,
     /// Answer `LISTEN ON` with WRONG (fault injection).
     listen_wrong: bool,
@@ -267,6 +269,11 @@ impl FakeNet {
         self.shared.lock().unwrap().st[i].listen_off_wrong = wrong;
     }
 
+    /// Station `i` gets broadcasts with no monitor report of them.
+    pub fn set_mute_reports(&self, i: usize, on: bool) {
+        self.shared.lock().unwrap().st[i].mute_reports = on;
+    }
+
     /// Station `i` hears no call from the next CONNECT on, as when the other
     /// station is out of range. `LISTEN OFF` from an app is not this: the app
     /// sends it some time after a link ends, and a call can get there first.
@@ -354,7 +361,7 @@ fn send_line(s: &Shared, i: usize, line: &str) {
 /// What a station with MONITOR on is told of a wrapped broadcast it decoded
 /// on `mode`: Mercury names the frame's size (less its CRC), not the sender.
 fn report_broadcast(s: &Shared, to: usize, mode: u8) {
-    if !s.st[to].monitor {
+    if !s.st[to].monitor || s.st[to].mute_reports {
         return;
     }
     if let Some((name, frame)) = crate::kiss::listen_mode_frame(mode) {

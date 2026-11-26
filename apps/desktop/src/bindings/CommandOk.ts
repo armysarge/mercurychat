@@ -13,6 +13,7 @@ import type { EndpointCheck } from "./EndpointCheck";
 import type { FileSettings } from "./FileSettings";
 import type { FrequencyEntry } from "./FrequencyEntry";
 import type { HamlibModelView } from "./HamlibModelView";
+import type { HeardBroadcast } from "./HeardBroadcast";
 import type { HeardStation } from "./HeardStation";
 import type { MacroDef } from "./MacroDef";
 import type { PreparedView } from "./PreparedView";
@@ -25,7 +26,7 @@ import type { StationProfile } from "./StationProfile";
 import type { TransferView } from "./TransferView";
 import type { WizardState } from "./WizardState";
 
-export type CommandOk = { "type": "snapshot" } & AppSnapshot | { "type": "profile" } & StationProfile | { "type": "message" } & ChatMessage | { "type": "conversations", conversations: Array<Conversation>, } | { "type": "history", messages: Array<ChatMessage>, } | { "type": "heard", stations: Array<HeardStation>, } | { "type": "activity", entries: Array<ActivityEntry>, } | { "type": "frequencies", entries: Array<FrequencyEntry>, } | { "type": "restored", added: number, } | { "type": "rigTest", steps: Array<RigTestStep>, } | { "type": "rigSettings", config: RigConfig, region: number, schedule: Schedule, } | { "type": "hamlibModels", models: Array<HamlibModelView>, found: boolean, } | { "type": "catRadios", radios: Array<string>, } | { "type": "catImported", added: Array<string>, 
+export type CommandOk = { "type": "snapshot" } & AppSnapshot | { "type": "profile" } & StationProfile | { "type": "message" } & ChatMessage | { "type": "conversations", conversations: Array<Conversation>, } | { "type": "history", messages: Array<ChatMessage>, } | { "type": "heard", stations: Array<HeardStation>, } | { "type": "heardBroadcasts", broadcasts: Array<HeardBroadcast>, } | { "type": "activity", entries: Array<ActivityEntry>, } | { "type": "frequencies", entries: Array<FrequencyEntry>, } | { "type": "restored", added: number, } | { "type": "rigTest", steps: Array<RigTestStep>, } | { "type": "rigSettings", config: RigConfig, region: number, schedule: Schedule, } | { "type": "hamlibModels", models: Array<HamlibModelView>, found: boolean, } | { "type": "catRadios", radios: Array<string>, } | { "type": "catImported", added: Array<string>, 
 /**
  * "name: why" for each radio that could not be read.
  */

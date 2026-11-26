@@ -6,7 +6,7 @@
 use super::beacon::BeaconStatus;
 use super::broadcast::{BroadcastKind, BroadcastOutcome};
 use super::chat::ChatMessage;
-use super::discovery::{ActivityEntry, HeardStation};
+use super::discovery::{ActivityEntry, HeardBroadcast, HeardStation};
 use super::info::{PeerSnr, PeerStation};
 use super::logbook::Qso;
 use super::qsy::QsyView;
@@ -125,6 +125,11 @@ pub enum AppEvent {
     /// New details for an observation that was already reported.
     HeardUpdated {
         station: HeardStation,
+    },
+    /// A general broadcast arrived; sent again, with the same `id`, once its
+    /// S/N is known.
+    BroadcastHeard {
+        broadcast: HeardBroadcast,
     },
     /// A line was added to the activity log.
     Activity {

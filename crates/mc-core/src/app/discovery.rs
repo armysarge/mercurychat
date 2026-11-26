@@ -4,13 +4,16 @@
 //! `Callsign::parse` before anything is stored, and every time is this
 //! station's own UTC at receipt (no sender clock).
 
+use super::broadcast_text;
 use super::events::{AppEvent, ModemState};
+use super::snr_match::Matcher;
 use super::telemetry::Tuning;
 use crate::band::band_for;
 use crate::station::Observation;
-use mc_storage::{now_utc, HeardRow, HeardSummaryRow, StorageError, Store};
+use mc_storage::{now_utc, BroadcastRow, HeardRow, HeardSummaryRow, StorageError, Store};
 use mch_protocol::beacon::{self, Received};
 use mercury_adapter::kiss::{KissFrame, CMD_DATA_STD};
+use mercury_adapter::monitor::MonitorBroadcast;
 use mercury_adapter::Callsign;
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
@@ -32,6 +35,11 @@ pub const HEARD_RETENTION_DAYS: i64 = 30;
 pub const MONITOR_SNR: &str = "modem monitor";
 /// At most this many stations' carrier offsets are kept (in memory only).
 pub const OFFSETS_KEPT: usize = 1024;
+/// The broadcast list shows this many, newest first.
+pub const LATEST_BROADCASTS: u32 = 10;
+/// Mercury delivers a wrapped broadcast with the sender's KISS command: 0x00,
+/// or VARA's 0x01, or 0x02. 0x03 is a station message.
+const CMD_WRAPPED_MAX: u8 = 0x02;
 
 /// A measured value with its provenance (DSC-04): where it came from, when
 /// this station took it, and the source's own age where it reports one.
@@ -108,6 +116,64 @@ pub struct HeardStation {
     pub name: Option<Reading<String>>,
     pub qth: Option<Reading<String>>,
     pub status: Option<Reading<String>>,
+}
+
+/// A general broadcast heard (`CALL: message`): not a CQ and not a beacon.
+/// `callsign` is what the text claims; nothing proves who sent it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(export)]
+pub struct HeardBroadcast {
+    #[ts(type = "number")]
+    pub id: i64,
+    pub callsign: String,
+    pub message: String,
+    /// When this station received it, by its own clock.
+    pub at_utc: String,
+    /// `None` when no S/N can be tied to this frame: it is never guessed.
+    pub snr: Option<Reading<f32>>,
+    /// The mode it was decoded on, known along with the S/N.
+    pub mode: Option<String>,
+    /// The radio's dial frequency (Hz) as it arrived, if fresh then.
+    #[ts(as = "Option<Reading<f64>>")]
+    pub freq: Option<Reading<u64>>,
+    pub band: Option<String>,
+}
+
+fn heard_broadcast(r: BroadcastRow) -> HeardBroadcast {
+    let at_utc = r.observed_utc;
+    let snr = r.snr_db.filter(|v| v.is_finite()).map(|value| Reading {
+        value,
+        source: r.snr_source.unwrap_or_else(|| "unknown".into()),
+        at_utc: at_utc.clone(),
+        age_ms: None,
+    });
+    let freq = r.freq_hz.and_then(|hz| u64::try_from(hz).ok()).map(|value| Reading {
+        value,
+        source: r.freq_source.unwrap_or_else(|| "unknown".into()),
+        at_utc: at_utc.clone(),
+        age_ms: r.freq_age_ms.and_then(|a| u64::try_from(a).ok()),
+    });
+    let band = freq.as_ref().and_then(|f| band_for(f.value)).map(String::from);
+    HeardBroadcast { id: r.id, callsign: r.callsign, message: r.message, at_utc, snr, mode: r.mode, freq, band }
+}
+
+/// The latest general broadcasts, newest first.
+pub fn latest_broadcasts(store: &Store) -> Result<Vec<HeardBroadcast>, StorageError> {
+    Ok(store.latest_broadcasts(LATEST_BROADCASTS)?.into_iter().map(heard_broadcast).collect())
+}
+
+/// Record a broadcast's settled S/N and publish the broadcast again.
+fn with_snr(store: &mut Store, id: i64, report: &MonitorBroadcast) -> Option<AppEvent> {
+    let stored =
+        store.set_broadcast_snr(id, report.snr_db, MONITOR_SNR, &report.mode).and_then(|()| store.broadcast(id));
+    match stored {
+        Ok(row) => row.map(|r| AppEvent::BroadcastHeard { broadcast: heard_broadcast(r) }),
+        Err(e) => {
+            tracing::warn!("could not record a broadcast's S/N: {e}");
+            None
+        }
+    }
 }
 
 /// One line of the activity log. `kind` is a short lowercase word: state,
@@ -322,6 +388,8 @@ pub struct Discovery {
     offsets: Offsets,
     /// CQ rows made by one line of a CQ, waiting for the other.
     cq_halves: HashMap<String, HalfCq>,
+    /// Ties broadcast frames to the modem's S/N reports of them.
+    matcher: Matcher,
 }
 
 /// Which of a CQ's two control lines made its row.
@@ -347,6 +415,7 @@ impl Default for Discovery {
             buffer: None,
             offsets: Offsets::default(),
             cq_halves: HashMap::new(),
+            matcher: Matcher::default(),
         }
     }
 }
@@ -371,6 +440,20 @@ impl Discovery {
         self.buffer = None;
         self.offsets = Offsets::default();
         self.cq_halves.clear();
+        self.matcher = Matcher::default();
+    }
+
+    /// When [`Discovery::settle_snr`] next has something to decide.
+    pub fn snr_wake(&self) -> Option<tokio::time::Instant> {
+        self.matcher.wake()
+    }
+
+    /// Give each broadcast whose S/N is now known its S/N, and publish it
+    /// again.
+    pub fn settle_snr(&mut self, store: Option<&mut Store>, now: tokio::time::Instant) -> Vec<AppEvent> {
+        let settled = self.matcher.settle(now);
+        let Some(store) = store else { return Vec::new() };
+        settled.into_iter().filter_map(|(id, report)| with_snr(store, id, &report)).collect()
     }
 
     /// The row `call`'s CQ made from its `first` line within [`CQ_PAIR`], if
@@ -556,12 +639,64 @@ impl Discovery {
             Observation::Unknown(line) if line.starts_with("CQFRAME") => {
                 self.malformed(format!("unreadable CQ {}", shown(&line)))
             }
-            Observation::Unknown(_) | Observation::Snr(_) | Observation::MonitorBroadcast(_) => Vec::new(),
+            Observation::MonitorBroadcast(report) => {
+                self.matcher.report(report, tokio::time::Instant::now());
+                Vec::new()
+            }
+            Observation::Unknown(_) | Observation::Snr(_) => Vec::new(),
         }
     }
 
+    /// A general broadcast, stored and published: its row id and events. It
+    /// does not make its sender a heard station.
+    fn general(
+        &mut self,
+        store: &mut Store,
+        callsign: String,
+        message: String,
+        tuning: &Tuning,
+    ) -> Option<(i64, Vec<AppEvent>)> {
+        let freq = tuning.freq.as_ref().and_then(|f| Some((i64::try_from(f.value).ok()?, f)));
+        let mut row = BroadcastRow {
+            id: 0,
+            observed_utc: now_utc(),
+            callsign,
+            message,
+            snr_db: None,
+            snr_source: None,
+            mode: None,
+            freq_hz: freq.map(|(hz, _)| hz),
+            freq_source: freq.map(|(_, f)| f.source.clone()),
+            freq_age_ms: freq.and_then(|(_, f)| f.age_ms).and_then(|a| i64::try_from(a).ok()),
+        };
+        match store.record_broadcast(&row) {
+            Ok(id) => row.id = id,
+            Err(e) => {
+                tracing::warn!("could not record a broadcast: {e}");
+                return None;
+            }
+        }
+        let line = self.note("broadcast", format!("broadcast from {}: {}", row.callsign, shown(&row.message)));
+        Some((row.id, vec![AppEvent::BroadcastHeard { broadcast: heard_broadcast(row) }, line]))
+    }
+
     /// One KISS frame from the broadcast port (03 §6).
-    pub fn frame(&mut self, store: Option<&mut Store>, f: KissFrame, tuning: &Tuning) -> Vec<AppEvent> {
+    pub fn frame(&mut self, mut store: Option<&mut Store>, f: KissFrame, tuning: &Tuning) -> Vec<AppEvent> {
+        // The modem reports every wrapped broadcast, whatever is in it, so
+        // each one counts when the reports are matched to frames.
+        if f.cmd <= CMD_WRAPPED_MAX {
+            let general = matches!(beacon::classify(&f.payload), Received::Foreign)
+                .then(|| broadcast_text::parse(&f.payload))
+                .flatten();
+            let recorded = match (general, store.as_deref_mut()) {
+                (Some((call, message)), Some(store)) => self.general(store, call, message, tuning),
+                _ => None,
+            };
+            self.matcher.frame(recorded.as_ref().map(|(id, _)| *id), tokio::time::Instant::now());
+            if let Some((_, events)) = recorded {
+                return events;
+            }
+        }
         if f.cmd != CMD_DATA_STD {
             return self.unsupported(format!("broadcast frame with KISS command 0x{:02x}", f.cmd));
         }
@@ -622,21 +757,71 @@ impl Discovery {
         }
     }
 
-    /// Drop heard observations past retention (on opening a station store).
+    /// Drop heard observations and broadcasts past retention (on opening a
+    /// station store).
     pub fn purge(&mut self, store: &mut Store) -> Vec<AppEvent> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(HEARD_RETENTION_DAYS))
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")
             .to_string();
-        match store.purge_heard_before(&cutoff) {
-            Ok(0) => Vec::new(),
-            Ok(n) => {
-                vec![self
-                    .note("purge", format!("removed {n} heard observation(s) older than {HEARD_RETENTION_DAYS} days"))]
-            }
-            Err(e) => {
-                tracing::warn!("could not purge old heard observations: {e}");
-                Vec::new()
+        let heard = store.purge_heard_before(&cutoff);
+        let broadcasts = store.purge_broadcasts_before(&cutoff);
+        let mut out = Vec::new();
+        for (removed, what) in [(heard, "heard observation(s)"), (broadcasts, "broadcast(s)")] {
+            match removed {
+                Ok(0) => {}
+                Ok(n) => {
+                    out.push(self.note("purge", format!("removed {n} {what} older than {HEARD_RETENTION_DAYS} days")))
+                }
+                Err(e) => tracing::warn!("could not purge old {what}: {e}"),
             }
         }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn listed(cmd: u8, payload: &[u8]) -> usize {
+        let mut store = Store::open_in_memory().unwrap();
+        let frame = KissFrame { cmd, payload: payload.to_vec() };
+        Discovery::default().frame(Some(&mut store), frame, &Tuning::default());
+        latest_broadcasts(&store).unwrap().len()
+    }
+
+    #[test]
+    fn every_wrapped_command_can_be_a_general_broadcast() {
+        for cmd in 0x00..=0x02 {
+            assert_eq!(listed(cmd, b"ZS6PEER: hi"), 1, "0x{cmd:02x}");
+        }
+        // A station message, and a command Mercury does not deliver.
+        for cmd in [0x03, 0x10] {
+            assert_eq!(listed(cmd, b"ZS6PEER: hi"), 0, "0x{cmd:02x}");
+        }
+    }
+
+    #[test]
+    fn old_broadcasts_are_purged_with_a_line() {
+        let mut store = Store::open_in_memory().unwrap();
+        let row = BroadcastRow {
+            id: 0,
+            observed_utc: "2000-01-01T00:00:00.000Z".into(),
+            callsign: "ZS6PEER".into(),
+            message: "old".into(),
+            snr_db: None,
+            snr_source: None,
+            mode: None,
+            freq_hz: None,
+            freq_source: None,
+            freq_age_ms: None,
+        };
+        store.record_broadcast(&row).unwrap();
+        let events = Discovery::default().purge(&mut store);
+        assert!(latest_broadcasts(&store).unwrap().is_empty());
+        assert!(
+            matches!(&events[..], [AppEvent::Activity { entry }] if entry.text.contains("1 broadcast(s)")),
+            "{events:?}"
+        );
     }
 }

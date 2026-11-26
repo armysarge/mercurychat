@@ -266,6 +266,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             let beacon_wake = app.beacon.sched.wake(tokio::time::Instant::now());
             let telemetry_wake = app.telemetry.wake();
             let qsy_wake = app.qsy_wake();
+            let snr_wake = app.discovery.snr_wake();
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
@@ -363,6 +364,11 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                 }
                 // A throttled telemetry change is due: published just below.
                 _ = tokio::time::sleep_until(telemetry_wake.unwrap_or_else(tokio::time::Instant::now)), if telemetry_wake.is_some() => {}
+                // A broadcast's S/N window has closed.
+                _ = tokio::time::sleep_until(snr_wake.unwrap_or_else(tokio::time::Instant::now)), if snr_wake.is_some() => {
+                    let events = app.discovery.settle_snr(app.chat.as_mut(), tokio::time::Instant::now());
+                    app.emit_all(events);
+                }
                 // A QSY window ends or a re-call is due: handled just below.
                 _ = tokio::time::sleep_until(qsy_wake.unwrap_or_else(tokio::time::Instant::now)), if qsy_wake.is_some() => {}
             }
@@ -695,6 +701,11 @@ impl App {
                 let store = self.chat.as_ref().ok_or_else(|| conflict("no station is selected".into()))?;
                 let stations = discovery::heard_list(store, self.discovery.offsets()).map_err(storage)?;
                 Ok(CommandOk::Heard { stations })
+            }
+            AppCommand::HeardBroadcasts => {
+                let store = self.chat.as_ref().ok_or_else(|| conflict("no station is selected".into()))?;
+                let broadcasts = discovery::latest_broadcasts(store).map_err(storage)?;
+                Ok(CommandOk::HeardBroadcasts { broadcasts })
             }
             AppCommand::SetFavourite { callsign, on } => {
                 let call = Callsign::parse(&callsign)

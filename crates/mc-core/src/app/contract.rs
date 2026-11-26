@@ -6,7 +6,7 @@ use super::audio::AudioSettingsView;
 use super::beacon::{BeaconContentView, BeaconStatus};
 use super::chat::{ChatMessage, Conversation};
 use super::diagnostics::DiagEntryView;
-use super::discovery::{ActivityEntry, DiscoveryStats, HeardStation};
+use super::discovery::{ActivityEntry, DiscoveryStats, HeardBroadcast, HeardStation};
 use super::endpoints::EndpointCheck;
 use super::events::{ModemDetail, ModemState, SessionInfo};
 use super::export::ExportFormat;
@@ -161,6 +161,9 @@ pub enum AppCommand {
     },
     /// The heard list: stations heard in the last 30 days, then favourites.
     Heard,
+    /// The latest general broadcasts heard (`CALL: message`), newest first,
+    /// at most 10. Neither CQs nor beacons are among them.
+    HeardBroadcasts,
     /// Mark or unmark a callsign as a favourite; it stays listed while marked.
     SetFavourite {
         callsign: String,
@@ -503,6 +506,9 @@ pub enum CommandOk {
     },
     Heard {
         stations: Vec<HeardStation>,
+    },
+    HeardBroadcasts {
+        broadcasts: Vec<HeardBroadcast>,
     },
     Activity {
         entries: Vec<ActivityEntry>,

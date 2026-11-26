@@ -40,7 +40,7 @@ pub use broadcast::{
 };
 pub use chat::{ChatMessage, Conversation, MAX_TEXT_BYTES, QUEUE_BYTES, QUEUE_MESSAGES};
 pub use contract::{AppCommand, AppError, AppSnapshot, BuiltInView, CommandOk};
-pub use discovery::{ActivityEntry, DiscoveryStats, HeardSource, HeardStation, Reading};
+pub use discovery::{ActivityEntry, DiscoveryStats, HeardBroadcast, HeardSource, HeardStation, Reading};
 pub use endpoints::EndpointCheck;
 pub use events::{
     is_current, AppEvent, EventEnvelope, EventLog, ModemDetail, ModemState, SessionDirection, SessionInfo, Since,
@@ -77,6 +77,7 @@ pub fn export_bindings() -> Result<(), ts_rs::ExportError> {
     contract::AppErrorWire::export_all(&cfg)?;
     EventEnvelope::export_all(&cfg)?;
     HeardStation::export_all(&cfg)?;
+    HeardBroadcast::export_all(&cfg)?;
     ActivityEntry::export_all(&cfg)?;
     DiscoveryStats::export_all(&cfg)?;
     BroadcastKind::export_all(&cfg)?;
