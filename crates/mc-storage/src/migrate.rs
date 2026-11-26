@@ -27,7 +27,25 @@ pub const MIGRATIONS: &[Migration] = &[
     Migration { to: 8, sql: MIGRATION_8 },
     Migration { to: 9, sql: MIGRATION_9 },
     Migration { to: 10, sql: MIGRATION_10 },
+    Migration { to: 11, sql: MIGRATION_11 },
 ];
+
+/// General broadcasts heard, kept as long as heard observations.
+const MIGRATION_11: &str = r#"
+CREATE TABLE broadcasts_heard (
+  id           INTEGER PRIMARY KEY,
+  observed_utc TEXT NOT NULL,
+  callsign     TEXT NOT NULL,
+  message      TEXT NOT NULL,
+  snr_db       REAL,
+  snr_source   TEXT,
+  mode         TEXT,
+  freq_hz      INTEGER,
+  freq_source  TEXT,
+  freq_age_ms  INTEGER
+);
+CREATE INDEX broadcasts_time ON broadcasts_heard (observed_utc);
+"#;
 
 /// The built-in modem (M5 §5.1): its UI WebSocket and rigctld ports. Control
 /// and broadcast use the existing columns; other kinds leave these NULL.

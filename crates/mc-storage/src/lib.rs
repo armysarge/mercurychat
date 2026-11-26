@@ -30,6 +30,7 @@ pub enum StorageError {
     QsoNotFound(String),
 }
 
+mod broadcasts;
 mod freqlist;
 mod heard;
 mod logbook;
@@ -153,6 +154,23 @@ pub struct HeardSummaryRow {
     pub freq_age_ms: Option<i64>,
     pub count: i64,
     pub favourite: bool,
+}
+
+/// One general broadcast heard (`broadcasts_heard`). `id` is ignored on
+/// insert. The callsign is what the message claims.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BroadcastRow {
+    pub id: i64,
+    pub observed_utc: String,
+    pub callsign: String,
+    pub message: String,
+    pub snr_db: Option<f32>,
+    pub snr_source: Option<String>,
+    /// The mode it was decoded on, from the report that gave the S/N.
+    pub mode: Option<String>,
+    pub freq_hz: Option<i64>,
+    pub freq_source: Option<String>,
+    pub freq_age_ms: Option<i64>,
 }
 
 /// One `qso_records` row. `state` is `draft` or `final`.
