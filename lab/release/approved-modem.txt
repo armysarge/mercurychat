@@ -1,0 +1,8 @@
+# Modem sources approved for releases (resolve-release.sh adds to this; commit it
+# with the release). A version listed here may not change: a moved Mercury tag or
+# a replaced Hamlib tarball stops the build.
+#   hamlib <version> <SHA-256 of the source tarball>
+#   mercury <tag> <commit>
+# The first two are the lab pins (lab/hamlib-pin.env, lab/mercury-pin.env).
+hamlib 4.7.2 ae1fcf2dbc80ea0786ea8f047b09399c3f7737d1930442f61a031708ed33e88f
+mercury v1.9.25 33efac4e3089f64f493fde1232b8e96305d15185

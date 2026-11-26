@@ -7,12 +7,14 @@
 #
 # Default (development, labs): the fixed pins in lab/hamlib-pin.env and
 # lab/mercury-pin.env, from the read-only fork mount and a local tarball.
-# --latest (release builds, design §3): the newest Hamlib and Mercury releases
-# from GitHub (resolve-latest.sh, or $MC_RESOLVE for tests), cloned inside this
-# container. A patch that doesn't apply or a failed check stops the build.
+# --latest (release builds, design §3): the newest Hamlib and Mercury releases,
+# exactly as lab/release/resolve-release.sh resolved them and had them approved:
+# the Hamlib tarball must have that SHA-256, and Mercury is that commit, cloned
+# inside this container. A patch that doesn't apply or a failed check stops the build.
 #
 # Mounts: /scripts (lab/docker, ro), /pins (lab, ro), /patches (lab/mercury-patches, ro),
-#         /src (the Mercury fork, ro), /hamlib-src (dir with the pinned tarball, ro), /out
+#         /src (the Mercury fork, ro), /hamlib-src (dir with the pinned tarball, ro), /out,
+#         with --latest /resolved (resolve-release.sh's output, ro; or $MC_RESOLVED)
 set -euo pipefail
 latest=0
 if [ "${1:-}" = --latest ]; then latest=1; shift; fi
@@ -24,24 +26,28 @@ targets=("$@"); [ ${#targets[@]} -eq 0 ] && targets=(linux-amd64 windows-x64)
 . /pins/mercury-pin.env
 mercury_repo=/src; mercury_ref=$MERCURY_COMMIT
 if [ $latest = 1 ]; then
-  eval "$(bash "${MC_RESOLVE:-/scripts/resolve-latest.sh}")"
+  resolved=${MC_RESOLVED:-/resolved}
+  [ -f "$resolved/resolved.env" ] \
+    || { echo "FAIL no approved sources in $resolved: run lab/release/resolve-release.sh first" >&2; exit 4; }
+  # Nothing from the pins may stand in for a value the resolver did not give.
+  unset HAMLIB_VERSION HAMLIB_SHA256 MERCURY_REPO MERCURY_REF
+  # shellcheck disable=SC1091
+  . "$resolved/resolved.env"
+  : "${HAMLIB_VERSION:?}" "${HAMLIB_SHA256:?}" "${MERCURY_REPO:?}" "${MERCURY_REF:?}"
+  [[ $MERCURY_REF =~ ^[0-9a-f]{40}$ ]] || { echo "FAIL Mercury's ref '$MERCURY_REF' is not a full commit" >&2; exit 4; }
   mercury_repo=$MERCURY_REPO; mercury_ref=$MERCURY_REF
-  tarball=/tmp/hamlib-$HAMLIB_VERSION.tar.gz
-  if [ -n "${HAMLIB_URL:-}" ] && [ ! -f "$tarball" ]; then
-    case "$HAMLIB_URL" in
-      /*) cp "$HAMLIB_URL" "$tarball" ;;
-      *) curl -fsSL "$HAMLIB_URL" -o "$tarball" ;;
-    esac
-  fi
-  HAMLIB_SHA256=$(sha256sum "$tarball" | cut -d' ' -f1)
+  tarball=$resolved/hamlib-$HAMLIB_VERSION.tar.gz
+  expected="the approved one ($resolved/resolved.env)"
 else
   tarball=/hamlib-src/hamlib-$HAMLIB_VERSION.tar.gz
-  echo "$HAMLIB_SHA256  $tarball" | sha256sum -c --quiet \
-    || { echo "FAIL the Hamlib tarball's SHA-256 differs from lab/hamlib-pin.env" >&2; exit 1; }
+  expected="lab/hamlib-pin.env"
 fi
+echo "$HAMLIB_SHA256  $tarball" | sha256sum -c --quiet \
+  || { echo "FAIL the Hamlib tarball's SHA-256 differs from $expected" >&2; exit 1; }
 
 rm -rf /m && git clone -q "$mercury_repo" /m && git -C /m checkout -q "$mercury_ref"
 commit=$(git -C /m rev-parse HEAD)
+[ $latest = 0 ] || [ "$commit" = "$mercury_ref" ] || { echo "FAIL checked out $commit, not $mercury_ref" >&2; exit 1; }
 mversion=$(git -C /m describe --tags --always 2>/dev/null || echo "$commit")
 applied=""
 for p in $MERCURY_PATCHES; do

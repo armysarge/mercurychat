@@ -200,7 +200,7 @@ MSYS_NO_PATHCONV=1 docker run --rm "${M[@]}" mercurychat-lab:m0 bash /scripts/bu
 - **Windows** is built in the Debian 13 lab image, because Ubuntu 22.04's mingw headers lack `struct pollfd`. It uses our `libhamlib-4.dll`, not the one Mercury vendors.
 - **Hamlib:** `E:/mc-lab-out/m5/src/` holds the pinned tarball. `lab/hamlib-pin.env` has its version and SHA-256, and the build refuses a tarball that differs.
 - **Checks:** each build ends with `check-bundle.sh`. It verifies the manifest, the Hamlib version, the dummy rig in `rigctld -l`, and that only common system libraries (Linux) or bundled/Windows DLLs are needed.
-- **Release builds** use `build-bundle.sh --latest`: the newest Mercury release and Hamlib release from GitHub (`resolve-latest.sh`), cloned inside the container, and never into the fork. A patch that no longer applies, or a failed check, stops the build. `test-latest.sh <old commit>` tests this without the network.
+- **Release builds** use `build-bundle.sh --latest`: the newest Mercury release and Hamlib release, exactly as `lab/release/resolve-release.sh` resolved them and you approved them (section 3f), cloned inside the container, and never into the fork. A tarball that differs, a ref that is not a full commit, a patch that no longer applies, or a failed check stops the build. `test-latest.sh <old commit>` tests this without the network.
 - **Contracts** on the bundle's own Mercury: `lab/docker/contract/check-mercury.sh --bundle E:/mc-lab-out/m5/bundle/linux-amd64`.
 
 ## 3e. The built-in lab (M5)
@@ -223,6 +223,16 @@ The commands and what each check proves are in [`docker/rig/M5-checks.md`](docke
 5. `THIRD-PARTY.md` at the bundle's versions, the source zips (MercuryChat, the patched Mercury, Hamlib), `LICENSE` and `SHA256SUMS`.
 
 `--pinned` uses the lab pins instead of the latest releases; `--bundle DIR` reuses a modem already built.
+
+**The modem sources are resolved and approved first.** Before anything is built or deleted, `resolve-release.sh` runs once, and both the Linux and Windows builds use its result:
+- **Hamlib:** the latest release's source tarball, which must contain that version.
+- **Mercury:** the latest release's tag, as a full commit. With no release, the build stops; a branch is never used.
+- **Record:** `approved-modem.txt` keeps what was approved. If a listed version has changed since, the build stops. Commit new lines with the release.
+- **Approval:** type `yes` at the question. With no terminal, run with the `--approve "hamlib=<version> mercury=<commit, 12 characters>"` line that the failed run prints.
+
+**Neither is signature-checked** (owner, 26 Nov 2026), so nothing proves that a new release is genuine: Mercury signs nothing, and every copy found of Hamlib's signing key had expired on 6 July 2024, before 4.7.2 was signed. For a new version, check on the project's own pages that the release is one you expect before approving it.
+
+Tests, no network needed (Git Bash): `bash lab/release/test-resolve-release.sh` and `bash lab/release/test-build-release.sh`.
 
 The images, once:
 
