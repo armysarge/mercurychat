@@ -233,6 +233,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         pending_message: None,
         broadcast_abort: None,
         broadcast_silent: false,
+        reopen_port: false,
         beacon: BeaconState::new(),
         telemetry: Telemetry::default(),
         qso: None,
@@ -419,6 +420,8 @@ struct App {
     broadcast_abort: Option<BroadcastAbort>,
     /// The closed port cannot take another beacon until an explicit retry or recovery.
     broadcast_silent: bool,
+    /// The port was reset after a message and is not yet open again.
+    reopen_port: bool,
     /// Periodic beacons: the schedule, the profile's settings, the status shown.
     beacon: BeaconState,
     /// Link quality and Mercury's telemetry (OBS-01), and its event throttle.
@@ -1268,6 +1271,8 @@ impl App {
     fn send_broadcast_message(&mut self, text: &str) -> Result<(), AppError> {
         self.qsy_owns_rig()?;
         let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
+        // A reopen that failed is asked for again, ahead of this message.
+        self.reopen_port_if_idle();
         let mode = self.listen_mode.current().unwrap_or(DATAC3);
         let payload = match broadcast_text::compose(&p.callsign, text, mode) {
             Ok(payload) => payload,
@@ -1316,11 +1321,6 @@ impl App {
                 self.beacon.submitted();
             }
             let silent = kind == BroadcastKind::Beacon && self.beacon_outcome(&outcome);
-            let silent_message = kind == BroadcastKind::Message
-                && matches!(
-                    outcome,
-                    BroadcastOutcome::NotConfirmed { reason: Some(NotConfirmedReason::BroadcastPortSilent) }
-                );
             let line = match (kind, &outcome) {
                 // The operator's message went out: one row for it, not a generic beacon line too.
                 (BroadcastKind::Message, BroadcastOutcome::Transmitted) if self.pending_message.is_some() => {
@@ -1340,8 +1340,8 @@ impl App {
             if silent {
                 self.record_silent_beacon();
             }
-            if silent_message {
-                self.reset_silent_port();
+            if self.broadcasts.take_unkeyed_message() {
+                self.reset_message_port();
             }
         }
     }
@@ -1369,15 +1369,24 @@ impl App {
     }
 
     /// A message the modem never keyed must not linger on its connection to
-    /// go out later (lab F5). A fresh connection is made for the next one the
-    /// operator sends; the beacon schedule is not touched.
-    fn reset_silent_port(&mut self) {
+    /// go out later (lab F5), however its window ended. The connection is
+    /// reset and made again; the beacon schedule is not touched.
+    fn reset_message_port(&mut self) {
         let Some(port) = self.broadcast_abort.take() else { return };
         port.abort();
         let line = self.discovery.note("broadcast", "broadcast port reset after an unconfirmed message");
         self.emit(line);
-        if let Some(task) = &self.task {
-            task.send(ModemCmd::ReopenBroadcast);
+        self.reopen_port = true;
+        self.reopen_port_if_idle();
+    }
+
+    /// Without the port nothing is heard either. The modem task opens it only
+    /// while idle, so this is asked again until a report says it is open.
+    fn reopen_port_if_idle(&mut self) {
+        if self.reopen_port && matches!(self.modem, ModemState::Ready | ModemState::Listening) {
+            if let Some(task) = &self.task {
+                task.send(ModemCmd::ReopenBroadcast);
+            }
         }
     }
 
@@ -1530,6 +1539,7 @@ impl App {
         self.beacon.sched.on_state(state, tokio::time::Instant::now());
         let out = self.broadcasts.state(state);
         self.publish_broadcasts(out);
+        self.reopen_port_if_idle();
         if state == ModemState::Faulted {
             // Also re-syncs the gate's live listen mode (ruling P2).
             self.telemetry.modem_faulted(&mut self.listen_mode);
@@ -1549,6 +1559,7 @@ impl App {
         self.publish_broadcasts(abandoned);
         self.broadcast_abort = None;
         self.broadcast_silent = false;
+        self.reopen_port = false;
         self.listen_mode = ListenMode::default();
         let telemetry = matches!(&target, Some(p) if matches!(&p.modem, ModemTarget::Existing { telemetry_url: Some(_), .. } | ModemTarget::BuiltIn { .. }));
         self.telemetry.reset(telemetry);
@@ -1736,6 +1747,7 @@ impl App {
             }
             ReportKind::BroadcastOpened(abort) => {
                 self.broadcast_abort = Some(abort);
+                self.reopen_port = false;
                 self.broadcast_silent = false;
             }
             ReportKind::Broadcast(why) => {

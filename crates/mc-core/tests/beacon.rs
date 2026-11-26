@@ -770,6 +770,58 @@ mod service {
         );
     }
 
+    /// A call can take the modem out of idle before a message is keyed. The
+    /// message must not wait on its connection to go out afterwards, and the
+    /// port must come back once the modem is idle, or nothing more is heard.
+    #[tokio::test(flavor = "current_thread")]
+    async fn a_message_not_keyed_before_a_call_never_goes_out_later() {
+        let net = FakeNet::start().await;
+        net.set_unanswered_calls(true);
+        let fake = stalled_broadcast_port().await;
+        let mut p = profile(&net, Some("KG33"));
+        if let ModemTarget::Existing { broadcast_port, .. } = &mut p.modem {
+            *broadcast_port = Some(fake.port);
+        }
+        let dir = tempfile::tempdir().unwrap();
+        let (h, mut rx) = ready(dir.path(), p).await;
+        tokio::time::pause();
+        done(&h, AppCommand::SendBroadcastMessage { text: "QRV 40m".into() }).await;
+        settle().await;
+        done(&h, AppCommand::Call { peer: "ZS6PEER".into() }).await;
+        settle().await;
+        let mut outcomes = Vec::new();
+        while let Ok(ev) = rx.try_recv() {
+            if let AppEvent::Broadcast { kind: BroadcastKind::Message, outcome } = ev.event {
+                outcomes.push(outcome);
+            }
+        }
+        assert_eq!(outcomes, [BroadcastOutcome::Submitted, BroadcastOutcome::NOT_CONFIRMED]);
+
+        // The other program lets go: the message must not be there to be read.
+        fake.release.send_replace(true);
+        for _ in 0..50 {
+            if !fake.ended.lock().unwrap().is_empty() {
+                break;
+            }
+            settle().await;
+        }
+        assert_eq!(fake.ended.lock().unwrap().clone(), ["ConnectionReset"], "the connection was reset");
+        if cfg!(windows) {
+            assert_eq!(fake.read.load(Ordering::SeqCst), 0, "a stale message would have gone out");
+        }
+
+        // The call ends: the port is open again, with nothing waiting on it.
+        done(&h, AppCommand::CancelCall).await;
+        state(&mut rx, ModemState::Listening).await;
+        for _ in 0..50 {
+            if fake.conns.load(Ordering::SeqCst) > 1 {
+                break;
+            }
+            settle().await;
+        }
+        assert_eq!(fake.conns.load(Ordering::SeqCst), 2, "reopened once idle");
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn a_silent_broadcast_connection_is_reset_and_requires_rearming() {
         // Lab F3 and F5: another program holds Mercury's broadcast port.
