@@ -25,6 +25,7 @@ mod rig;
 mod rigconfig;
 pub mod schedule;
 mod service;
+mod snr_match;
 mod telemetry;
 mod wizard;
 
