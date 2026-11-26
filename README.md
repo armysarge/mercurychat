@@ -23,7 +23,7 @@ Founded by ZS6SHZ. Updates: [releases](https://github.com/armysarge/mercurychat/
 ## Features
 
 - **Chat** with calls and auto-answer, a saved outbox and delivery receipts from the other station. After a failure, unconfirmed messages are marked uncertain and are not resent by themselves.
-- **Discovery:** CQ, opt-in beacons, short broadcast messages and a heard list. No broadcast is ever shown as confirmed received.
+- **Discovery:** CQ, opt-in beacons, a heard list, short messages to everyone, and a list of the latest ones heard with their S/N. No broadcast is ever shown as confirmed received.
 - **Files:** the receiver accepts or declines first. Files are compressed, photos are shrunk with their metadata removed, and a file that fails its checksum is not saved.
 - **Rig control:** the bundled or your own Hamlib `rigctld`, FLRig, or built-in CAT control with importable command files (Icom IC-7300, Yaesu FT-991A and Kenwood TS-590S/SG included).
 - **Station tools:** QSO logging with ADIF and CSV export, QSY proposals, SNR and station information requests, macros, history search and notifications.

@@ -1,5 +1,14 @@
 # Planning changes
 
+## Unreleased: latest broadcasts
+
+- **Latest broadcasts on Operate:** the idle screen lists the last 10 general broadcasts heard, with callsign, date and time (UTC), S/N and the start of the message. A row opens the full details. CQ calls and beacons stay in the Heard list. The Broadcasts page shows the same list as its "Heard" column.
+- **The Broadcast button now sends a general broadcast**, `YOURCALL: message`, instead of a beacon. **Older copies of MercuryChat do not show these messages**: they log them as another program's broadcast. Other programs that send or read `CALL: message` text interoperate. The message is still up to 40 bytes, and less where the listen mode carries less with your callsign. A station whose callsign has no letter and digit cannot use it.
+- **S/N** comes from Mercury's monitor report, which names no sender, so it is matched to a message by arrival time. It is left blank (—) when that is not certain, for example when two broadcasts arrive within a couple of seconds. A wrong match is still possible if a report is lost.
+- The callsign shown is what the message says; nothing verifies it.
+- The station database gains a table (migration 11), backed up first as usual. Broadcasts are kept 30 days, like heard stations.
+- Not tested on the air.
+
 ## 0.11 — 24 November 2026 (M5 packaging and beta, 0.5.0-beta.1)
 
 - Built M5 on branch `m5`. **Built-in modem:** MercuryChat ships its own Mercury and Hamlib rigctld and runs them itself. Their private `mercury.ini` binds 127.0.0.1 and lets no web page drive the modem, ports are checked before start (a taken port is named, never adopted), and both programs are tied to the app's life: none is left behind, even after a crash.
