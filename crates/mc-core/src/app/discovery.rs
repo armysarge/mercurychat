@@ -556,7 +556,7 @@ impl Discovery {
             Observation::Unknown(line) if line.starts_with("CQFRAME") => {
                 self.malformed(format!("unreadable CQ {}", shown(&line)))
             }
-            Observation::Unknown(_) | Observation::Snr(_) => Vec::new(),
+            Observation::Unknown(_) | Observation::Snr(_) | Observation::MonitorBroadcast(_) => Vec::new(),
         }
     }
 

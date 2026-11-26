@@ -8,7 +8,7 @@
 use crate::session::{ModemSignal, Session, SessionCommand, SessionConfig, SessionEnd, SessionEvent};
 use mc_storage::Store;
 use mercury_adapter::{
-    monitor::{parse_cq, MonitorCq},
+    monitor::{parse_broadcast, parse_cq, MonitorBroadcast, MonitorCq},
     Ack, AdapterEvent, Attachment, Bandwidth, Callsign, Command, ControlEvent, Endpoint, MercuryClient, Timeouts,
 };
 use std::path::PathBuf;
@@ -164,6 +164,8 @@ pub enum Observation {
     },
     /// A CQ heard through MONITOR, with its SNR.
     MonitorCq(MonitorCq),
+    /// A broadcast heard through MONITOR, with its S/N; it names no sender.
+    MonitorBroadcast(MonitorBroadcast),
     Ptt(bool),
     Busy(bool),
     Snr(f32),
@@ -183,7 +185,10 @@ fn observation_of(ev: &AdapterEvent) -> Option<Observation> {
         }
         ControlEvent::Monitor(rest) => match parse_cq(rest) {
             Some(cq) => Observation::MonitorCq(cq),
-            None => Observation::Unknown(format!("MONITOR {rest}")),
+            None => match parse_broadcast(rest) {
+                Some(report) => Observation::MonitorBroadcast(report),
+                None => Observation::Unknown(format!("MONITOR {rest}")),
+            },
         },
         ControlEvent::Ptt(b) => Observation::Ptt(*b),
         ControlEvent::Busy(b) => Observation::Busy(*b),

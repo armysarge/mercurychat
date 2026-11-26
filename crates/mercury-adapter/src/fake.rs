@@ -314,6 +314,7 @@ impl FakeNet {
             if let Some(tx) = &s.st[to].bcast_tx {
                 let _ = tx.send(crate::kiss::encode(crate::kiss::CMD_DATA_STD, &payload));
             }
+            report_broadcast(&s, to, mode);
         }
         true
     }
@@ -347,6 +348,17 @@ fn send_line(s: &Shared, i: usize, line: &str) {
             "PTT OFF" => hook(false),
             _ => {}
         }
+    }
+}
+
+/// What a station with MONITOR on is told of a wrapped broadcast it decoded
+/// on `mode`: Mercury names the frame's size (less its CRC), not the sender.
+fn report_broadcast(s: &Shared, to: usize, mode: u8) {
+    if !s.st[to].monitor {
+        return;
+    }
+    if let Some((name, frame)) = crate::kiss::listen_mode_frame(mode) {
+        send_line(s, to, &format!("MONITOR {name} BCAST_DATA LEN={} SNR=7.5", frame - 2));
     }
 }
 
@@ -662,6 +674,7 @@ async fn transmit_broadcast(net: Arc<FakeNet>, i: usize, mut payload: Vec<u8>) {
         if let Some(tx) = &s.st[j].bcast_tx {
             let _ = tx.send(crate::kiss::encode(crate::kiss::CMD_DATA_STD, &payload));
         }
+        report_broadcast(&s, j, mode);
     }
     send_line(&s, i, "PTT OFF");
 }

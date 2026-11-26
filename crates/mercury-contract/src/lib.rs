@@ -263,7 +263,8 @@ impl Ws {
 /// (126-byte frames, 123 bytes of wrapped capacity).
 pub const LAB_MODE: u8 = 1;
 
-async fn broadcast_port(st: &Station) -> (BroadcastPort, tokio::sync::mpsc::Receiver<KissFrame>) {
+/// A station's broadcast port, with the frames it hears.
+pub async fn broadcast_port(st: &Station) -> (BroadcastPort, tokio::sync::mpsc::Receiver<KissFrame>) {
     BroadcastPort::connect(&st.bcast.ip().to_string(), st.bcast.port(), Duration::from_secs(3))
         .await
         .unwrap_or_else(|e| panic!("broadcast port of {}: {e}", st.call))
