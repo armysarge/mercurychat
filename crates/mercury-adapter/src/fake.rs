@@ -269,6 +269,13 @@ impl FakeNet {
         self.shared.lock().unwrap().st[i].listen_off_wrong = wrong;
     }
 
+    /// A client of station `i` is still connected on some port. A newcomer is
+    /// refused until the fake has noticed the last one leaving.
+    pub fn has_client(&self, i: usize) -> bool {
+        let s = self.shared.lock().unwrap();
+        s.st[i].ctrl_tx.is_some() || s.st[i].data_tx.is_some() || s.st[i].bcast_tx.is_some()
+    }
+
     /// Station `i` gets broadcasts with no monitor report of them.
     pub fn set_mute_reports(&self, i: usize, on: bool) {
         self.shared.lock().unwrap().st[i].mute_reports = on;

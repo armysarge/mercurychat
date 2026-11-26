@@ -45,6 +45,9 @@ async fn wait_for<T>(rx: &mut Receiver<EventEnvelope>, secs: u64, mut want: impl
             Ok(Err(RecvError::Closed)) => panic!("the event stream closed"),
             Ok(Ok(env)) => env.event,
         };
+        if let AppEvent::ModemState { state: ModemState::Faulted, detail } = &ev {
+            panic!("faulted: {detail:?}");
+        }
         if let Some(t) = want(&ev) {
             return t;
         }
@@ -253,11 +256,19 @@ async fn each_station_has_its_own_list() {
     air(&net, b"ZS6PEER: for the first station");
     broadcast_event(&mut rx, 5).await;
 
-    let second = save(&h, existing(&net)).await;
+    // The second station has a modem of its own: a fake modem refuses a new
+    // client until it has noticed the old one leaving.
+    let other = FakeNet::start().await;
+    let second = save(&h, existing(&other)).await;
     let mut rx = h.subscribe();
     select(&h, &mut rx, &second).await;
     assert_eq!(listed(&h).await, vec![]);
 
+    let end = Instant::now() + Duration::from_secs(10);
+    while net.has_client(0) {
+        assert!(Instant::now() < end, "the first modem still has the old client");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
     let mut rx = h.subscribe();
     select(&h, &mut rx, &first).await;
     assert_eq!(listed(&h).await.len(), 1);
