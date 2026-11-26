@@ -23,6 +23,7 @@ import Settings from "./views/Settings.vue";
 import Welcome from "./views/Welcome.vue";
 import Wizard from "./views/Wizard.vue";
 import AppLogo from "./components/AppLogo.vue";
+import BroadcastDetail from "./components/BroadcastDetail.vue";
 import ContextMenu from "./components/ContextMenu.vue";
 import StationMenu from "./components/StationMenu.vue";
 import { countdown } from "./components/countdown";
@@ -204,6 +205,9 @@ watch(
   () => activeProfile.value?.id,
   (id, old) => {
     if (id !== old) {
+      // The last station's broadcasts go at once.
+      discovery.broadcasts = [];
+      discovery.opened = null;
       void reloadChat();
       void reloadDiscovery();
       void reloadTransfers();
@@ -382,6 +386,7 @@ onUnmounted(() => {
   <ContextMenu />
   <StationMenu />
   <SendFileDialog />
+  <BroadcastDetail />
 </template>
 
 <style scoped>

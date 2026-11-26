@@ -5,7 +5,9 @@ import { computed, reactive, watch } from "vue";
 import { call, describeError, Mirror, type View } from "./api";
 import type { ActivityEntry } from "./bindings/ActivityEntry";
 import type { AppEvent } from "./bindings/AppEvent";
+import { upsertLatest } from "./broadcastList";
 import type { BroadcastKind } from "./bindings/BroadcastKind";
+import type { HeardBroadcast } from "./bindings/HeardBroadcast";
 import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { ChatMessage } from "./bindings/ChatMessage";
 import type { Conversation } from "./bindings/Conversation";
@@ -122,6 +124,11 @@ export function onAppEvent(fn: (e: AppEvent) => void) {
 export const mirror = new Mirror((v) => (app.view = v), {
   message: onMessage,
   heard: onHeard,
+  broadcastHeard: (b) => {
+    discovery.broadcasts = upsertLatest(discovery.broadcasts, b);
+    // The open details gain the S/N too, even if the row has left the list.
+    if (discovery.opened?.id === b.id) discovery.opened = b;
+  },
   activity: (e) => {
     discovery.activity.unshift(e);
     if (discovery.activity.length > ACTIVITY_MAX) discovery.activity.length = ACTIVITY_MAX;
@@ -221,6 +228,10 @@ export const HIGHLIGHT_MS = 3000;
 export const discovery = reactive({
   /** The heard list, newest first; favourites with nothing heard sort last. */
   heard: [] as HeardStation[],
+  /** The latest general broadcasts, newest first (at most 10). */
+  broadcasts: [] as HeardBroadcast[],
+  /** The broadcast whose details are open. */
+  opened: null as HeardBroadcast | null,
   /** The activity log, newest first. */
   activity: [] as ActivityEntry[],
   /** The latest outcome of each kind of broadcast this run. */
@@ -258,15 +269,22 @@ function onHeard(st: HeardStation) {
   if (st.source !== "session") discovery.announce = t("heard.announce", { callsign: st.callsign, source: t(`heard.source.${st.source}`) });
 }
 
-/** Re-read the heard list and the activity log (start-up, resync, a new station). */
+/** Re-read the heard list, the latest broadcasts and the activity log (start-up, resync, a new station). */
 export async function reloadDiscovery() {
-  if (!activeProfile.value) {
+  const profile = activeProfile.value?.id;
+  if (!profile) {
+    discovery.broadcasts = [];
+    discovery.opened = null;
     discovery.heard = [];
     discovery.activity = [];
     return;
   }
   try {
-    const [h, a] = await Promise.all([call({ type: "heard" }), call({ type: "activity" })]);
+    const [h, a, b] = await Promise.all([call({ type: "heard" }), call({ type: "activity" }), call({ type: "heardBroadcasts" })]);
+    // Another station was selected meanwhile: these lists are not its own.
+    if (activeProfile.value?.id !== profile) return;
+    // Merged, not replaced: an S/N may have arrived while the list was read.
+    if (b.type === "heardBroadcasts") discovery.broadcasts = b.broadcasts.reduce(upsertLatest, discovery.broadcasts);
     if (h.type === "heard") discovery.heard = [...h.stations].sort(heardOrder);
     if (a.type === "activity") discovery.activity = [...a.entries].reverse().slice(0, ACTIVITY_MAX);
   } catch {

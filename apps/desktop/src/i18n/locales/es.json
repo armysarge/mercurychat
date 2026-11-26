@@ -83,6 +83,24 @@
       "restartModem": "Mercury dice que transmite pero el equipo no está en transmisión tras volver rigctld: reinicie el módem."
     }
   },
+  "latest": {
+    "title": "Últimas difusiones",
+    "empty": "Aún no se han recibido difusiones",
+    "callsign": "Indicativo",
+    "date": "Fecha (UTC)",
+    "snr": "S/N (dB)",
+    "message": "Mensaje",
+    "rowAria": "{callsign}, {date} UTC, S/N {snr}: {message}",
+    "detailTitle": "Difusión de {callsign}",
+    "dateLabel": "Fecha",
+    "snrLabel": "S/N",
+    "mode": "Modo",
+    "freq": "Frecuencia",
+    "claimed": "El indicativo es el que declara el mensaje",
+    "open": "Abrir conversación",
+    "close": "Cerrar",
+    "snrValue": "{db} dB ({source})"
+  },
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "El módem no transmitió; puede que otro programa esté usando el puerto de difusión de Mercury."
@@ -1385,7 +1403,6 @@
     "sent": "Enviadas",
     "heard": "Oídas",
     "noneSent": "Aún no has difundido nada.",
-    "noneHeard": "Aún no se han oído mensajes difundidos.",
     "kind": {
       "message": "Mensaje",
       "cq": "Llamada CQ",

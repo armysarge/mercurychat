@@ -38,6 +38,8 @@ node --test apps/desktop/scripts/transfers.test.mjs
 node --test apps/desktop/scripts/wizard.test.mjs
 node --test apps/desktop/scripts/third-party.test.mjs
 node --test apps/desktop/scripts/logExport.test.mjs
+# The latest broadcasts: the list, its dates and S/N (broadcastList.ts).
+node --test apps/desktop/scripts/broadcastList.test.mjs
 npm --prefix apps/desktop run build
 
 # The UI's TypeScript contract is generated from the Rust types by `cargo test`

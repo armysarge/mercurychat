@@ -83,6 +83,24 @@
       "restartModem": "O Mercury diz que está transmitindo, mas o rádio não está em transmissão depois que o rigctld voltou: reinicie o modem."
     }
   },
+  "latest": {
+    "title": "Últimas transmissões gerais",
+    "empty": "Nenhuma transmissão geral recebida ainda",
+    "callsign": "Indicativo",
+    "date": "Data (UTC)",
+    "snr": "S/N (dB)",
+    "message": "Mensagem",
+    "rowAria": "{callsign}, {date} UTC, S/N {snr}: {message}",
+    "detailTitle": "Transmissão geral de {callsign}",
+    "dateLabel": "Data",
+    "snrLabel": "S/N",
+    "mode": "Modo",
+    "freq": "Frequência",
+    "claimed": "O indicativo é o que a mensagem declara",
+    "open": "Abrir conversa",
+    "close": "Fechar",
+    "snrValue": "{db} dB ({source})"
+  },
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "O modem não transmitiu; outro programa pode estar usando a porta de difusão do Mercury."
@@ -1385,7 +1403,6 @@
     "sent": "Enviadas",
     "heard": "Ouvidas",
     "noneSent": "Nada foi transmitido ainda.",
-    "noneHeard": "Nenhuma mensagem transmitida foi ouvida ainda.",
     "kind": {
       "message": "Mensagem",
       "cq": "Chamada CQ",

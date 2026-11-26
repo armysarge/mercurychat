@@ -82,6 +82,24 @@
       "restartModem": "Mercury says it is transmitting but the rig is not keyed after rigctld came back: restart the modem."
     }
   },
+  "latest": {
+    "title": "Latest broadcasts",
+    "empty": "No broadcasts received yet",
+    "callsign": "Callsign",
+    "date": "Date (UTC)",
+    "snr": "S/N (dB)",
+    "message": "Message",
+    "rowAria": "{callsign}, {date} UTC, S/N {snr}: {message}",
+    "detailTitle": "Broadcast from {callsign}",
+    "dateLabel": "Date",
+    "snrLabel": "S/N",
+    "mode": "Mode",
+    "freq": "Frequency",
+    "claimed": "Callsign is as stated in the message",
+    "open": "Open conversation",
+    "close": "Close",
+    "snrValue": "{db} dB ({source})"
+  },
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "The modem did not transmit; another program may be using Mercury's broadcast port."
@@ -1384,7 +1402,6 @@
     "sent": "Sent",
     "heard": "Heard",
     "noneSent": "Nothing broadcast yet.",
-    "noneHeard": "No broadcast messages heard yet.",
     "kind": {
       "message": "Message",
       "cq": "Call CQ",

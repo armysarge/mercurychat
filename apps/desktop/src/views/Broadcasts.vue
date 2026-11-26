@@ -4,7 +4,8 @@
 // were heard. A broadcast carries no delivery receipt (DSC-02).
 import { computed } from "vue";
 import { useI18n } from "vue-i18n";
-import { discovery, openPeer } from "../store";
+import LatestBroadcasts from "../components/LatestBroadcasts.vue";
+import { discovery } from "../store";
 
 const { t } = useI18n();
 type Sent = { utc: string; kind: "message" | "cq" | "beacon"; text: string };
@@ -19,13 +20,7 @@ const sent = computed<Sent[]>(() =>
     return [];
   }),
 );
-const heard = computed(() =>
-  discovery.heard
-    .filter((h) => !!h.status && !!h.lastHeardUtc)
-    .sort((a, b) => (b.lastHeardUtc ?? "").localeCompare(a.lastHeardUtc ?? "")),
-);
 const hm = (utc: string) => utc.slice(11, 16);
-const signed = (db: number) => (db > 0 ? "+" : "") + db.toFixed(1);
 </script>
 
 <template>
@@ -44,18 +39,7 @@ const signed = (db: number) => (db > 0 ? "+" : "") + db.toFixed(1);
           </li>
         </ul>
       </section>
-      <section class="card" aria-labelledby="h-heard">
-        <h2 id="h-heard" class="label">{{ t("broadcasts.heard") }}</h2>
-        <p v-if="!heard.length" class="muted small empty-heard">{{ t("broadcasts.noneHeard") }}</p>
-        <ul v-else class="list heard-list">
-          <li v-for="h in heard" :key="h.callsign" :data-callsign="h.callsign">
-            <button class="quiet who" @click="openPeer(h.callsign)"><b class="mono">{{ h.callsign }}</b></button>
-            <span class="text">“{{ h.status?.value }}”</span>
-            <span class="mono small muted">{{ hm(h.lastHeardUtc ?? "") }} UTC</span>
-            <span v-if="h.snr" class="mono small snr" :title="t('heard.snrTitle')">{{ t("heard.snr", { db: signed(h.snr.value) }) }}</span>
-          </li>
-        </ul>
-      </section>
+      <LatestBroadcasts class="card heard-messages" :title="t('broadcasts.heard')" />
     </div>
   </section>
 </template>
@@ -70,6 +54,4 @@ p { margin: 0; }
 .list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .list li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
 .text { overflow-wrap: anywhere; }
-.who { padding: 0; min-height: 0; border: 0; background: transparent; }
-.snr { color: var(--accent); font-weight: 600; }
 </style>

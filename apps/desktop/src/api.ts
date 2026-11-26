@@ -6,6 +6,7 @@ import type { ActivityEntry } from "./bindings/ActivityEntry";
 import type { AppCommand } from "./bindings/AppCommand";
 import type { AppEvent } from "./bindings/AppEvent";
 import type { BroadcastKind } from "./bindings/BroadcastKind";
+import type { HeardBroadcast } from "./bindings/HeardBroadcast";
 import type { BroadcastOutcome } from "./bindings/BroadcastOutcome";
 import type { HeardStation } from "./bindings/HeardStation";
 import type { Qso } from "./bindings/Qso";
@@ -69,6 +70,8 @@ export interface MirrorHooks {
   message?: (m: ChatMessage) => void;
   /** A heard-list row, new or changed (heard again, its SNR completed, starred). */
   heard?: (station: HeardStation) => void;
+  /** A general broadcast heard, or its S/N, which follows a moment later. */
+  broadcastHeard?: (broadcast: HeardBroadcast) => void;
   /** A line for the activity log. */
   activity?: (entry: ActivityEntry) => void;
   /** What became of a CQ or a beacon. */
@@ -220,6 +223,9 @@ export class Mirror {
       case "heard":
       case "heardUpdated":
         this.hooks.heard?.(ev.station);
+        break;
+      case "broadcastHeard":
+        this.hooks.broadcastHeard?.(ev.broadcast);
         break;
       case "activity":
         this.hooks.activity?.(ev.entry);

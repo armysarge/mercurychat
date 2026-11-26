@@ -2,7 +2,7 @@
 // The idle station home (the design canvas, M5 Task 11b), shown in Operate
 // while no conversation is open: the dial (the rig's frequency while its link
 // is up, else Mercury's), the bands of the saved frequency list, the
-// spectrum, and the CQ, Broadcast and Beacon cards. Every control goes through the same
+// spectrum, the latest broadcasts, and the CQ, Broadcast and Beacon cards. Every control goes through the same
 // commands as the station strip; nothing here transmits by itself.
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useI18n } from "vue-i18n";
@@ -12,6 +12,7 @@ import { activeProfile, app, discoveryError, modemState, sendCq } from "../store
 import BeaconControl from "./BeaconControl.vue";
 import BroadcastMessage from "./BroadcastMessage.vue";
 import FreqDigits from "./FreqDigits.vue";
+import LatestBroadcasts from "./LatestBroadcasts.vue";
 import Waterfall from "./Waterfall.vue";
 
 const { t } = useI18n();
@@ -90,6 +91,8 @@ function savedFrequencies() {
       <Waterfall :shown="true" large />
     </div>
 
+    <LatestBroadcasts class="card latest" :title="t('latest.title')" />
+
     <div class="card cq-card">
       <span class="label">{{ t("home.cqTitle") }}</span>
       <p class="muted small">{{ t("home.cqBody") }}</p>
@@ -114,7 +117,7 @@ function savedFrequencies() {
   flex: 1; min-height: 0; overflow-y: auto; padding: calc(var(--space) * 2);
   display: grid; gap: calc(var(--space) * 1.5); align-content: start;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  grid-template-areas: "dial bands" "spectrum spectrum" "cq beacon" "broadcast beacon";
+  grid-template-areas: "dial bands" "spectrum spectrum" "latest latest" "cq beacon" "broadcast beacon";
 }
 .card { border-radius: 12px; min-width: 0; }
 .dial { grid-area: dial; display: grid; gap: 6px; align-content: start; }
@@ -130,6 +133,7 @@ function savedFrequencies() {
 .band { min-width: 56px; border-radius: 999px; }
 .band.current { border-color: var(--accent); color: var(--accent); background: var(--raised); }
 .spectrum { grid-area: spectrum; }
+.latest { grid-area: latest; }
 .cq-card { grid-area: cq; display: grid; gap: var(--space); align-content: start; justify-items: start; }
 .cq-card p { margin: 0; }
 .broadcast-card { grid-area: broadcast; display: grid; gap: var(--space); align-content: start; }
@@ -137,6 +141,6 @@ function savedFrequencies() {
 .beacon-card { grid-area: beacon; min-width: 0; }
 .beacon-card :deep(.card) { border-radius: 12px; height: 100%; }
 @media (max-width: 900px) {
-  .station-home { grid-template-columns: minmax(0, 1fr); grid-template-areas: "dial" "bands" "spectrum" "cq" "broadcast" "beacon"; padding: calc(var(--space) * 1.5); }
+  .station-home { grid-template-columns: minmax(0, 1fr); grid-template-areas: "dial" "bands" "spectrum" "latest" "cq" "broadcast" "beacon"; padding: calc(var(--space) * 1.5); }
 }
 </style>

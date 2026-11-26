@@ -83,6 +83,24 @@
       "restartModem": "Mercury dit émettre mais le poste n'est pas en émission depuis le retour de rigctld : redémarrez le modem."
     }
   },
+  "latest": {
+    "title": "Dernières diffusions",
+    "empty": "Aucune diffusion reçue pour l’instant",
+    "callsign": "Indicatif",
+    "date": "Date (UTC)",
+    "snr": "S/B (dB)",
+    "message": "Message",
+    "rowAria": "{callsign}, {date} UTC, S/B {snr} : {message}",
+    "detailTitle": "Diffusion de {callsign}",
+    "dateLabel": "Date",
+    "snrLabel": "S/B",
+    "mode": "Mode",
+    "freq": "Fréquence",
+    "claimed": "L’indicatif est celui qu’annonce le message",
+    "open": "Ouvrir la conversation",
+    "close": "Fermer",
+    "snrValue": "{db} dB ({source})"
+  },
   "broadcast": {
     "notConfirmed": {
       "broadcastPortSilent": "Le modem n'a pas émis ; un autre programme utilise peut-être le port de diffusion de Mercury."
@@ -1385,7 +1403,6 @@
     "sent": "Envoyées",
     "heard": "Entendues",
     "noneSent": "Rien n'a encore été diffusé.",
-    "noneHeard": "Aucun message diffusé entendu pour l'instant.",
     "kind": {
       "message": "Message",
       "cq": "Appel CQ",

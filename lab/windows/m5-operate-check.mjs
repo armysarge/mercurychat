@@ -290,7 +290,7 @@ try {
   await until(s, "!!document.querySelector('.broadcasts .sent-list [data-kind=message]')", "the sent message on the Broadcasts page", 15000);
   const sentRow = await s.eval(text(".broadcasts .sent-list [data-kind=message]"));
   if (!sentRow.includes("QRV test 73 de the lab")) throw new Error(`B2: the sent row says "${sentRow}"`);
-  if (!(await s.eval("!!document.querySelector('.broadcasts .empty-heard, .broadcasts .heard-list')"))) throw new Error("B2: no Heard section");
+  if (!(await s.eval("!!document.querySelector('.broadcasts .latest-broadcasts')"))) throw new Error("B2: no Heard section");
   results.push(`PASS B2 Broadcasts page: Sent lists "${sentRow}"; a Heard section is there`);
   await s.eval(`${rail("Chats")}.click()`);
 
