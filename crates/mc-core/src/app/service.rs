@@ -1176,6 +1176,10 @@ impl App {
             }
             return Err(refusal);
         }
+        // A reopen that failed is asked for again, ahead of what is sent now.
+        if kind != BroadcastKind::Cq {
+            self.reopen_port_if_idle();
+        }
         let cmd = match kind {
             BroadcastKind::Cq => ModemCmd::Cq,
             BroadcastKind::Beacon | BroadcastKind::Qsy | BroadcastKind::Message => {
@@ -1271,8 +1275,6 @@ impl App {
     fn send_broadcast_message(&mut self, text: &str) -> Result<(), AppError> {
         self.qsy_owns_rig()?;
         let Some(p) = self.active_profile() else { return Err(conflict("no station is selected".into())) };
-        // A reopen that failed is asked for again, ahead of this message.
-        self.reopen_port_if_idle();
         let mode = self.listen_mode.current().unwrap_or(DATAC3);
         let payload = match broadcast_text::compose(&p.callsign, text, mode) {
             Ok(payload) => payload,
@@ -1340,8 +1342,9 @@ impl App {
             if silent {
                 self.record_silent_beacon();
             }
-            if self.broadcasts.take_unkeyed_message() {
-                self.reset_message_port();
+            // A silent beacon's port is already reset, and stays closed (above).
+            if self.broadcasts.take_unkeyed() && !silent {
+                self.reset_unkeyed_port(kind);
             }
         }
     }
@@ -1368,13 +1371,15 @@ impl App {
         false
     }
 
-    /// A message the modem never keyed must not linger on its connection to
-    /// go out later (lab F5), however its window ended. The connection is
-    /// reset and made again; the beacon schedule is not touched.
-    fn reset_message_port(&mut self) {
+    /// A beacon, QSY suggestion or message the modem never keyed must not
+    /// linger on its connection to go out later (lab F5), however its window
+    /// ended. The connection is reset and made again; the beacon schedule is
+    /// not touched.
+    fn reset_unkeyed_port(&mut self, kind: BroadcastKind) {
         let Some(port) = self.broadcast_abort.take() else { return };
         port.abort();
-        let line = self.discovery.note("broadcast", "broadcast port reset after an unconfirmed message");
+        let line =
+            self.discovery.note("broadcast", format!("broadcast port reset after an unconfirmed {}", kind.label()));
         self.emit(line);
         self.reopen_port = true;
         self.reopen_port_if_idle();

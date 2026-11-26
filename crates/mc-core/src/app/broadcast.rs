@@ -36,7 +36,7 @@ pub enum BroadcastKind {
 }
 
 impl BroadcastKind {
-    fn label(self) -> &'static str {
+    pub fn label(self) -> &'static str {
         match self {
             BroadcastKind::Cq => "CQ",
             BroadcastKind::Beacon => "beacon",
@@ -211,8 +211,9 @@ struct InFlight {
 #[derive(Debug, Default)]
 pub struct Tracker {
     in_flight: Option<InFlight>,
-    /// A message ended not confirmed with the modem never seen to key it.
-    unkeyed_message: bool,
+    /// A broadcast written to the broadcast connection ended not confirmed
+    /// with the modem never seen to key it.
+    unkeyed: bool,
 }
 
 type Outcomes = Vec<(BroadcastKind, BroadcastOutcome)>;
@@ -238,16 +239,17 @@ impl Tracker {
         });
     }
 
-    /// True once after a message ended not confirmed without the modem ever
-    /// keying: it may still be waiting where it can go out later.
-    pub fn take_unkeyed_message(&mut self) -> bool {
-        std::mem::take(&mut self.unkeyed_message)
+    /// True once after a beacon, QSY suggestion or message ended not
+    /// confirmed without the modem ever keying: it may still be waiting
+    /// where it can go out later.
+    pub fn take_unkeyed(&mut self) -> bool {
+        std::mem::take(&mut self.unkeyed)
     }
 
     fn finish(&mut self, outcome: BroadcastOutcome) -> Outcomes {
         let Some(f) = self.in_flight.take() else { return Vec::new() };
-        if f.kind == BroadcastKind::Message && !f.started && matches!(outcome, BroadcastOutcome::NotConfirmed { .. }) {
-            self.unkeyed_message = true;
+        if f.kind != BroadcastKind::Cq && !f.started && matches!(outcome, BroadcastOutcome::NotConfirmed { .. }) {
+            self.unkeyed = true;
         }
         let mut out = Vec::new();
         // Evidence of a transmission is evidence of a submission too.
@@ -397,56 +399,59 @@ mod tests {
     }
 
     #[test]
-    fn a_message_never_keyed_is_marked_however_it_ends() {
+    fn a_broadcast_never_keyed_is_marked_however_it_ends() {
         let t0 = Instant::now();
-        let sent = || {
-            let mut t = Tracker::default();
-            t.start(BroadcastKind::Message, t0);
-            t.submitted(BroadcastKind::Message);
-            t
-        };
-        // The window closes; the modem leaves idle first.
-        let mut t = sent();
-        t.expired(t0 + TRANSMIT_WINDOW);
-        assert!(t.take_unkeyed_message());
-        assert!(!t.take_unkeyed_message(), "taken once");
-        let mut t = sent();
-        t.state(ModemState::Negotiating);
-        assert!(t.take_unkeyed_message());
-        // The modem answers after leaving idle, or never answers at all.
-        let mut t = Tracker::default();
-        t.start(BroadcastKind::Message, t0);
-        t.state(ModemState::Calling);
-        t.submitted(BroadcastKind::Message);
-        assert!(t.take_unkeyed_message());
-        let mut t = Tracker::default();
-        t.start(BroadcastKind::Message, t0);
-        t.unconfirmed(BroadcastKind::Message);
-        assert!(t.take_unkeyed_message());
-        let mut t = Tracker::default();
-        t.start(BroadcastKind::Message, t0);
-        t.expired(t0 + TRANSMIT_WINDOW);
-        assert!(t.take_unkeyed_message());
+        // A beacon, a QSY suggestion and a message all use the broadcast connection.
+        for kind in [BroadcastKind::Beacon, BroadcastKind::Qsy, BroadcastKind::Message] {
+            let started = || {
+                let mut t = Tracker::default();
+                t.start(kind, t0);
+                t
+            };
+            let sent = || {
+                let mut t = started();
+                t.submitted(kind);
+                t
+            };
+            // The window closes (the modem left idle first, or it did not).
+            let mut t = sent();
+            t.expired(t0 + TRANSMIT_WINDOW);
+            assert!(t.take_unkeyed(), "{kind:?}");
+            assert!(!t.take_unkeyed(), "{kind:?}: taken once");
+            let mut t = sent();
+            t.state(ModemState::Negotiating);
+            assert!(t.take_unkeyed(), "{kind:?}");
+            // The modem answers after leaving idle, or never answers at all.
+            let mut t = started();
+            t.state(ModemState::Calling);
+            t.submitted(kind);
+            assert!(t.take_unkeyed(), "{kind:?}");
+            let mut t = started();
+            t.unconfirmed(kind);
+            assert!(t.take_unkeyed(), "{kind:?}");
+            let mut t = started();
+            t.expired(t0 + TRANSMIT_WINDOW);
+            assert!(t.take_unkeyed(), "{kind:?}");
 
-        // Keyed (even if not seen through), transmitted or refused: not marked.
-        let mut t = sent();
-        t.observe(&Observation::Ptt(true));
-        t.state(ModemState::Negotiating);
-        assert!(!t.take_unkeyed_message());
-        let mut t = sent();
-        t.observe(&Observation::Ptt(true));
-        t.observe(&Observation::Ptt(false));
-        assert!(!t.take_unkeyed_message());
+            // Keyed (even if not seen through), transmitted or refused: not marked.
+            let mut t = sent();
+            t.observe(&Observation::Ptt(true));
+            t.state(ModemState::Negotiating);
+            assert!(!t.take_unkeyed(), "{kind:?}");
+            let mut t = sent();
+            t.observe(&Observation::Ptt(true));
+            t.observe(&Observation::Ptt(false));
+            assert!(!t.take_unkeyed(), "{kind:?}");
+            let mut t = started();
+            t.refused(kind, "not sent: x".into());
+            assert!(!t.take_unkeyed(), "{kind:?}");
+        }
+        // A CQ is not written to the broadcast connection at all.
         let mut t = Tracker::default();
-        t.start(BroadcastKind::Message, t0);
-        t.refused(BroadcastKind::Message, "not sent: x".into());
-        assert!(!t.take_unkeyed_message());
-        // A beacon keeps its own rules.
-        let mut t = Tracker::default();
-        t.start(BroadcastKind::Beacon, t0);
-        t.submitted(BroadcastKind::Beacon);
+        t.start(BroadcastKind::Cq, t0);
+        t.submitted(BroadcastKind::Cq);
         t.state(ModemState::Negotiating);
-        assert!(!t.take_unkeyed_message());
+        assert!(!t.take_unkeyed());
     }
 
     #[test]

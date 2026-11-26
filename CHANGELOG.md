@@ -7,6 +7,7 @@
 - **S/N** comes from Mercury's monitor report, which names no sender, so it is matched to a message by arrival time. It is left blank (—) when that is not certain, for example when two broadcasts arrive within a couple of seconds. A wrong match is still possible if a report is lost.
 - The callsign shown is what the message says; nothing verifies it.
 - The station database gains a table (migration 11), backed up first as usual. Broadcasts are kept 30 days, like heard stations.
+- **A broadcast the modem never keyed can no longer go out later.** If a call or a session began before a beacon, a QSY suggestion or a message was transmitted, it could stay on the connection to Mercury and be sent afterwards. The connection is now reset in that case and opened again once the modem is idle. Beacon schedule and settings are untouched.
 - Not tested on the air.
 
 ## 0.11 — 24 November 2026 (M5 packaging and beta, 0.5.0-beta.1)
