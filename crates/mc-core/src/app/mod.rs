@@ -4,6 +4,7 @@
 mod audio;
 mod beacon;
 mod broadcast;
+mod broadcast_text;
 pub mod builtin;
 pub mod catradios;
 mod chat;
