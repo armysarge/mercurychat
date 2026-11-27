@@ -52,7 +52,7 @@ pub struct BuiltInRun {
 
 #[derive(Debug, Clone)]
 pub struct BuiltInStart {
-    /// The verified Mercury program (`Bundle::verify`).
+    /// The verified Mercury program (`Bundle::verify_program`).
     pub mercury: PathBuf,
     /// The profile's Mercury folder: `mercury.ini` and `mercury.log`.
     pub dir: PathBuf,

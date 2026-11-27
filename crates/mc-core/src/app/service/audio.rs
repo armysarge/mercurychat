@@ -43,8 +43,10 @@ impl App {
         let (slot, probing) = (self.audio.incoming.clone(), self.audio.probing.clone());
         tokio::spawn(async move {
             let found = async {
-                let exe =
-                    tokio::task::spawn_blocking(move || bundle.verify(crate::bundle::MERCURY_EXE)).await.ok()?.ok()?;
+                let exe = tokio::task::spawn_blocking(move || bundle.verify_program(crate::bundle::MERCURY_EXE))
+                    .await
+                    .ok()?
+                    .ok()?;
                 let mut cmd = mercury_adapter::child::command(&exe);
                 cmd.args(["-z", "-x", PREFERRED_SYSTEM]).stdout(std::process::Stdio::piped());
                 let out = tokio::time::timeout(Duration::from_secs(10), cmd.output()).await.ok()?.ok()?;

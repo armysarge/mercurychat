@@ -1,6 +1,6 @@
-//! The built-in modem's shipped programs (M5 design G4): MercuryChat checks a
-//! program's SHA-256 against the manifest compiled into the app before it
-//! starts it, and refuses a changed, missing or unlisted one. The versions
+//! The built-in modem's shipped programs (M5 design G4): before it starts one,
+//! MercuryChat checks every shipped file's SHA-256 against the manifest
+//! compiled into the app, and refuses a changed, missing or unlisted one. The versions
 //! shown next to "Mercury" and "Hamlib" in the window come from the same
 //! build (owner, 23 Nov 2026).
 //!
@@ -37,11 +37,16 @@ pub enum BundleError {
 
 impl std::fmt::Display for BundleError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let what = |name: &str| if name.starts_with("rigctld") { "Hamlib's rigctld" } else { "Mercury" };
+        let program = |name: &str| match name.strip_suffix(".exe").unwrap_or(name) {
+            "mercury" => Some("Mercury"),
+            "rigctld" => Some("Hamlib's rigctld"),
+            _ => None,
+        };
         match self {
-            BundleError::Changed(n) => {
-                write!(f, "This copy of {} has been changed. Reinstall MercuryChat.", what(n))
-            }
+            BundleError::Changed(n) => match program(n) {
+                Some(p) => write!(f, "This copy of {p} has been changed. Reinstall MercuryChat."),
+                None => write!(f, "{n} in MercuryChat's modem folder has been changed. Reinstall MercuryChat."),
+            },
             BundleError::Missing(n) => {
                 write!(f, "{n} is missing from MercuryChat's modem folder. Reinstall MercuryChat.")
             }
@@ -96,6 +101,16 @@ impl Bundle {
         let got = sha256_file(&path).map_err(|_| BundleError::Missing(rel.to_string()))?;
         if got != want {
             return Err(BundleError::Changed(rel.to_string()));
+        }
+        Ok(path)
+    }
+
+    /// The program `rel`, ready to be started: it and every other shipped
+    /// file match the manifest, since it loads the libraries beside it.
+    pub fn verify_program(&self, rel: &str) -> Result<PathBuf, BundleError> {
+        let path = self.verify(rel)?;
+        for name in self.manifest_names().filter(|n| *n != rel) {
+            self.verify(name)?;
         }
         Ok(path)
     }
@@ -218,6 +233,31 @@ mod tests {
         assert_eq!(b.verify_all(), Ok(()));
         std::fs::write(d.path().join("rigctld"), b"changed").unwrap();
         assert_eq!(b.verify_all(), Err(BundleError::Changed("rigctld".into())));
+    }
+
+    /// L1: a program loads the libraries beside it, so none of them may be
+    /// unchecked when it starts.
+    #[test]
+    fn a_program_starts_only_if_every_shipped_file_is_intact() {
+        let (d, m) = folder();
+        std::fs::write(d.path().join("libhamlib-4.dll"), b"library").unwrap();
+        let sha = sha256_file(&d.path().join("libhamlib-4.dll")).unwrap();
+        let m = leak(format!(
+            "{m}{sha}  libhamlib-4.dll
+"
+        ));
+        let b = Bundle::for_tests(d.path().into(), m, BUILD);
+        assert_eq!(b.verify_program("mercury").unwrap(), d.path().join("mercury"));
+        assert_eq!(b.verify_program("other"), Err(BundleError::NotInManifest("other".into())));
+        std::fs::write(d.path().join("libhamlib-4.dll"), b"swapped").unwrap();
+        let e = b.verify_program("mercury").unwrap_err();
+        assert_eq!(e, BundleError::Changed("libhamlib-4.dll".into()));
+        assert_eq!(
+            e.to_string(),
+            "libhamlib-4.dll in MercuryChat's modem folder has been changed. Reinstall MercuryChat."
+        );
+        std::fs::remove_file(d.path().join("libhamlib-4.dll")).unwrap();
+        assert_eq!(b.verify_program("rigctld"), Err(BundleError::Missing("libhamlib-4.dll".into())));
     }
 
     #[test]

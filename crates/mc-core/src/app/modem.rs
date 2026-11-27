@@ -678,7 +678,7 @@ async fn start_builtin(
 ) -> Option<Keeper> {
     r.send(ReportKind::BuiltIn(Some(ModemDetail::StartingMercury))).await;
     r.state(ModemState::Attaching, Some("Starting Mercury…".into())).await;
-    let mercury = match b.bundle.verify(crate::bundle::MERCURY_EXE) {
+    let mercury = match b.bundle.verify_program(crate::bundle::MERCURY_EXE) {
         Ok(p) => p,
         Err(e) => {
             mercury_stopped(r, e.to_string()).await;

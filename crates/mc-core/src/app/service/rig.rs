@@ -504,7 +504,7 @@ impl App {
                     let listen = r.listen();
                     // A built-in profile: the bundled rigctld, checked, or nothing.
                     let program = match &r.builtin {
-                        Some(b) => match b.bundle.as_ref().map(|b| b.verify(crate::bundle::RIGCTLD_EXE)) {
+                        Some(b) => match b.bundle.as_ref().map(|b| b.verify_program(crate::bundle::RIGCTLD_EXE)) {
                             Some(Ok(exe)) => Ok(Some(exe)),
                             Some(Err(e)) => Err(e.to_string()),
                             None => Err("the built-in rigctld is not part of this build".to_string()),
@@ -614,7 +614,7 @@ impl App {
             .builtin
             .as_ref()
             .and_then(|b| b.bundle.as_ref())
-            .and_then(|b| b.verify(crate::bundle::RIGCTLD_EXE).ok());
+            .and_then(|b| b.verify_program(crate::bundle::RIGCTLD_EXE).ok());
         let Some(exe) = bundled.or_else(|| self.rig.rigctld_program(&hamlib_dir)) else {
             let _ = reply.send(Ok(CommandOk::HamlibModels { models: vec![], found: false }));
             return;
