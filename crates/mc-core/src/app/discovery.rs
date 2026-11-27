@@ -371,7 +371,7 @@ pub fn heard_list(store: &Store, offsets: &Offsets) -> Result<Vec<HeardStation>,
 /// One callsign as the heard list shows it. A callsign neither heard nor a
 /// favourite comes back with `count` 0 and `favourite` false: not listed.
 pub fn heard_station(store: &Store, callsign: &str, offsets: &Offsets) -> Result<HeardStation, StorageError> {
-    if let Some(r) = store.heard_summary()?.into_iter().find(|r| r.callsign == callsign) {
+    if let Some(r) = store.heard_summary_for(callsign)? {
         return Ok(station(r, offsets));
     }
     let favourite = store.favourites()?.iter().any(|c| c == callsign);
@@ -758,7 +758,7 @@ impl Discovery {
     }
 
     /// Drop heard observations and broadcasts past retention (on opening a
-    /// station store).
+    /// station store, then once a day while it stays open).
     pub fn purge(&mut self, store: &mut Store) -> Vec<AppEvent> {
         let cutoff = (chrono::Utc::now() - chrono::Duration::days(HEARD_RETENTION_DAYS))
             .format("%Y-%m-%dT%H:%M:%S%.3fZ")

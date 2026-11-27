@@ -225,3 +225,33 @@ fn a_new_frequency_replaces_the_whole_reading() {
         (Some(7_074_000), Some("operator"), None, None)
     );
 }
+
+/// O1: refreshing one station must give exactly the heard list's own row for
+/// it, without building the whole list.
+#[test]
+fn one_callsign_summary_is_the_lists_own_row() {
+    let mut s = Store::open_in_memory().unwrap();
+    for (call, utc, kind) in [
+        ("ZS6ABC", "2026-01-01T10:00:00.000Z", "cq"),
+        ("ZS6ABC", "2026-01-03T10:00:00.000Z", "beacon"),
+        ("ZS6ABC", "2026-01-02T10:00:00.000Z", "session"),
+        // Two at the same instant: the later record wins.
+        ("ZS6TIE", "2026-01-05T10:00:00.000Z", "cq"),
+        ("ZS6TIE", "2026-01-05T10:00:00.000Z", "beacon"),
+        ("ZS6FAV", "2026-01-04T10:00:00.000Z", "cq"),
+    ] {
+        s.record_heard(&heard(call, utc, kind)).unwrap();
+    }
+    s.set_favourite("ZS6FAV", true).unwrap();
+    s.set_favourite("ZS6NEVER", true).unwrap();
+    let list = s.heard_summary().unwrap();
+    assert_eq!(list.len(), 3);
+    for row in list {
+        assert_eq!(s.heard_summary_for(&row.callsign).unwrap(), Some(row.clone()), "{}", row.callsign);
+    }
+    let abc = s.heard_summary_for("ZS6ABC").unwrap().unwrap();
+    assert_eq!((abc.kind.as_str(), abc.count), ("beacon", 3));
+    assert_eq!(s.heard_summary_for("ZS6TIE").unwrap().unwrap().kind, "beacon");
+    assert_eq!(s.heard_summary_for("ZS6NEVER").unwrap(), None, "a favourite never heard has no observation");
+    assert_eq!(s.heard_summary_for("ZS6NOBODY").unwrap(), None);
+}
