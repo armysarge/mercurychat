@@ -205,6 +205,20 @@ impl Store {
         Ok(rows)
     }
 
+    /// Keep the newest `keep` incoming offers that were refused without
+    /// asking the operator, and drop the older ones. Returns how many went.
+    pub fn transfers_prune_refused(&mut self, keep: u32) -> Result<usize> {
+        const REFUSED: &str = "direction = 'in' AND state = 'rejected'
+             AND detail IN ('busy', 'too large', 'no folder', 'write failed', 'no space')";
+        Ok(self.conn.execute(
+            &format!(
+                "DELETE FROM transfers WHERE {REFUSED} AND rowid_pk NOT IN
+                   (SELECT rowid_pk FROM transfers WHERE {REFUSED} ORDER BY rowid_pk DESC LIMIT ?1)"
+            ),
+            params![keep],
+        )?)
+    }
+
     /// On start-up: nothing mid-flight survives a restart (no resume, FIL-05).
     pub fn transfers_interrupt_unfinished(&mut self) -> Result<u64> {
         let n = self.conn.execute(

@@ -282,6 +282,22 @@ async fn oversize_declined_before_operator() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn refused_offers_do_not_pile_up() {
+    let dir = tempfile::tempdir().unwrap();
+    // No room: B refuses every offer without asking its operator.
+    let (_net, mut a, b) = pair(dir.path(), &|c| c.free_space = FreeSpace::fixed(10)).await;
+    let file = prepared(&a, "notes.txt", &text(40));
+    for _ in 0..23 {
+        let id = ObjectId::random();
+        a.send(SessionCommand::SendFile { id, prepared: file.clone() }).await;
+        a.next(10, "FileRejected", |e| matches!(e, SessionEvent::FileRejected { id: got, .. } if *got == id)).await;
+    }
+    let kept = b.store().transfers(100).unwrap();
+    assert_eq!(kept.len(), 20);
+    assert!(kept.iter().all(|r| r.state == TransferState::Rejected));
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn traversal_name_stays_in_folder() {
     let dir = tempfile::tempdir().unwrap();
     let (_net, a, mut b) = pair(dir.path(), &|_| {}).await;

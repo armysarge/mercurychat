@@ -86,3 +86,25 @@ fn interrupt_unfinished_leaves_final_rows() {
         }
     }
 }
+
+/// L4: a station that keeps offering files this one refuses must not grow the
+/// list without end. What the operator decided, and everything else, stays.
+#[test]
+fn only_the_newest_refused_offers_are_kept() {
+    let mut s = Store::open_in_memory().unwrap();
+    let add = |s: &mut Store, id: u8, dir, state, reason: Option<&str>| {
+        s.transfer_upsert(&TransferRow { reason: reason.map(Into::into), ..row(id, dir, state) }).unwrap();
+    };
+    use TransferState::{Complete, Rejected};
+    add(&mut s, 1, Direction::In, Complete, None);
+    add(&mut s, 2, Direction::In, Rejected, Some("declined"));
+    add(&mut s, 3, Direction::In, Rejected, Some("timeout"));
+    add(&mut s, 4, Direction::Out, Rejected, Some("busy"));
+    for (id, why) in (10..).zip(["busy", "too large", "no folder", "write failed", "no space", "busy", "too large"]) {
+        add(&mut s, id, Direction::In, Rejected, Some(why));
+    }
+    assert_eq!(s.transfers_prune_refused(3).unwrap(), 4);
+    let mut ids: Vec<u8> = s.transfers(100).unwrap().iter().map(|r| r.id[0]).collect();
+    ids.sort_unstable();
+    assert_eq!(ids, [1, 2, 3, 4, 14, 15, 16]);
+}

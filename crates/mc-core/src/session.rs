@@ -7,7 +7,7 @@
 //! `BUFFER` is seen to drain, so chat is not stuck behind a large backlog.
 
 use crate::files::pace::Pacer;
-use crate::files::{display_name, sanitize_name, unique_target, unpack_zstd, Prepared, UnpackError};
+use crate::files::{display_name, publish, sanitize_name, unpack_zstd, Prepared, UnpackError};
 use mc_storage::{Direction, OutState, Store, Stored, TransferRow, TransferState};
 use mch_protocol::payload::*;
 use mch_protocol::{encode, Decoder, Frame, FrameType, ObjectId, ProtocolError};
@@ -942,6 +942,7 @@ impl<'a> Session<'a> {
         if let Some(code) = refusal {
             self.send_reject(f.id, code);
             let _ = self.store.transfer_set_state(Direction::In, &f.id.0, TransferState::Rejected, 0, Some(code));
+            let _ = self.store.transfers_prune_refused(REFUSED_OFFERS_KEPT);
             // The operator here sees what was declined for them, and why.
             self.emit(SessionEvent::FileRejected { id: f.id, reason: code.into() });
             return Ok(());
@@ -1137,19 +1138,25 @@ impl<'a> Session<'a> {
             self.emit(SessionEvent::FileFailed { id, reason: format!("{code}: {why}") });
             return;
         }
-        let target = unique_target(&self.cfg.files_dir, &sanitize_name(&inf.name));
-        if let Err(e) = tokio::fs::rename(&inf.out, &target).await {
-            let _ = tokio::fs::remove_file(&inf.out).await;
-            let _ = self.store.transfer_set_state(
-                Direction::In,
-                &id.0,
-                TransferState::Failed,
-                inf.received,
-                Some("publish"),
-            );
-            self.emit(SessionEvent::FileFailed { id, reason: format!("publish failed: {e}") });
-            return;
-        }
+        let (part, dir, name) = (inf.out.clone(), self.cfg.files_dir.clone(), sanitize_name(&inf.name));
+        let published = tokio::task::spawn_blocking(move || publish(&part, &dir, &name))
+            .await
+            .unwrap_or_else(|e| Err(std::io::Error::other(e)));
+        let target = match published {
+            Ok(target) => target,
+            Err(e) => {
+                let _ = tokio::fs::remove_file(&inf.out).await;
+                let _ = self.store.transfer_set_state(
+                    Direction::In,
+                    &id.0,
+                    TransferState::Failed,
+                    inf.received,
+                    Some("publish"),
+                );
+                self.emit(SessionEvent::FileFailed { id, reason: format!("publish failed: {e}") });
+                return;
+            }
+        };
         // The rename itself on disk too, before completion is recorded.
         #[cfg(unix)]
         if let Ok(d) = std::fs::File::open(&self.cfg.files_dir) {
@@ -1167,6 +1174,10 @@ impl<'a> Session<'a> {
         self.emit(SessionEvent::FileReceived { id, path: target, sha256: inf.sha256 });
     }
 }
+
+/// How many automatically refused offers stay listed: the sender chooses how
+/// many it makes.
+const REFUSED_OFFERS_KEPT: u32 = 20;
 
 /// Whether a file can be created in `dir` (made if missing): checked at the
 /// offer, so an unwritable folder is found before any airtime is spent.
