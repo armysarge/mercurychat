@@ -655,3 +655,45 @@ async fn broadcast_port_reopens_after_recovery() {
     assert!(lines.iter().any(|t| t.contains("reopened")), "{lines:?}");
     assert!(lines.iter().all(|t| !t.contains("another client")), "no guessed causes: {lines:?}");
 }
+
+/// O2: a long-running app keeps to the 30 days, not only when a station opens.
+#[tokio::test(flavor = "multi_thread")]
+async fn heard_older_than_30_days_is_purged_while_running() {
+    let net = FakeNet::start().await;
+    let dir = tempfile::tempdir().unwrap();
+    let every = Some(Duration::from_millis(200));
+    let h = spawn_app(Store::open_in_memory().unwrap(), AppOptions { purge_every: every, ..opts(dir.path()) });
+    let id = save(&h, existing(&net)).await;
+    let mut rx = h.subscribe();
+    select(&h, &mut rx, &id).await;
+    // Recorded after the station opened, so only the running purge can see it.
+    let ago =
+        |days: i64| (chrono::Utc::now() - chrono::Duration::days(days)).format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
+    let mut store = Store::open(&station_db(dir.path(), &id)).unwrap();
+    for (call, days) in [("ZS6OLD", 31), ("ZS6NEW", 29)] {
+        let row = HeardRow {
+            id: 0,
+            callsign: call.into(),
+            observed_utc: ago(days),
+            kind: "cq".into(),
+            bandwidth: None,
+            grid: None,
+            caps: None,
+            snr_db: None,
+            snr_source: None,
+            freq_hz: None,
+            freq_source: None,
+            freq_age_ms: None,
+        };
+        store.record_heard(&row).unwrap();
+    }
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let calls: Vec<String> = heard(&h).await.into_iter().map(|s| s.callsign).collect();
+        if calls == ["ZS6NEW"] {
+            break;
+        }
+        assert!(Instant::now() < deadline, "still listed: {calls:?}");
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+}

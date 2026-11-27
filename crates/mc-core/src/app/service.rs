@@ -103,6 +103,9 @@ pub struct AppOptions {
     pub bundle: Option<crate::bundle::Bundle>,
     /// The app's log folder (`{data root}/logs`), for the diagnostics file.
     pub logs_dir: Option<PathBuf>,
+    /// How often old heard records are removed while the app runs (tests);
+    /// `None` is once a day.
+    pub purge_every: Option<std::time::Duration>,
 }
 
 impl Default for AppOptions {
@@ -124,9 +127,13 @@ impl Default for AppOptions {
             qsy_windows: None,
             bundle: None,
             logs_dir: None,
+            purge_every: None,
         }
     }
 }
+
+/// How often a running app removes heard records past retention.
+const PURGE_EVERY: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
 
 type Reply<T> = oneshot::Sender<Result<T, AppError>>;
 
@@ -212,6 +219,8 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
         chat: None,
         sim_root: opts.sim_root,
         logs_dir: opts.logs_dir,
+        purge_every: opts.purge_every.unwrap_or(PURGE_EVERY),
+        purge_next: tokio::time::Instant::now() + opts.purge_every.unwrap_or(PURGE_EVERY),
         modem_opts: ModemOptions {
             stations_root,
             locks_dir: opts.locks_dir,
@@ -269,6 +278,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
             let telemetry_wake = app.telemetry.wake();
             let qsy_wake = app.qsy_wake();
             let snr_wake = app.discovery.snr_wake();
+            let purge_wake = app.purge_next;
             tokio::select! {
                 req = rx.recv() => {
                     let Some(req) = req else { break };
@@ -371,6 +381,7 @@ pub fn spawn_app(store: Store, opts: AppOptions) -> AppHandle {
                     let events = app.discovery.settle_snr(app.chat.as_mut(), tokio::time::Instant::now());
                     app.emit_all(events);
                 }
+                _ = tokio::time::sleep_until(purge_wake) => app.purge_due(),
                 // A QSY window ends or a re-call is due: handled just below.
                 _ = tokio::time::sleep_until(qsy_wake.unwrap_or_else(tokio::time::Instant::now)), if qsy_wake.is_some() => {}
             }
@@ -396,6 +407,9 @@ struct App {
     builtin_audio: Option<Arc<std::sync::atomic::AtomicBool>>,
     bundle: Option<crate::bundle::Bundle>,
     logs_dir: Option<PathBuf>,
+    /// When old heard records are next removed, and how often.
+    purge_next: tokio::time::Instant,
+    purge_every: std::time::Duration,
     /// The negotiated session, as the modem task last reported it.
     session: Option<SessionInfo>,
     /// The selected station's own store (its outbox, history and drafts),
@@ -1477,6 +1491,15 @@ impl App {
             if let Some(t) = &self.task {
                 t.send(ModemCmd::Submit { peer: peer.to_string(), id });
             }
+        }
+    }
+
+    /// Keep the open station's heard records to the retention window.
+    fn purge_due(&mut self) {
+        self.purge_next = tokio::time::Instant::now() + self.purge_every;
+        if let Some(store) = self.chat.as_mut() {
+            let purged = self.discovery.purge(store);
+            self.emit_all(purged);
         }
     }
 
