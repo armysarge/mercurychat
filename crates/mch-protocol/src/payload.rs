@@ -199,9 +199,12 @@ pub struct Reason {
 
 impl Reason {
     pub fn new(code: &str, text: &str) -> Self {
-        let mut t = text.to_string();
-        t.truncate(160);
-        Reason { code: code.into(), text: t }
+        // At most 160 bytes, never splitting a character.
+        let mut end = text.len().min(160);
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        Reason { code: code.into(), text: text[..end].to_string() }
     }
     pub fn to_frame(&self, ftype: FrameType, id: ObjectId) -> Result<Frame, ProtocolError> {
         check_len("code", &self.code, 32)?;
@@ -638,5 +641,17 @@ mod tests {
         assert!(offer(99).validate().is_ok());
         assert!(offer(100).validate().is_err());
         assert!(offer(u64::MAX - 10).validate().is_err());
+    }
+
+    /// L2: the 160-byte cut must not split a character.
+    #[test]
+    fn a_long_reason_is_cut_between_characters() {
+        for (lead, ch) in [("a", "é"), ("", "€"), ("a", "€"), ("ab", "🙂"), ("", "x")] {
+            let text = format!("{lead}{}", ch.repeat(100));
+            let r = Reason::new("code", &text);
+            assert!(r.text.len() <= 160 && r.text.len() + ch.len() > 160.min(text.len()), "{} bytes", r.text.len());
+            assert!(text.starts_with(&r.text));
+        }
+        assert_eq!(Reason::new("code", "short é").text, "short é");
     }
 }
