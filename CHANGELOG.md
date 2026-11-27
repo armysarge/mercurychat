@@ -1,5 +1,14 @@
 # Planning changes
 
+## Unreleased: pre-beta audit fixes
+
+- **Heard list:** updating one station no longer sums up every station, and records older than 30 days are now removed once a day while the app runs, not only when a station opens.
+- **Built-in modem:** every shipped file, libraries included, is checked before Mercury or rigctld is started.
+- **Files:** a received file can no longer be saved over one that appeared under the same name at the last moment. Only the newest 20 automatically refused offers stay listed.
+- **A crash was removed:** a long error text in another script could stop the app while it was being shortened.
+- **GitHub builds** have read-only access and run actions pinned to exact commits.
+- Still open: two moderate `npm audit` warnings in a development tool.
+
 ## Unreleased: latest broadcasts
 
 - **Latest broadcasts on Operate:** the idle screen lists the last 10 general broadcasts heard, with callsign, date and time (UTC), S/N and the start of the message. A row opens the full details. CQ calls and beacons stay in the Heard list. The Broadcasts page shows the same list as its "Heard" column.
