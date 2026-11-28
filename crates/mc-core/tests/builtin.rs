@@ -99,6 +99,20 @@ async fn answers(port: u16) -> bool {
     tokio::time::timeout(Duration::from_secs(2), read).await.unwrap_or(false)
 }
 
+/// [`answers`], allowing a few seconds. Like Mercury, the fake serves one
+/// control client and closes a newcomer at once, and the supervisor's own
+/// start-up probe may not be let go of yet.
+async fn answers_soon(port: u16) -> bool {
+    let end = Instant::now() + Duration::from_secs(5);
+    while !answers(port).await {
+        if Instant::now() >= end {
+            return false;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    true
+}
+
 async fn closed_within(port: u16, limit: Duration) -> bool {
     let end = Instant::now() + limit;
     while Instant::now() < end {
@@ -201,7 +215,7 @@ async fn starts_and_answers() {
     let d = tempfile::tempdir().unwrap();
     let ports = fresh_ports();
     let sup = Supervisor::start(start_cfg(d.path(), ports)).await.unwrap();
-    assert!(answers(ports.control).await);
+    assert!(answers_soon(ports.control).await);
     let log = std::fs::read_to_string(d.path().join("mercury.log")).unwrap();
     assert!(log.contains("-x null"), "audio null on first start: {log}");
     assert!(log.contains(&format!("-C {}", d.path().join("mercury.ini").display())), "{log}");
@@ -304,7 +318,7 @@ async fn starts_from_a_folder_with_spaces_and_accents() {
     let d = root.path().join("José Smith").join("mercury");
     let ports = fresh_ports();
     let sup = Supervisor::start(start_cfg(&d, ports)).await.unwrap();
-    assert!(answers(ports.control).await);
+    assert!(answers_soon(ports.control).await);
     assert!(d.join("mercury.ini").is_file());
     assert!(d.join("mercury.log").is_file());
     sup.stop().await;
