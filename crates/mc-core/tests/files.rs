@@ -281,6 +281,38 @@ async fn oversize_declined_before_operator() {
     b.none(1, |e| matches!(e, SessionEvent::FileOffered { .. })).await;
 }
 
+/// A file the operator accepted stays listed, even when it could not be saved
+/// and many automatic refusals follow.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_accepted_file_that_could_not_be_saved_stays_listed() {
+    let dir = tempfile::tempdir().unwrap();
+    let not_a_folder = dir.path().join("not-a-folder");
+    std::fs::write(&not_a_folder, b"x").unwrap();
+    let (_net, mut a, mut b) = pair(dir.path(), &move |c| {
+        // Room for the small file only (above the 1 MiB B keeps spare), so B
+        // refuses every larger offer without asking its operator.
+        c.free_space = FreeSpace::fixed((1 << 20) + 500);
+        c.tmp_dir = Some(not_a_folder.clone());
+    })
+    .await;
+    let small = prepared(&a, "small.txt", &text(1));
+    assert!(small.size + small.wire_size <= 500);
+    let accepted = ObjectId::random();
+    a.send(SessionCommand::SendFile { id: accepted, prepared: small }).await;
+    b.next(10, "FileOffered", |e| matches!(e, SessionEvent::FileOffered { id, .. } if *id == accepted)).await;
+    b.send(SessionCommand::AcceptFile { id: accepted }).await;
+    a.next(10, "FileRejected", |e| matches!(e, SessionEvent::FileRejected { id, .. } if *id == accepted)).await;
+    let big = prepared(&a, "notes.txt", &text(40));
+    assert!(big.size + big.wire_size > 500);
+    for _ in 0..23 {
+        let id = ObjectId::random();
+        a.send(SessionCommand::SendFile { id, prepared: big.clone() }).await;
+        a.next(10, "FileRejected", |e| matches!(e, SessionEvent::FileRejected { id: got, .. } if *got == id)).await;
+    }
+    assert_eq!(b.row(Direction::In, accepted).state, TransferState::Rejected);
+    assert_eq!(b.store().transfers(100).unwrap().len(), 21);
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn refused_offers_do_not_pile_up() {
     let dir = tempfile::tempdir().unwrap();

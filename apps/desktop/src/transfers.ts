@@ -88,6 +88,7 @@ const REASONS: Record<string, string> = {
   "no space": "noSpace",
   busy: "busy",
   "write failed": "writeFailed",
+  "accept failed": "writeFailed",
   user: "user",
   peer: "peer",
   link: "link",

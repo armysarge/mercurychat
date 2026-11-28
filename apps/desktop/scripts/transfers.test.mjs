@@ -79,6 +79,7 @@ test("helpers", async () => {
   assert.ok(isPhotoName("IMG_001.JPG") && isPhotoName("scan.png") && isPhotoName("a.webp") && !isPhotoName("notes.txt"));
   assert.equal(reasonKey("too large"), "files.reason.tooLarge");
   assert.equal(reasonKey("declined"), "files.reason.declined");
+  assert.equal(reasonKey("accept failed"), "files.reason.writeFailed", "accepted, then could not be saved");
   assert.equal(reasonKey("hash_mismatch: declared ab got cd"), null, "an engine's own words are shown as they are");
   assert.equal(offerAirtimeS(1900, "BW500"), 110, "19 B/s nominal plus framing");
   assert.equal(offerAirtimeS(1150, "BW2300"), 11);

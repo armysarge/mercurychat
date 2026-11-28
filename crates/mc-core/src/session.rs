@@ -1003,18 +1003,25 @@ impl<'a> Session<'a> {
             }
             Err(e) => {
                 tracing::warn!("cannot create the file's temp file: {e}");
-                self.reject_in_file(id, "write failed").await;
+                // Recorded apart from an offer refused as "write failed":
+                // this one was accepted, so its record is never pruned.
+                self.reject_in_file_as(id, "write failed", "accept failed").await;
             }
         }
     }
 
     /// Our operator declined, the window ran out, or the file can't be stored.
     async fn reject_in_file(&mut self, id: ObjectId, code: &str) {
+        self.reject_in_file_as(id, code, code).await;
+    }
+
+    /// [`Self::reject_in_file`], with `detail` kept in this station's record.
+    async fn reject_in_file_as(&mut self, id: ObjectId, code: &str, detail: &str) {
         if let Some(inf) = self.in_file.take_if(|i| i.id == id && !i.verifying) {
             drop(inf.file);
             let _ = tokio::fs::remove_file(&inf.wire).await;
             self.send_reject(id, code);
-            let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Rejected, 0, Some(code));
+            let _ = self.store.transfer_set_state(Direction::In, &id.0, TransferState::Rejected, 0, Some(detail));
             self.emit(SessionEvent::FileRejected { id, reason: code.into() });
         }
         self.start_next_file().await;
