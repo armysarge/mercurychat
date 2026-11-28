@@ -77,27 +77,63 @@ fn candidates<'a>(dir: &'a Path, name: &'a str) -> impl Iterator<Item = PathBuf>
     std::iter::once(dir.join(name)).chain((1u32..).map(move |n| dir.join(format!("{stem} ({n}){ext}"))))
 }
 
-/// Move `part` into `dir` under the first free name, never over anything: the
-/// name is claimed by creating it (which fails if it exists, however recently
-/// it appeared), and only that empty file of ours is replaced.
+/// Move `part` into `dir` under the first free name, never over anything.
 pub fn publish(part: &Path, dir: &Path, name: &str) -> std::io::Result<PathBuf> {
+    publish_with(part, dir, name, |from, to| std::fs::hard_link(from, to))
+}
+
+/// [`publish`] with the linking call given (tests). A hard link gives the whole
+/// file its name in one step and fails if the name is taken, however recently.
+/// Where the folder cannot hold links (FAT, some network folders), the name is
+/// claimed by creating it, and only that empty file of ours is replaced.
+fn publish_with(
+    part: &Path,
+    dir: &Path,
+    name: &str,
+    link: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> std::io::Result<PathBuf> {
+    use std::io::ErrorKind::AlreadyExists;
     for target in candidates(dir, name) {
         // `exists` first: creating over a folder fails differently on Windows.
         if target.exists() {
             continue;
         }
+        match link(part, &target) {
+            Ok(()) => {
+                // The file is published; a leftover `.part` name is cleared at
+                // the next start.
+                let _ = std::fs::remove_file(part);
+                return Ok(target);
+            }
+            Err(e) if e.kind() == AlreadyExists => continue,
+            Err(_) => {}
+        }
         match std::fs::OpenOptions::new().write(true).create_new(true).open(&target) {
             Ok(claim) => drop(claim),
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) if e.kind() == AlreadyExists => continue,
             Err(e) => return Err(e),
         }
-        if let Err(e) = std::fs::rename(part, &target) {
+        if let Err(e) = while_denied(|| std::fs::rename(part, &target)) {
             let _ = std::fs::remove_file(&target);
             return Err(e);
         }
         return Ok(target);
     }
     Err(std::io::Error::other("no free file name"))
+}
+
+/// Retry for up to a second while access is denied: on Windows a virus scanner
+/// or sync program may briefly hold a file that has just appeared.
+fn while_denied(mut op: impl FnMut() -> std::io::Result<()>) -> std::io::Result<()> {
+    for _ in 0..10 {
+        match op() {
+            Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            done => return done,
+        }
+    }
+    op()
 }
 
 #[cfg(test)]
@@ -154,6 +190,39 @@ mod tests {
         }
     }
 
+    /// The name appears with the whole file or not at all: no empty stand-in
+    /// that a virus scanner or sync program could open and so block the move.
+    #[test]
+    fn a_published_name_never_shows_an_unfinished_file() {
+        let d = tempfile::tempdir().unwrap();
+        for round in 0..2000 {
+            let part = d.path().join(format!(".{round}.part"));
+            std::fs::write(&part, [7u8; 64]).unwrap();
+            let target = d.path().join(format!("{round}.bin"));
+            let start = std::sync::Barrier::new(2);
+            let done = std::sync::atomic::AtomicBool::new(false);
+            let seen = std::thread::scope(|s| {
+                let watcher = s.spawn(|| {
+                    start.wait();
+                    loop {
+                        let last = done.load(std::sync::atomic::Ordering::SeqCst);
+                        if let Ok(m) = std::fs::metadata(&target) {
+                            return Some(m.len());
+                        }
+                        if last {
+                            return None;
+                        }
+                    }
+                });
+                start.wait();
+                publish(&part, d.path(), &format!("{round}.bin")).unwrap();
+                done.store(true, std::sync::atomic::Ordering::SeqCst);
+                watcher.join().unwrap()
+            });
+            assert_eq!(seen, Some(64), "round {round}");
+        }
+    }
+
     #[test]
     fn publishing_steps_past_what_is_there() {
         let d = tempfile::tempdir().unwrap();
@@ -166,6 +235,45 @@ mod tests {
         assert_eq!(std::fs::read(&to).unwrap(), b"new");
         assert_eq!(std::fs::read(d.path().join("a.txt")).unwrap(), b"1");
         assert!(!part.exists());
+    }
+
+    #[test]
+    fn a_folder_without_links_still_publishes_without_overwriting() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::write(d.path().join("a.txt"), b"1").unwrap();
+        let part = d.path().join(".x.part");
+        std::fs::write(&part, b"new").unwrap();
+        let no_links = |_: &Path, _: &Path| Err(std::io::Error::from(std::io::ErrorKind::Unsupported));
+        let to = publish_with(&part, d.path(), "a.txt", no_links).unwrap();
+        assert_eq!(to, d.path().join("a (1).txt"));
+        assert_eq!(std::fs::read(&to).unwrap(), b"new");
+        assert_eq!(std::fs::read(d.path().join("a.txt")).unwrap(), b"1");
+        assert!(!part.exists());
+        assert!(publish_with(&part, d.path(), "b.txt", no_links).is_err());
+        assert!(!d.path().join("b.txt").exists(), "no empty file left");
+    }
+
+    #[test]
+    fn a_briefly_denied_move_is_tried_again() {
+        use std::io::{Error, ErrorKind};
+        let mut calls = 0;
+        let held_twice = while_denied(|| {
+            calls += 1;
+            if calls < 3 {
+                Err(Error::from(ErrorKind::PermissionDenied))
+            } else {
+                Ok(())
+            }
+        });
+        assert!(held_twice.is_ok());
+        assert_eq!(calls, 3);
+        let mut calls = 0;
+        let gone = while_denied(|| {
+            calls += 1;
+            Err(Error::from(ErrorKind::NotFound))
+        });
+        assert_eq!(gone.unwrap_err().kind(), ErrorKind::NotFound);
+        assert_eq!(calls, 1, "only a denial is retried");
     }
 
     #[test]
